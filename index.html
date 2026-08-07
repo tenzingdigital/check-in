@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<title>Hut Check-In</title>
+
+<!--
+  Hut Check-In — single-file front end. No build step.
+
+  Configuration: set the two values in the CONFIG block below, or define
+  window.CHECKIN_SUPABASE_URL / window.CHECKIN_SUPABASE_ANON_KEY before this
+  script runs (e.g. from a small config.js you keep out of git).
+
+  The anon key is a public value — it identifies the project, it does not grant
+  access. Every table is behind row-level security and every read a guard makes
+  is gated on an authenticated session. See supabase/schema.sql.
+-->
+
+<style>
+  :root {
+    --bg:        #0e1116;
+    --surface:   #161b23;
+    --surface-2: #1e2530;
+    --line:      #2b3441;
+    --text:      #e8edf4;
+    --muted:     #8d9bb0;
+    --accent:    #4c8dff;
+    --ok:        #35c88a;
+    --warn:      #f0b429;
+    --bad:       #f2604e;
+    --exempt:    #7b8798;
+    --radius:    14px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body { padding-bottom: env(safe-area-inset-bottom); }
+
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  [hidden] { display: none !important; }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
+
+  /* ---- header ---- */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar {
+    max-width: 760px; margin: 0 auto; padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .brand { font-weight: 650; letter-spacing: -0.01em; margin-right: auto; }
+  .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
+
+  .stats {
+    max-width: 760px; margin: 0 auto; padding: 0 16px 12px;
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .stat {
+    flex: 1 1 0; min-width: 84px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 10px;
+  }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .stat span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .stat.bad  b { color: var(--bad); }
+  .stat.warn b { color: var(--warn); }
+  .stat.ok   b { color: var(--ok); }
+
+  /* ---- tabs ---- */
+  nav.tabs {
+    display: flex; gap: 6px; margin: 16px 0;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 5px;
+  }
+  nav.tabs button {
+    flex: 1; padding: 11px 8px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--muted); font-weight: 550;
+  }
+  nav.tabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); }
+  nav.tabs .pip {
+    display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 5px;
+    border-radius: 999px; background: var(--bad); color: #fff;
+    font-size: 12px; font-weight: 700; vertical-align: 1px;
+  }
+
+  /* ---- inputs ---- */
+  .field {
+    width: 100%; padding: 15px 16px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--line); border-radius: 12px;
+  }
+  .field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+  input[type="search"]::-webkit-search-cancel-button { filter: invert(.6); }
+
+  /* ---- resident cards ---- */
+  .list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+
+  .card {
+    width: 100%; text-align: left;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  button.card:hover { border-color: #3b4757; }
+  button.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* The three lines are spans in the markup, so they need explicit block
+     display — otherwise the name, the metadata and the compliance badge all
+     reflow into one run of text. */
+  .card .who  { flex: 1; min-width: 0; display: block; }
+  .card .name { display: block; font-size: 17px; font-weight: 600; }
+  .card .meta { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  .pill {
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .pill.in   { background: color-mix(in srgb, var(--ok) 18%, transparent);   color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+  .pill.out  { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
+
+  .badge { font-size: 12px; font-weight: 600; }
+  .badge.ok       { color: var(--ok); }
+  .badge.due_soon { color: var(--warn); }
+  .badge.overdue  { color: var(--bad); }
+  .badge.never    { color: var(--bad); }
+  .badge.exempt   { color: var(--exempt); }
+
+  .card.overdue, .card.never { border-left: 4px solid var(--bad); }
+  .card.due_soon { border-left: 4px solid var(--warn); }
+
+  /* ---- detail panel ---- */
+  .detail {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px; margin-top: 14px;
+  }
+  .detail h2 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
+  .detail .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
+  .fact { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+  .fact span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .fact b { font-weight: 600; font-size: 15px; }
+
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btn {
+    padding: 20px 16px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--text);
+    font-size: 17px; font-weight: 650; letter-spacing: -0.01em;
+  }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.primary-in  { background: var(--ok);  color: #06231a; border-color: transparent; }
+  .btn.primary-out { background: var(--warn); color: #2b1d00; border-color: transparent; }
+  .btn.wide { grid-column: 1 / -1; }
+  .btn.ghost { background: transparent; color: var(--muted); padding: 13px; font-size: 15px; font-weight: 500; }
+
+  /* ---- log ---- */
+  .logrow {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 11px 14px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  .logrow time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 46px; }
+  .logrow .dir { font-size: 11px; font-weight: 700; letter-spacing: .06em; min-width: 34px; }
+  .logrow .dir.in  { color: var(--ok); }
+  .logrow .dir.out { color: var(--muted); }
+  .logrow .body { flex: 1; min-width: 0; }
+  .logrow .by { display: block; font-size: 12px; color: var(--muted); }
+
+  .row { display: flex; gap: 10px; align-items: center; }
+  .empty { text-align: center; color: var(--muted); padding: 36px 16px; }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  /* ---- login ---- */
+  .login { max-width: 380px; margin: 12vh auto; padding: 0 20px; }
+  .login h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .login p  { color: var(--muted); margin: 0 0 22px; font-size: 14px; }
+  .login .field { margin-bottom: 10px; }
+  .login .btn { width: 100%; background: var(--accent); color: #041025; border-color: transparent; }
+
+  .alert {
+    background: color-mix(in srgb, var(--bad) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+    color: #ffd9d3; border-radius: 10px; padding: 11px 13px; font-size: 14px; margin-bottom: 12px;
+  }
+
+  /* ---- toast ---- */
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120%);
+    background: var(--surface-2); border: 1px solid var(--line);
+    padding: 13px 18px; border-radius: 12px; font-weight: 600;
+    box-shadow: 0 10px 34px rgb(0 0 0 / .5);
+    transition: transform .22s ease; z-index: 60; max-width: calc(100vw - 32px);
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast.ok  { border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+  #toast.err { border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<!-- ========================= LOGIN ========================= -->
+<section id="login" class="login" hidden>
+  <h1>Hut Check-In</h1>
+  <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
+  <div id="loginError" class="alert" hidden></div>
+  <form id="loginForm" autocomplete="on">
+    <input id="email" class="field" type="email" placeholder="Email" autocomplete="username" required>
+    <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button id="loginBtn" class="btn" type="submit">Log in</button>
+  </form>
+</section>
+
+<!-- ========================= APP ========================= -->
+<div id="app" hidden>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <span id="siteName">Security Hut</span>
+        <small id="guardName">&nbsp;</small>
+      </div>
+      <span class="clock" id="clock"></span>
+      <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
+    </div>
+    <div class="stats">
+      <div class="stat ok">   <b id="statOnSite">–</b><span>On site</span></div>
+      <div class="stat bad">  <b id="statOverdue">–</b><span>Overdue</span></div>
+      <div class="stat warn"> <b id="statDueSoon">–</b><span>Due soon</span></div>
+      <div class="stat">      <b id="statToday">–</b><span>Today</span></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="appError" class="alert" hidden></div>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tabSearch"  aria-selected="true"  aria-controls="panelSearch">Search</button>
+      <button role="tab" id="tabOverdue" aria-selected="false" aria-controls="panelOverdue">Overdue<span class="pip" id="overduePip" hidden>0</span></button>
+      <button role="tab" id="tabLog"     aria-selected="false" aria-controls="panelLog">Log</button>
+    </nav>
+
+    <!-- ---- search ---- -->
+    <section id="panelSearch" role="tabpanel" aria-labelledby="tabSearch">
+      <input id="q" class="field" type="search" placeholder="Search resident by name or room…"
+             autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before signing them in.</p>
+      <div id="searchResults" class="list"></div>
+      <div id="detail" class="detail" hidden></div>
+    </section>
+
+    <!-- ---- overdue ---- -->
+    <section id="panelOverdue" role="tabpanel" aria-labelledby="tabOverdue" hidden>
+      <div class="row">
+        <p class="hint" style="flex:1;margin:0">Adults who have not presented at the hut within the required window. Under-18s are exempt.</p>
+        <button class="btn ghost" id="refreshOverdue">Refresh</button>
+      </div>
+      <div id="overdueList" class="list"></div>
+    </section>
+
+    <!-- ---- log ---- -->
+    <section id="panelLog" role="tabpanel" aria-labelledby="tabLog" hidden>
+      <div class="row">
+        <input id="logDate" class="field" type="date" style="flex:1">
+        <button class="btn ghost" id="logToday">Today</button>
+      </div>
+      <p class="hint" style="margin:8px 2px 0" id="logCount"></p>
+      <div id="logList" class="list"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"
+        integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE"
+        crossorigin="anonymous"></script>
+
+<script>
+"use strict";
+
+/* ========================================================================
+   Configuration
+   ====================================================================== */
+const CONFIG = {
+  url: window.CHECKIN_SUPABASE_URL  || "https://YOUR-PROJECT.supabase.co",
+  key: window.CHECKIN_SUPABASE_ANON_KEY || "YOUR-PUBLISHABLE-ANON-KEY",
+};
+
+const $ = (id) => document.getElementById(id);
+
+if (!window.supabase) {
+  document.body.innerHTML =
+    '<div class="login"><h1>Offline</h1><p>The Supabase client could not be loaded. ' +
+    'Check the hut’s internet connection and reload.</p></div>';
+  throw new Error("supabase-js failed to load");
+}
+
+const sb = window.supabase.createClient(CONFIG.url, CONFIG.key, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+});
+
+/* ========================================================================
+   State
+   ====================================================================== */
+const state = {
+  profile:  null,   // { full_name, role }
+  settings: null,   // app_settings row
+  selected: null,   // resident status row shown in the detail panel
+  tab:      "search",
+  busy:     false,
+  // Every row we have rendered, by id. Tapping a card reads from here rather
+  // than making a second round trip.
+  rows:     new Map(),
+};
+
+/* ========================================================================
+   Helpers
+   ====================================================================== */
+
+// Resident and guard names are entered by staff, so treat them as untrusted
+// when building markup.
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+function toast(msg, kind = "ok") {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = "show " + kind;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = ""; }, 3200);
+}
+
+function showError(msg) {
+  const el = $("appError");
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+// "3h 12m ago" — guards read this at a glance, absolute times go in the log.
+// Hours are kept all the way to 72 rather than rolling over at 24: against a
+// 24-hour rule, "30h ago" is the number that matters and "1 day ago" hides it.
+function ago(iso) {
+  if (!iso) return "never";
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1)  return "just now";
+  if (mins < 60) return mins + "m ago";
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (h < 72) return m ? `${h}h ${m}m ago` : `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d} days ago`;
+}
+
+function until(iso) {
+  if (!iso) return "";
+  const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  const abs = Math.abs(mins);
+  const h = Math.floor(abs / 60), m = abs % 60;
+  const span = h ? (m ? `${h}h ${m}m` : `${h}h`) : `${abs}m`;
+  return mins >= 0 ? `due in ${span}` : `overdue by ${span}`;
+}
+
+function timeOfDay(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+const COMPLIANCE_LABEL = {
+  ok:       "Signed in",
+  due_soon: "Due soon",
+  overdue:  "OVERDUE",
+  never:    "Never signed in",
+  exempt:   "Under 18 — exempt",
+  inactive: "Departed",
+};
+
+function complianceText(r) {
+  const label = COMPLIANCE_LABEL[r.compliance] || r.compliance;
+  if (r.compliance === "exempt" || r.compliance === "inactive") return label;
+  if (r.compliance === "never") return label;
+  return `${label} · ${until(r.due_by)}`;
+}
+
+// Local-day boundaries for the log's date filter. Using the browser's timezone
+// keeps "today" meaning what the guard on shift thinks it means, and handles
+// DST changes for free.
+function dayBounds(yyyy_mm_dd) {
+  const [y, m, d] = yyyy_mm_dd.split("-").map(Number);
+  const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+  const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function todayISODate() {
+  const n = new Date();
+  const p = (v) => String(v).padStart(2, "0");
+  return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+}
+
+/* ========================================================================
+   Rendering
+   ====================================================================== */
+
+function residentCard(r, { clickable = true } = {}) {
+  const tag = clickable ? "button" : "div";
+  const cls = ["card", r.compliance].join(" ");
+  const bits = [];
+  if (r.room_ref) bits.push(esc(r.room_ref));
+  bits.push(`age ${r.age_years}`);
+  bits.push(r.last_in_at ? `last in ${ago(r.last_in_at)}` : "no check-in on record");
+
+  return `
+    <${tag} class="${cls}" ${clickable ? `data-id="${esc(r.id)}" type="button"` : ""}>
+      <span class="who">
+        <span class="name">${esc(r.full_name)}</span>
+        <span class="meta">${bits.join(" · ")}</span>
+        <span class="meta badge ${esc(r.compliance)}">${esc(complianceText(r))}</span>
+      </span>
+      <span class="pill ${r.presence === "in" ? "in" : "out"}">${r.presence === "in" ? "On site" : "Off site"}</span>
+    </${tag}>`;
+}
+
+function renderList(container, rows, emptyMsg) {
+  (rows || []).forEach((r) => state.rows.set(r.id, r));
+  if (!rows || rows.length === 0) {
+    container.innerHTML = `<p class="empty">${esc(emptyMsg)}</p>`;
+    return;
+  }
+  container.innerHTML = rows.map((r) => residentCard(r)).join("");
+}
+
+function renderDetail(r) {
+  state.selected = r;
+  if (r) state.rows.set(r.id, r);
+  const el = $("detail");
+  if (!r) { el.hidden = true; el.innerHTML = ""; return; }
+
+  const isIn = r.presence === "in";
+  const dueFact = r.compliance === "exempt"
+    ? "Exempt (under 18)"
+    : (r.due_by ? esc(until(r.due_by)) : "Not yet signed in");
+
+  el.innerHTML = `
+    <h2>${esc(r.full_name)}</h2>
+    <div class="sub">${r.room_ref ? esc(r.room_ref) + " · " : ""}age ${r.age_years}${r.note ? " · " + esc(r.note) : ""}</div>
+
+    <div class="facts">
+      <div class="fact"><span>Status</span><b>${isIn ? "On site" : "Off site"}</b></div>
+      <div class="fact"><span>Last check-in</span><b>${esc(ago(r.last_in_at))}</b></div>
+      <div class="fact"><span>24h rule</span><b class="badge ${esc(r.compliance)}">${dueFact}</b></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn ${isIn ? "" : "primary-in"}"  id="doIn"  type="button">Sign IN</button>
+      <button class="btn ${isIn ? "primary-out" : ""}" id="doOut" type="button">Sign OUT</button>
+      <button class="btn ghost wide" id="closeDetail" type="button">Close</button>
+    </div>`;
+  el.hidden = false;
+
+  $("doIn").onclick  = () => record(r.id, "in");
+  $("doOut").onclick = () => record(r.id, "out");
+  $("closeDetail").onclick = () => { renderDetail(null); $("q").focus(); };
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function renderLog(rows) {
+  const list = $("logList");
+  $("logCount").textContent = rows.length
+    ? `${rows.length} event${rows.length === 1 ? "" : "s"}`
+    : "";
+  if (!rows.length) {
+    list.innerHTML = `<p class="empty">No movements recorded for this date.</p>`;
+    return;
+  }
+  list.innerHTML = rows.map((e) => `
+    <div class="logrow">
+      <time datetime="${esc(e.occurred_at)}">${esc(timeOfDay(e.occurred_at))}</time>
+      <span class="dir ${e.direction === "in" ? "in" : "out"}">${e.direction === "in" ? "IN" : "OUT"}</span>
+      <span class="body">
+        ${esc(e.resident_name)}${e.room_ref ? ` <span class="hint">(${esc(e.room_ref)})</span>` : ""}
+        <span class="by">by ${esc(e.guard_name)}${e.note ? " · " + esc(e.note) : ""}</span>
+      </span>
+    </div>`).join("");
+}
+
+/* ========================================================================
+   Data access
+   ====================================================================== */
+
+async function refreshSummary() {
+  const { data, error } = await sb.rpc("hut_summary");
+  if (error) return;                       // header counts are non-critical
+  const s = Array.isArray(data) ? data[0] : data;
+  if (!s) return;
+  $("statOnSite").textContent  = s.on_site;
+  $("statOverdue").textContent = s.overdue;
+  $("statDueSoon").textContent = s.due_soon;
+  $("statToday").textContent   = s.events_today;
+
+  const outstanding = (s.overdue || 0) + (s.never_signed_in || 0);
+  const pip = $("overduePip");
+  pip.textContent = outstanding;
+  pip.hidden = outstanding === 0;
+}
+
+let searchToken = 0;
+async function runSearch(q) {
+  const token = ++searchToken;
+  const box = $("searchResults");
+
+  if (!q || q.trim().length < 2) {
+    box.innerHTML = "";
+    return;
+  }
+
+  const { data, error } = await sb.rpc("search_residents", {
+    q: q.trim(), include_departed: false, max_results: 20,
+  });
+  if (token !== searchToken) return;       // a newer keystroke already won
+
+  if (error) { showError("Search failed: " + error.message); return; }
+  showError("");
+  renderList(box, data, `No resident matching “${q.trim()}”.`);
+}
+
+async function record(residentId, direction) {
+  if (state.busy) return;
+  state.busy = true;
+  document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = true));
+
+  const { data, error } = await sb.rpc("record_check", {
+    p_resident_id: residentId, p_direction: direction, p_note: null,
+  });
+
+  state.busy = false;
+  if (error) {
+    toast("Not recorded: " + error.message, "err");
+    document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = false));
+    return;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  toast(`${row.full_name} signed ${direction.toUpperCase()}`, "ok");
+  renderDetail(row);
+  refreshSummary();
+  if (state.tab === "overdue") loadOverdue();
+  if ($("q").value.trim().length >= 2) runSearch($("q").value);
+}
+
+async function loadOverdue() {
+  const { data, error } = await sb.rpc("overdue_residents", { max_results: 200 });
+  if (error) { showError("Could not load the overdue list: " + error.message); return; }
+  showError("");
+  renderList($("overdueList"), data, "Everyone is within the 24-hour window.");
+}
+
+async function loadLog(dateStr) {
+  const { start, end } = dayBounds(dateStr);
+  const { data, error } = await sb
+    .from("v_check_log")
+    .select("*")
+    .gte("occurred_at", start)
+    .lt("occurred_at", end)
+    .order("occurred_at", { ascending: false })
+    .limit(500);
+  if (error) { showError("Could not load the log: " + error.message); return; }
+  showError("");
+  renderLog(data || []);
+}
+
+/* ========================================================================
+   Tabs
+   ====================================================================== */
+function selectTab(name) {
+  state.tab = name;
+  for (const t of ["search", "overdue", "log"]) {
+    const cap = t[0].toUpperCase() + t.slice(1);
+    $("tab" + cap).setAttribute("aria-selected", String(t === name));
+    $("panel" + cap).hidden = t !== name;
+  }
+  if (name === "search")  $("q").focus();
+  if (name === "overdue") loadOverdue();
+  if (name === "log")     loadLog($("logDate").value || todayISODate());
+}
+
+/* ========================================================================
+   Session
+   ====================================================================== */
+
+async function enterApp() {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return showLogin();
+
+  const [{ data: profile, error: pErr }, { data: settings }] = await Promise.all([
+    sb.from("profiles").select("full_name, role, active").eq("id", user.id).maybeSingle(),
+    sb.from("app_settings").select("*").maybeSingle(),
+  ]);
+
+  if (pErr || !profile || !profile.active) {
+    await sb.auth.signOut();
+    return showLogin("This account has no active guard profile. Ask an administrator to enable it.");
+  }
+
+  state.profile = profile;
+  state.settings = settings;
+
+  $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
+  if (settings?.site_name) $("siteName").textContent = settings.site_name;
+
+  $("login").hidden = true;
+  $("app").hidden = false;
+  $("logDate").value = todayISODate();
+  $("logDate").max = todayISODate();
+
+  selectTab("search");
+  refreshSummary();
+}
+
+function showLogin(message) {
+  state.profile = null;
+  $("app").hidden = true;
+  $("login").hidden = false;
+  $("loginError").hidden = !message;
+  if (message) $("loginError").textContent = message;
+  $("email").focus();
+}
+
+/* ========================================================================
+   Wiring
+   ====================================================================== */
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("loginBtn");
+  btn.disabled = true;
+  btn.textContent = "Logging in…";
+  $("loginError").hidden = true;
+
+  const { error } = await sb.auth.signInWithPassword({
+    email: $("email").value.trim(),
+    password: $("password").value,
+  });
+
+  btn.disabled = false;
+  btn.textContent = "Log in";
+
+  if (error) {
+    $("loginError").textContent = error.message;
+    $("loginError").hidden = false;
+    return;
+  }
+  $("password").value = "";
+  enterApp();
+});
+
+$("logoutBtn").addEventListener("click", async () => {
+  await sb.auth.signOut();
+  $("q").value = "";
+  $("searchResults").innerHTML = "";
+  renderDetail(null);
+  showLogin();
+});
+
+let searchTimer;
+$("q").addEventListener("input", (e) => {
+  clearTimeout(searchTimer);
+  const v = e.target.value;
+  searchTimer = setTimeout(() => runSearch(v), 220);
+});
+
+// Enter opens the top result — one-handed operation at the window.
+$("q").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const first = $("searchResults").querySelector("button.card");
+  if (first) first.click();
+});
+
+// Card clicks are delegated so re-rendering never orphans a listener.
+document.addEventListener("click", (e) => {
+  const card = e.target.closest("button.card");
+  if (!card) return;
+  const row = state.rows.get(card.dataset.id);
+  if (!row) return;
+  if (state.tab !== "search") selectTab("search");
+  renderDetail(row);
+});
+
+$("tabSearch").addEventListener("click",  () => selectTab("search"));
+$("tabOverdue").addEventListener("click", () => selectTab("overdue"));
+$("tabLog").addEventListener("click",     () => selectTab("log"));
+$("refreshOverdue").addEventListener("click", loadOverdue);
+$("logDate").addEventListener("change", (e) => loadLog(e.target.value || todayISODate()));
+$("logToday").addEventListener("click", () => {
+  $("logDate").value = todayISODate();
+  loadLog(todayISODate());
+});
+
+// Clock in the header, plus a periodic summary refresh so a terminal left open
+// overnight does not show stale overdue counts.
+setInterval(() => {
+  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}, 1000);
+setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
+setInterval(() => { if (state.profile && state.tab === "overdue") loadOverdue(); }, 120000);
+
+sb.auth.onAuthStateChange((event) => {
+  if (event === "SIGNED_OUT") showLogin();
+});
+
+// Boot.
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await enterApp(); else showLogin();
+})();
+</script>
+</body>
+</html>

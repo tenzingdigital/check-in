@@ -1,0 +1,8 @@
+.vercel
+.DS_Store
+node_modules/
+
+# Optional local override for the Supabase URL / anon key. Neither value is a
+# secret (the anon key is designed to be public and is useless without a login),
+# but keeping it out of git means the repo is not tied to one project.
+config.js

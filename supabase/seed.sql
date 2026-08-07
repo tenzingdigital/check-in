@@ -1,0 +1,46 @@
+-- ============================================================================
+-- Demo data — OPTIONAL. Run only on a test project.
+--
+-- These are invented people. Do not run this against a project that holds real
+-- resident data: mixing test records into a live register makes your GDPR
+-- accuracy obligation (Art. 5(1)(d)) much harder to argue.
+-- ============================================================================
+
+insert into public.residents (first_name, last_name, date_of_birth, room_ref, note) values
+  ('Aoife',   'Brennan',   '1991-04-12', 'A-04',  null),
+  ('Marek',   'Nowak',     '1988-11-30', 'A-07',  'Works nights, usually signs in around 07:00'),
+  ('Grace',   'Okonkwo',   '2001-02-19', 'B-11',  null),
+  ('Daniel',  'Fitzgerald','1975-07-03', 'B-02',  null),
+  ('Leila',   'Haddad',    '1996-09-25', 'C-09',  null),
+  ('Tomás',   'Ó Súilleabháin', '1983-01-08', 'C-01', null),
+  ('Priya',   'Nair',      '1999-06-14', 'A-12',  null),
+  ('Jonas',   'Andersson', '1993-03-02', 'B-06',  null),
+  ('Sofia',   'Marchetti', '2009-05-21', 'A-04',  'Minor — exempt from the 24h rule, accompanied by A. Brennan'),
+  ('Kwame',   'Mensah',    '1979-12-17', 'C-14',  null)
+on conflict do nothing;
+
+-- A spread of history so the compliance states are all visible in the UI:
+-- some signed in recently (ok), one approaching the deadline (due_soon),
+-- one well past it (overdue), and one with no history at all (never).
+with g as (
+  select id from public.profiles order by created_at limit 1
+),
+r as (
+  select id, first_name, last_name from public.residents
+)
+insert into public.check_events (resident_id, guard_id, direction, occurred_at)
+select r.id, g.id, v.direction, now() - v.ago
+from r
+cross join g
+join (values
+  ('Brennan',        'in',  interval '2 hours'),
+  ('Nowak',          'in',  interval '21 hours'),   -- due soon
+  ('Okonkwo',        'in',  interval '40 hours'),   -- overdue
+  ('Okonkwo',        'out', interval '39 hours'),
+  ('Fitzgerald',     'in',  interval '6 hours'),
+  ('Haddad',         'in',  interval '30 hours'),   -- overdue
+  ('Ó Súilleabháin', 'in',  interval '1 hour'),
+  ('Nair',           'in',  interval '10 hours'),
+  ('Nair',           'out', interval '3 hours'),
+  ('Mensah',         'in',  interval '23 hours')    -- due soon
+) as v(surname, direction, ago) on r.last_name = v.surname;
