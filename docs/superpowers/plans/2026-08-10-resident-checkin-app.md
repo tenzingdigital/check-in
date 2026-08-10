@@ -822,6 +822,14 @@ select pg_temp.try('guard edits an annotation',
                    'update public.compliance_annotations set note=''changed'' where true');
 select pg_temp.try('guard deletes an annotation',
                    'delete from public.compliance_annotations where true');
+
+\echo '--- hut_summary() still reports the gate counters'
+-- Restores coverage lost when Task 1 deleted acceptance-suite section C, which
+-- held the only test of this function. Its signature changed in Task 1 and no
+-- other task touches it, so without this it would ship untested.
+select on_site >= 0 as on_site_is_a_count,
+       events_today >= 0 as events_today_is_a_count
+from public.hut_summary();
 reset role;
 ```
 
