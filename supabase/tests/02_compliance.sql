@@ -108,6 +108,37 @@ end $$;
 
 \echo ''
 \echo '=========== LEDGER INTEGRITY ==========='
+do $$
+begin
+  -- Without these, the try() probes below are vacuous: try() swallows
+  -- "relation does not exist" and reports it as "blocked", so a dropped table
+  -- would look exactly like a working RLS denial.
+  perform pg_temp.expect('checkin_events exists',
+    to_regclass('public.checkin_events') is not null, true);
+  perform pg_temp.expect('daily_compliance exists',
+    to_regclass('public.daily_compliance') is not null, true);
+
+  perform pg_temp.expect('RLS enabled on checkin_events',
+    (select relrowsecurity from pg_class where oid = 'public.checkin_events'::regclass), true);
+  perform pg_temp.expect('RLS enabled on daily_compliance',
+    (select relrowsecurity from pg_class where oid = 'public.daily_compliance'::regclass), true);
+
+  -- The append-only property, asserted directly rather than inferred from a
+  -- swallowed error: exactly one SELECT policy and no write policies at all.
+  perform pg_temp.expect('checkin_events has exactly 1 select policy',
+    (select count(*)::integer from pg_policies
+      where schemaname='public' and tablename='checkin_events' and cmd='SELECT'), 1);
+  perform pg_temp.expect('checkin_events has no write policies',
+    (select count(*)::integer from pg_policies
+      where schemaname='public' and tablename='checkin_events' and cmd <> 'SELECT'), 0);
+  perform pg_temp.expect('daily_compliance has exactly 1 select policy',
+    (select count(*)::integer from pg_policies
+      where schemaname='public' and tablename='daily_compliance' and cmd='SELECT'), 1);
+  perform pg_temp.expect('daily_compliance has no write policies',
+    (select count(*)::integer from pg_policies
+      where schemaname='public' and tablename='daily_compliance' and cmd <> 'SELECT'), 0);
+end $$;
+
 set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 select pg_temp.try('guard UPDATEs a checkin event',
