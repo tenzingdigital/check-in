@@ -183,7 +183,9 @@ $$;
 
 Update `supabase/seed.sql`: rename the `check_events` insert to `gate_events` and the `direction` column to `kind`.
 
-In `supabase/tests/01_acceptance.sql`, replace every `check_events` with `gate_events` and every `direction` with `kind`. Delete section C (the 24-hour rule tests) entirely — those behaviours are re-tested in `02_compliance.sql`. Delete the `overdue_residents()` call and the `compliance`/`due_by` columns from every select. In section C3, keep the resident inserts but drop the `Nineteen59`/`TwentyFour01` event inserts.
+In `supabase/tests/01_acceptance.sql`, replace every `check_events` with `gate_events` and every `direction` with `kind`. Delete the `overdue_residents()` call and the `compliance`/`due_by` columns from every select.
+
+Delete section C (the 24-hour rule tests) **in full**, including the four `Edge` residents it inserts and their events. Those residents existed only to probe the rolling-window and 18th-birthday boundaries; the rolling window is gone, and the birthday boundary is re-tested directly against `compliance_required()` in `02_compliance.sql` Task 2, which needs no fixture residents. Nothing else in either suite references them.
 
 - [ ] **Step 7: Run tests to verify they pass**
 
@@ -1187,18 +1189,40 @@ git commit -m "feat: split retention so the register outlives the movement log"
 Second static file, same patterns as `index.html`: dark high-contrast UI, large touch targets, delegated click handling, `esc()` on every interpolated value.
 
 **Files:**
-- Create: `checkin.html`
-- Modify: `vercel.json`
+- Create: `app-common.css`, `app-common.js`, `checkin.html`
+- Modify: `index.html`, `vercel.json`
 
 **Interfaces:**
 - Consumes: `search_residents(q, include_departed, max_results)`, `record_checkin(p_resident_id, p_note)`, `attention_list(max_results)`, `annotate_compliance_day(p_resident_id, p_date, p_note)`, view `v_resident_compliance`, table `daily_compliance`
-- Produces: nothing consumed by later tasks
+- Produces: `app-common.js` globals `esc(v)`, `toast(msg, kind)`, `ago(iso)`, `showError(msg, elId)`, `createHutClient(config)`, `mountLogin({onReady})`
 
-- [ ] **Step 1: Copy the shell from `index.html`**
+- [ ] **Step 1: Extract the shared layer out of `index.html`**
 
-Start from `index.html` and keep verbatim: the `<style>` block, `esc()`, `toast()`, `ago()`, `showError()`, the login section and its handler, `sb` client creation, the CDN `<script>` tag **including its `integrity` hash**, and the boot sequence. Change `<title>` to `Hut Check-In — Daily Register`.
+Ruled by the human partner ahead of execution: the two apps share one stylesheet and one helper script rather than duplicating ~250 lines. Still no build step — two extra `<link>`/`<script>` tags pointing at static files.
 
-Do not re-derive the SRI hash. It is `sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE` for `@supabase/supabase-js@2.58.0`.
+Create `app-common.css` containing the entire `<style>` block currently inside `index.html`, unchanged.
+
+Create `app-common.js` containing, moved verbatim from `index.html`'s inline script: `esc()`, `toast()`, `ago()`, `showError()`, the `$` shorthand, the supabase-client guard and `createClient` call (wrapped as `createHutClient(config)` returning the client), and the login form markup handler. Everything else — the tabs, search, and the gate-specific rendering — stays in `index.html`.
+
+`showError()` currently hardcodes the element id `appError`; give it a second parameter defaulting to `"appError"` so `checkin.html` can reuse it.
+
+Then in `index.html`, replace the removed blocks with:
+
+```html
+<link rel="stylesheet" href="/app-common.css">
+...
+<script src="/app-common.js"></script>
+```
+
+Keep the CDN `<script>` tag and its `integrity` hash in **both** HTML files, ahead of `app-common.js`. Do not re-derive the hash — it is `sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE` for `@supabase/supabase-js@2.58.0`.
+
+Verify `index.html` still renders and still logs in before touching `checkin.html`: re-run the mock-client render described in Step 5 against `index.html`. A regression here breaks the working gate app, which the plan otherwise leaves untouched.
+
+- [ ] **Step 1b: Create `checkin.html`**
+
+Start with the same head — `app-common.css`, the CDN tag, `app-common.js` — plus the login section markup. Set `<title>` to `Hut Check-In — Daily Register`. Everything below is check-in specific.
+
+No CSP change is needed: `vercel.json` already allows `script-src 'self'` and `style-src 'self'`, which cover both new files.
 
 - [ ] **Step 2: Build the two tabs**
 

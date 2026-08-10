@@ -6,3 +6,6 @@ node_modules/
 # secret (the anon key is designed to be public and is useless without a login),
 # but keeping it out of git means the repo is not tied to one project.
 config.js
+
+# Subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
