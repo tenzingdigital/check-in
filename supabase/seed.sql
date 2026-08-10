@@ -28,8 +28,8 @@ with g as (
 r as (
   select id, first_name, last_name from public.residents
 )
-insert into public.check_events (resident_id, guard_id, direction, occurred_at)
-select r.id, g.id, v.direction, now() - v.ago
+insert into public.gate_events (resident_id, guard_id, kind, occurred_at)
+select r.id, g.id, v.kind, now() - v.ago
 from r
 cross join g
 join (values
@@ -43,4 +43,4 @@ join (values
   ('Nair',           'in',  interval '10 hours'),
   ('Nair',           'out', interval '3 hours'),
   ('Mensah',         'in',  interval '23 hours')    -- due soon
-) as v(surname, direction, ago) on r.last_name = v.surname;
+) as v(surname, kind, ago) on r.last_name = v.surname;

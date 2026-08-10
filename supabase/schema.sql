@@ -7,10 +7,11 @@
 -- "if not exists" / "or replace" and policies are dropped before creation.
 --
 -- Design notes
---  * check_events is an append-only ledger. Presence ("is this person in or
---    out?") and compliance ("have they been seen in the last 24h?") are both
---    derived from it. There is no daily reset and no nightly job that mutates
---    state — "today's log" is a timestamp range filter.
+--  * gate_events is an append-only ledger of site entry/exit. It answers
+--    presence ("is this person in or out?"). There is no daily reset and no
+--    nightly job that mutates state — "today's log" is a timestamp range
+--    filter. It does not drive daily-compliance tracking — that lives
+--    elsewhere (see checkin_events, added separately).
 --  * Guards never read the residents table directly. They read v_resident_status,
 --    which deliberately omits date_of_birth and exposes only age_years /
 --    is_adult. Data minimisation (GDPR Art. 5(1)(c)) enforced in the schema.
@@ -64,15 +65,16 @@ create table if not exists public.app_settings (
   id                      boolean primary key default true check (id),
   site_name               text    not null default 'Security Hut',
   local_timezone          text    not null default 'Europe/Dublin',
-  -- How often an adult resident must present at the hut.
-  compliance_window_hours integer not null default 24  check (compliance_window_hours between 1 and 168),
-  -- How long before the deadline a resident starts showing as "due soon".
-  warn_before_hours       integer not null default 4   check (warn_before_hours >= 0),
+  -- Hour of the site-local day after which "not seen yet" starts being flagged.
+  due_soon_after_hour     integer not null default 18 check (due_soon_after_hour between 0 and 23),
+  -- Statutory proof horizon for the daily register. PLACEHOLDER: set to the
+  -- real retention period before go-live.
+  compliance_retention_days integer not null default 2555 check (compliance_retention_days between 1 and 36500),
   adult_age_years         integer not null default 18  check (adult_age_years between 1 and 30),
-  -- GDPR Art. 5(1)(e): storage limitation. Events older than this are purged.
+  -- GDPR Art. 5(1)(e): storage limitation. Applies to both gate_events and
+  -- checkin_events.
   event_retention_days    integer not null default 90  check (event_retention_days between 1 and 3650),
-  updated_at              timestamptz not null default now(),
-  constraint warn_within_window check (warn_before_hours < compliance_window_hours)
+  updated_at              timestamptz not null default now()
 );
 
 insert into public.app_settings (id) values (true) on conflict (id) do nothing;
@@ -180,6 +182,9 @@ create table if not exists public.residents (
   date_of_birth date not null check (date_of_birth > '1900-01-01' and date_of_birth <= current_date),
   room_ref      text,
   status        text not null default 'active' check (status in ('active', 'departed')),
+  -- The day the resident stopped being subject to the daily rule. status alone
+  -- cannot answer that for a PAST date, which would corrupt close-out backfill.
+  departed_on   date,
   -- Free-text operational note, e.g. "uses side gate". Deliberately NOT a
   -- place for health, religion or other special-category data (GDPR Art. 9).
   note          text,
@@ -197,7 +202,10 @@ create table if not exists public.residents (
       btrim(last_name)  || ' ' || btrim(first_name) || ' ' ||
       coalesce(room_ref, '')
     ))
-  ) stored
+  ) stored,
+
+  constraint departed_on_requires_status
+    check (departed_on is null or status = 'departed')
 );
 
 create index if not exists residents_search_key_trgm_idx
@@ -223,33 +231,25 @@ create trigger residents_touch_updated_at
 
 
 -- ---------------------------------------------------------------------------
--- Check events (append-only ledger)
+-- Gate events (append-only ledger)
 -- ---------------------------------------------------------------------------
 
-create table if not exists public.check_events (
+create table if not exists public.gate_events (
   id          bigint generated always as identity primary key,
   resident_id uuid not null references public.residents (id) on delete cascade,
-  -- Who performed the check. Attribution is the whole point of the audit trail,
-  -- so this is NOT nullable and staff rows are never hard-deleted.
   guard_id    uuid not null references public.profiles (id) on delete restrict,
-  direction   text not null check (direction in ('in', 'out')),
+  kind        text not null check (kind in ('in', 'out')),
   occurred_at timestamptz not null default now(),
   note        text
 );
 
-create index if not exists check_events_resident_time_idx
-  on public.check_events (resident_id, occurred_at desc, id desc);
+create index if not exists gate_events_resident_time_idx
+  on public.gate_events (resident_id, occurred_at desc, id desc);
+create index if not exists gate_events_time_idx
+  on public.gate_events (occurred_at desc);
 
-create index if not exists check_events_time_idx
-  on public.check_events (occurred_at desc);
-
--- 'in' events drive the 24-hour compliance clock; give them their own index.
-create index if not exists check_events_resident_in_time_idx
-  on public.check_events (resident_id, occurred_at desc)
-  where direction = 'in';
-
-comment on table public.check_events is
-  'Append-only. No UPDATE or DELETE policy exists for staff; corrections are made by recording a new event. Rows are removed only by the retention purge or a GDPR erasure request.';
+comment on table public.gate_events is
+  'Append-only record of site entry and exit. Answers "who is on site now". Does NOT satisfy the daily check-in requirement — see checkin_events.';
 
 
 -- ---------------------------------------------------------------------------
@@ -282,15 +282,8 @@ with s as (
 ),
 last_event as (
   select distinct on (resident_id)
-    resident_id, direction, occurred_at, guard_id
-  from public.check_events
-  order by resident_id, occurred_at desc, id desc
-),
-last_in as (
-  select distinct on (resident_id)
-    resident_id, occurred_at as last_in_at
-  from public.check_events
-  where direction = 'in'
+    resident_id, kind, occurred_at, guard_id
+  from public.gate_events
   order by resident_id, occurred_at desc, id desc
 )
 select
@@ -306,25 +299,12 @@ select
   (date_part('year', age(r.date_of_birth)))::integer as age_years,
   (r.date_of_birth <= current_date - make_interval(years => s.adult_age_years)) as is_adult,
   -- Current presence. Someone with no history at all is treated as "out".
-  coalesce(le.direction, 'out') as presence,
+  coalesce(le.kind, 'out') as presence,
   le.occurred_at as last_event_at,
-  le.guard_id    as last_event_guard_id,
-  li.last_in_at,
-  case when r.date_of_birth <= current_date - make_interval(years => s.adult_age_years)
-       then li.last_in_at + make_interval(hours => s.compliance_window_hours)
-  end as due_by,
-  case
-    when r.status <> 'active' then 'inactive'
-    when r.date_of_birth > current_date - make_interval(years => s.adult_age_years) then 'exempt'
-    when li.last_in_at is null then 'never'
-    when now() >  li.last_in_at + make_interval(hours => s.compliance_window_hours) then 'overdue'
-    when now() >= li.last_in_at + make_interval(hours => s.compliance_window_hours - s.warn_before_hours) then 'due_soon'
-    else 'ok'
-  end as compliance
+  le.guard_id    as last_event_guard_id
 from public.residents r
 cross join s
 left join last_event le on le.resident_id = r.id
-left join last_in    li on li.resident_id = r.id
 where public.is_staff();
 
 comment on view public.v_resident_status is
@@ -335,14 +315,14 @@ create or replace view public.v_check_log as
 select
   e.id,
   e.resident_id,
-  e.direction,
+  e.kind,
   e.occurred_at,
   e.note,
   btrim(r.first_name) || ' ' || btrim(r.last_name) as resident_name,
   r.room_ref,
   e.guard_id,
   g.full_name as guard_name
-from public.check_events e
+from public.gate_events e
 join public.residents r on r.id = e.resident_id
 join public.profiles  g on g.id = e.guard_id
 where public.is_staff();
@@ -435,7 +415,7 @@ as $$
 declare
   v_guard  uuid := auth.uid();
   v_status text;
-  v_last   public.check_events;
+  v_last   public.gate_events;
 begin
   if not public.is_staff() then
     raise exception 'Not authorised to record check events'
@@ -457,16 +437,16 @@ begin
 
   -- Ignore an identical repeat within 60 seconds (double tap on a touchscreen).
   select * into v_last
-  from public.check_events
+  from public.gate_events
   where resident_id = p_resident_id
   order by occurred_at desc, id desc
   limit 1;
 
   if v_last.id is null
-     or v_last.direction <> p_direction
+     or v_last.kind <> p_direction
      or v_last.occurred_at < now() - interval '60 seconds'
   then
-    insert into public.check_events (resident_id, guard_id, direction, note)
+    insert into public.gate_events (resident_id, guard_id, kind, note)
     values (p_resident_id, v_guard, p_direction, nullif(btrim(p_note), ''));
   end if;
 
@@ -476,53 +456,17 @@ end;
 $$;
 
 
--- Residents who owe a check-in. Drives the "Overdue" tab.
-create or replace function public.overdue_residents(max_results integer default 200)
-returns setof public.v_resident_status
-language sql
-stable
-security invoker
-set search_path = public
-as $$
-  select *
-  from public.v_resident_status
-  where public.is_staff()
-    and status = 'active'
-    and compliance in ('overdue', 'never', 'due_soon')
-  order by
-    case compliance when 'overdue' then 0 when 'never' then 1 else 2 end,
-    last_in_at asc nulls first,
-    last_name, first_name
-  limit greatest(1, least(coalesce(max_results, 200), 500));
-$$;
-
-
 -- Counts for the header. One round trip instead of three.
 create or replace function public.hut_summary()
-returns table (
-  on_site        integer,
-  overdue        integer,
-  due_soon       integer,
-  never_signed_in integer,
-  events_today   integer
-)
-language sql
-stable
-security invoker
-set search_path = public
+returns table (on_site integer, events_today integer)
+language sql stable security invoker set search_path = public, extensions
 as $$
   select
     count(*) filter (where presence = 'in' and status = 'active')::integer,
-    count(*) filter (where compliance = 'overdue')::integer,
-    count(*) filter (where compliance = 'due_soon')::integer,
-    count(*) filter (where compliance = 'never')::integer,
-    (
-      select count(*)::integer
-      from public.check_events e
-      where e.occurred_at >= date_trunc(
-              'day', now() at time zone (select local_timezone from public.app_settings where id)
-            ) at time zone (select local_timezone from public.app_settings where id)
-    )
+    (select count(*)::integer from public.gate_events e
+      where e.occurred_at >= date_trunc('day',
+              now() at time zone (select local_timezone from public.app_settings where id)
+            ) at time zone (select local_timezone from public.app_settings where id))
   from public.v_resident_status
   where public.is_staff();
 $$;
@@ -537,7 +481,7 @@ create or replace function public.export_resident_record(p_resident_id uuid)
 returns jsonb
 language plpgsql
 security invoker
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_out jsonb;
@@ -550,14 +494,14 @@ begin
     'exported_at', now(),
     'exported_by', (select full_name from public.profiles where id = auth.uid()),
     'resident', to_jsonb(r) - 'search_key',
-    'check_events', coalesce((
+    'gate_events', coalesce((
       select jsonb_agg(jsonb_build_object(
-               'direction', e.direction,
+               'kind', e.kind,
                'occurred_at', e.occurred_at,
                'note', e.note,
                'recorded_by', g.full_name
              ) order by e.occurred_at)
-      from public.check_events e
+      from public.gate_events e
       join public.profiles g on g.id = e.guard_id
       where e.resident_id = r.id
     ), '[]'::jsonb)
@@ -596,7 +540,7 @@ begin
   end if;
 
   select count(*)::integer into v_events
-  from public.check_events where resident_id = p_resident_id;
+  from public.gate_events where resident_id = p_resident_id;
 
   v_digest := encode(digest(p_resident_id::text, 'sha256'), 'hex');
 
@@ -611,28 +555,25 @@ $$;
 
 
 -- Art. 5(1)(e): storage limitation. Run daily by pg_cron (see below).
-create or replace function public.purge_expired_check_events()
+create or replace function public.purge_expired_gate_events()
 returns integer
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_days    integer;
   v_deleted integer;
 begin
   select event_retention_days into v_days from public.app_settings where id;
-
-  delete from public.check_events
-  where occurred_at < now() - make_interval(days => v_days);
-
+  delete from public.gate_events where occurred_at < now() - make_interval(days => v_days);
   get diagnostics v_deleted = row_count;
   return v_deleted;
 end;
 $$;
 
-comment on function public.purge_expired_check_events is
-  'Deletes check events older than app_settings.event_retention_days. Schedule daily with pg_cron.';
+comment on function public.purge_expired_gate_events is
+  'Deletes gate events older than app_settings.event_retention_days. Schedule daily with pg_cron.';
 
 
 -- ---------------------------------------------------------------------------
@@ -642,7 +583,7 @@ comment on function public.purge_expired_check_events is
 alter table public.app_settings enable row level security;
 alter table public.profiles     enable row level security;
 alter table public.residents    enable row level security;
-alter table public.check_events enable row level security;
+alter table public.gate_events  enable row level security;
 alter table public.erasure_log  enable row level security;
 
 -- app_settings: everyone on staff reads it, only admins change it.
@@ -668,14 +609,14 @@ drop policy if exists residents_supervisor on public.residents;
 create policy residents_read       on public.residents for select using (public.is_supervisor());
 create policy residents_supervisor on public.residents for all    using (public.is_supervisor()) with check (public.is_supervisor());
 
--- check_events: staff may append events attributed to themselves and read the
+-- gate_events: staff may append events attributed to themselves and read the
 -- log. There is deliberately no update or delete policy for any role — the
 -- ledger is append-only. Deletion happens via SECURITY DEFINER functions
 -- (retention purge, GDPR erasure) that are individually authorised.
-drop policy if exists check_events_read   on public.check_events;
-drop policy if exists check_events_insert on public.check_events;
-create policy check_events_read   on public.check_events for select using (public.is_staff());
-create policy check_events_insert on public.check_events for insert
+drop policy if exists gate_events_read   on public.gate_events;
+drop policy if exists gate_events_insert on public.gate_events;
+create policy gate_events_read   on public.gate_events for select using (public.is_staff());
+create policy gate_events_insert on public.gate_events for insert
   with check (public.is_staff() and guard_id = auth.uid());
 
 -- erasure_log: admins only.
@@ -695,15 +636,13 @@ grant select on public.v_check_log       to authenticated;
 
 revoke all on function public.search_residents(text, boolean, integer)   from anon, public;
 revoke all on function public.record_check(uuid, text, text)             from anon, public;
-revoke all on function public.overdue_residents(integer)                 from anon, public;
 revoke all on function public.hut_summary()                              from anon, public;
 revoke all on function public.export_resident_record(uuid)               from anon, public;
 revoke all on function public.erase_resident(uuid, text)                 from anon, public;
-revoke all on function public.purge_expired_check_events()               from anon, public;
+revoke all on function public.purge_expired_gate_events()                from anon, public;
 
 grant execute on function public.search_residents(text, boolean, integer) to authenticated;
 grant execute on function public.record_check(uuid, text, text)           to authenticated;
-grant execute on function public.overdue_residents(integer)               to authenticated;
 grant execute on function public.hut_summary()                            to authenticated;
 grant execute on function public.export_resident_record(uuid)             to authenticated;
 grant execute on function public.erase_resident(uuid, text)               to authenticated;
@@ -720,10 +659,10 @@ commit;
 --   create extension if not exists pg_cron with schema cron;
 --
 --   select cron.schedule(
---     'purge-expired-check-events',
+--     'purge-expired-gate-events',
 --     '15 3 * * *',                        -- 03:15 UTC daily
---     $$ select public.purge_expired_check_events(); $$
+--     $$ select public.purge_expired_gate_events(); $$
 --   );
 --
 -- To confirm:   select * from cron.job;
--- To remove:    select cron.unschedule('purge-expired-check-events');
+-- To remove:    select cron.unschedule('purge-expired-gate-events');
