@@ -321,3 +321,60 @@ select pg_temp.expect('day boundary: the previous day''s row is untouched',
   (:'prior_pres')::boolean, true);
 
 update public.app_settings set local_timezone = 'Europe/Dublin';
+
+\echo ''
+\echo '=========== CLOSE-OUT AND BACKFILL ==========='
+reset role;
+delete from public.daily_compliance;
+delete from public.checkin_events;
+update public.residents set registered_at = now() - interval '10 days';
+
+-- Resident count is NOT hardcoded: 01_acceptance.sql erases Nair via
+-- erase_resident() before this file runs, so only 9 of the 10 seeded
+-- residents remain by the time this section executes.
+select count(*) as resident_count from public.residents \gset
+
+\echo '--- a 10-day outage: one run backfills every missing day'
+select public.close_out_compliance_days() as rows_written \gset
+select count(*) as distinct_days, count(*) filter (where presented) as any_presented
+from (select distinct compliance_date, presented from public.daily_compliance) d \gset
+
+select pg_temp.expect('backfill: distinct_days = 10', (:distinct_days)::integer, 10);
+select pg_temp.expect('backfill: any_presented = 0', (:any_presented)::integer, 0);
+select pg_temp.expect('backfill: rows_written = resident_count * distinct_days',
+  (:rows_written)::integer, (:resident_count)::integer * (:distinct_days)::integer);
+
+\echo '--- idempotency: a second run writes nothing and overwrites nothing'
+select public.close_out_compliance_days() as second_run_rows \gset
+
+select pg_temp.expect('idempotent second run: second_run_rows = 0', (:second_run_rows)::integer, 0);
+
+\echo '--- close-out never overwrites a recorded presence'
+select id as adult_id from public.residents where last_name='Brennan' \gset
+delete from public.daily_compliance where resident_id = :'adult_id' and compliance_date = public.site_today() - 1;
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count)
+values (:'adult_id', public.site_today() - 1, true, true, now() - interval '1 day', 1);
+select public.close_out_compliance_days() as third_run_rows \gset
+select presented as still_presented from public.daily_compliance
+ where resident_id = :'adult_id' and compliance_date = public.site_today() - 1 \gset
+
+select pg_temp.expect('overwrite-safety: third_run_rows = 0', (:third_run_rows)::integer, 0);
+select pg_temp.expect('overwrite-safety: still_presented = true', (:'still_presented')::boolean, true);
+
+\echo '--- today is left open; only completed days are closed'
+select count(*) as open_rows_today from public.daily_compliance
+ where compliance_date = public.site_today() and closed_at is null \gset
+select count(*) as unclosed_past_rows from public.daily_compliance
+ where compliance_date < public.site_today() and closed_at is null \gset
+
+select pg_temp.expect('today is left open: open_rows_today = 0', (:open_rows_today)::integer, 0);
+select pg_temp.expect('all past days are closed: unclosed_past_rows = 0', (:unclosed_past_rows)::integer, 0);
+
+\echo '--- the minor is required=false on every backfilled day'
+select bool_and(required = false) as minor_never_required
+from public.daily_compliance dc
+join public.residents r on r.id = dc.resident_id
+where r.last_name = 'Marchetti' \gset
+
+select pg_temp.expect('minor: required = false on every backfilled day',
+  (:'minor_never_required')::boolean, true);

@@ -324,6 +324,12 @@ create index if not exists daily_compliance_date_idx
 create index if not exists daily_compliance_breach_idx
   on public.daily_compliance (resident_id, compliance_date desc)
   where required and not presented;
+-- Lets close_out_compliance_days() find "the earliest still-open past day"
+-- without scanning the whole register, no matter how many years of already-
+-- closed history have accumulated.
+create index if not exists daily_compliance_open_idx
+  on public.daily_compliance (compliance_date)
+  where closed_at is null;
 
 
 -- ---------------------------------------------------------------------------
@@ -615,6 +621,91 @@ end;
 $$;
 
 
+-- Closes out completed days by writing the rows record_checkin never wrote:
+-- residents who did not present. Idempotent and self-healing — it recomputes
+-- the range from the register itself, so a cron outage of any length is
+-- repaired by the next run.
+--
+-- Deliberately writes ONLY negative rows. Positive rows are written by
+-- record_checkin in the same transaction as the event, so a failure of this
+-- job can never destroy evidence that someone did attend.
+create or replace function public.close_out_compliance_days(p_through date default null)
+returns integer
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_tz      text;
+  v_adult   integer;
+  v_through date;
+  v_from    date;
+  v_day     date;
+  v_written integer := 0;
+  v_batch   integer;
+begin
+  select local_timezone, adult_age_years into v_tz, v_adult
+  from public.app_settings where id;
+
+  -- Never close the day in progress.
+  v_through := least(
+    coalesce(p_through, (now() at time zone v_tz)::date - 1),
+    (now() at time zone v_tz)::date - 1
+  );
+
+  -- Resume from the day after the last closed one; on a fresh database, start
+  -- at the earliest registration. This fast-forward is only a lower bound,
+  -- though: a day can be "mostly closed" (every resident but one) if a row was
+  -- reopened after close-out — a correction landing after this job already ran,
+  -- or a hand-edited row like the one this test suite seeds directly. Take the
+  -- earliest of the fast-forward point and the earliest still-open past day so
+  -- that case is revisited instead of silently skipped forever.
+  select least(
+           coalesce(
+             (select max(compliance_date) + 1 from public.daily_compliance where closed_at is not null),
+             (select min((registered_at at time zone v_tz)::date) from public.residents)
+           ),
+           coalesce(
+             (select min(compliance_date) from public.daily_compliance
+               where closed_at is null and compliance_date <= v_through),
+             'infinity'
+           )
+         )
+    into v_from;
+
+  if v_from is null or v_from > v_through then
+    return 0;
+  end if;
+
+  for v_day in select d::date from generate_series(v_from, v_through, interval '1 day') d loop
+    insert into public.daily_compliance
+      (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
+    select
+      r.id, v_day,
+      public.compliance_required(
+        r.date_of_birth, (r.registered_at at time zone v_tz)::date,
+        r.departed_on, v_day, v_adult),
+      false, null, 0, now()
+    from public.residents r
+    where (r.registered_at at time zone v_tz)::date <= v_day
+      and (r.departed_on is null or r.departed_on >= v_day)
+    on conflict (resident_id, compliance_date) do nothing;
+
+    get diagnostics v_batch = row_count;
+    v_written := v_written + v_batch;
+
+    -- Rows written during the day by record_checkin are still open. Close them
+    -- without touching presented, first_seen_at or checkin_count.
+    update public.daily_compliance
+       set closed_at = now()
+     where compliance_date = v_day and closed_at is null;
+  end loop;
+
+  return v_written;
+end;
+$$;
+
+
 -- Counts for the header. One round trip instead of three.
 create or replace function public.hut_summary()
 returns table (on_site integer, events_today integer)
@@ -814,6 +905,7 @@ revoke all on function public.purge_expired_gate_events()                from an
 revoke all on function public.site_today()                               from anon, public;
 revoke all on function public.compliance_required(date, date, date, date, integer) from anon, public;
 revoke all on function public.record_checkin(uuid, text)                 from anon, public;
+revoke all on function public.close_out_compliance_days(date)            from anon, public;
 
 grant execute on function public.search_residents(text, boolean, integer) to authenticated;
 grant execute on function public.record_check(uuid, text, text)           to authenticated;
@@ -841,5 +933,17 @@ commit;
 --     $$ select public.purge_expired_gate_events(); $$
 --   );
 --
+--   select cron.schedule(
+--     'close-out-compliance-days',
+--     '30 0 * * *',                        -- 00:30 UTC daily, after midnight in Europe/Dublin
+--     $$ select public.close_out_compliance_days(); $$
+--   );
+--
+-- If the site timezone is far from UTC, move the close-out schedule so it
+-- runs after local midnight. Running it early only defers rows to the next
+-- run — it never writes a wrong day, because v_through is clamped to
+-- yesterday in site-local time.
+--
 -- To confirm:   select * from cron.job;
 -- To remove:    select cron.unschedule('purge-expired-gate-events');
+--               select cron.unschedule('close-out-compliance-days');
