@@ -150,3 +150,81 @@ select pg_temp.try('guard UPDATEs the register directly',
 select pg_temp.try('guard DELETEs a register row',
                    'delete from public.daily_compliance where true');
 reset role;
+
+\echo ''
+\echo '=========== RECORD_CHECKIN ==========='
+reset role;
+select id as adult_id from public.residents where last_name='Brennan'  \gset
+select id as minor_id from public.residents where last_name='Marchetti' \gset
+delete from public.daily_compliance;
+delete from public.checkin_events;
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- first check-in creates the row'
+select compliance_date = public.site_today() as dated_today, required, presented, checkin_count
+from public.record_checkin(:'adult_id') \gset first_
+
+select pg_temp.expect('first check-in: dated_today', (:'first_dated_today')::boolean, true);
+select pg_temp.expect('first check-in: required', (:'first_required')::boolean, true);
+select pg_temp.expect('first check-in: presented', (:'first_presented')::boolean, true);
+select pg_temp.expect('first check-in: checkin_count', (:'first_checkin_count')::integer, 1);
+
+\echo '--- a second check-in 2 minutes later increments the count, keeps first_seen_at'
+reset role;
+update public.checkin_events set occurred_at = now() - interval '2 minutes';
+update public.daily_compliance set first_seen_at = now() - interval '2 minutes';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select checkin_count, first_seen_at < now() - interval '1 minute' as kept_earliest
+from public.record_checkin(:'adult_id') \gset second_
+
+select pg_temp.expect('second check-in: checkin_count', (:'second_checkin_count')::integer, 2);
+select pg_temp.expect('second check-in: kept_earliest', (:'second_kept_earliest')::boolean, true);
+
+\echo '--- double tap within 60s does NOT inflate the count'
+select checkin_count as after_double_tap from public.record_checkin(:'adult_id') \gset dtap_
+
+select pg_temp.expect('double tap does not inflate count', (:'dtap_after_double_tap')::integer, 2);
+
+\echo '--- a minor gets a row with required=false'
+select required as minor_required, presented as minor_presented
+from public.record_checkin(:'minor_id') \gset minor_
+
+select pg_temp.expect('minor: required = false', (:'minor_minor_required')::boolean, false);
+select pg_temp.expect('minor: presented = true', (:'minor_minor_presented')::boolean, true);
+
+\echo '--- append-only probes, now that real rows exist'
+-- Task 3's LEDGER INTEGRITY probes run against empty tables, so they report
+-- "no-op (0 rows)" whether or not a write policy exists — they prove nothing on
+-- their own. Repeat them here, where record_checkin has just created real rows,
+-- so a stray UPDATE or DELETE policy would actually show up as ALLOWED.
+select pg_temp.try('guard UPDATEs a populated checkin_events',
+                   'update public.checkin_events set note=''x'' where true');
+select pg_temp.try('guard DELETEs from a populated checkin_events',
+                   'delete from public.checkin_events where true');
+select pg_temp.try('guard UPDATEs a populated daily_compliance',
+                   'update public.daily_compliance set presented=false where true');
+select pg_temp.try('guard DELETEs from a populated daily_compliance',
+                   'delete from public.daily_compliance where true');
+do $$
+begin
+  perform pg_temp.expect('checkin_events still populated after guard write attempts',
+    (select count(*) > 0 from public.checkin_events), true);
+  perform pg_temp.expect('daily_compliance still populated after guard write attempts',
+    (select count(*) > 0 from public.daily_compliance), true);
+end $$;
+
+\echo '--- attribution and authorisation'
+select count(*) as events_attributed_to_guard from public.checkin_events
+ where guard_id = '11111111-1111-1111-1111-111111111111' \gset attr_
+select count(*) as total from public.checkin_events \gset allev_
+
+select pg_temp.expect('all check-in events attributed to the acting guard',
+  (:'attr_events_attributed_to_guard')::integer, (:'allev_total')::integer);
+
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+select pg_temp.try('suspended account records a check-in',
+                   'select public.record_checkin(' || quote_literal(:'adult_id') || ')');
+reset role;

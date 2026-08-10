@@ -530,6 +530,78 @@ end;
 $$;
 
 
+-- The only write path a guard has to the register.
+--
+-- SECURITY DEFINER for the same reason as record_check: guards hold no SELECT
+-- on public.residents (it carries date_of_birth), so an invoker-rights version
+-- could not read the resident's DOB to decide whether the rule applies. Safe to
+-- elevate because it is closed — it re-checks is_staff() and takes the guard
+-- identity from auth.uid(), never from an argument.
+create or replace function public.record_checkin(
+  p_resident_id uuid,
+  p_note        text default null
+)
+returns public.daily_compliance
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_tz     text;
+  v_adult  integer;
+  v_now    timestamptz := now();
+  v_day    date;
+  v_res    public.residents;
+  v_last   timestamptz;
+  v_out    public.daily_compliance;
+begin
+  if not public.is_staff() then
+    raise exception 'Not authorised to record check-ins' using errcode = '42501';
+  end if;
+
+  select local_timezone, adult_age_years into v_tz, v_adult
+  from public.app_settings where id;
+
+  select * into v_res from public.residents where id = p_resident_id;
+  if not found then
+    raise exception 'Resident not found' using errcode = 'P0002';
+  end if;
+  if v_res.status <> 'active' then
+    raise exception 'Resident is not active and cannot check in' using errcode = '23514';
+  end if;
+
+  v_day := (v_now at time zone v_tz)::date;
+
+  -- Touchscreens double-fire. A repeat inside 60 seconds is one presentation.
+  select max(occurred_at) into v_last
+  from public.checkin_events where resident_id = p_resident_id;
+
+  if v_last is null or v_last < v_now - interval '60 seconds' then
+    insert into public.checkin_events (resident_id, guard_id, occurred_at, note)
+    values (p_resident_id, auth.uid(), v_now, nullif(btrim(p_note), ''));
+
+    insert into public.daily_compliance as dc
+      (resident_id, compliance_date, required, presented, first_seen_at, checkin_count)
+    values (
+      p_resident_id, v_day,
+      public.compliance_required(
+        v_res.date_of_birth,
+        (v_res.registered_at at time zone v_tz)::date,
+        v_res.departed_on, v_day, v_adult),
+      true, v_now, 1)
+    on conflict (resident_id, compliance_date) do update
+      set presented     = true,
+          first_seen_at = least(dc.first_seen_at, excluded.first_seen_at),
+          checkin_count = dc.checkin_count + 1;
+  end if;
+
+  select * into v_out from public.daily_compliance
+  where resident_id = p_resident_id and compliance_date = v_day;
+  return v_out;
+end;
+$$;
+
+
 -- Counts for the header. One round trip instead of three.
 create or replace function public.hut_summary()
 returns table (on_site integer, events_today integer)
@@ -728,6 +800,7 @@ revoke all on function public.erase_resident(uuid, text)                 from an
 revoke all on function public.purge_expired_gate_events()                from anon, public;
 revoke all on function public.site_today()                               from anon, public;
 revoke all on function public.compliance_required(date, date, date, date, integer) from anon, public;
+revoke all on function public.record_checkin(uuid, text)                 from anon, public;
 
 grant execute on function public.search_residents(text, boolean, integer) to authenticated;
 grant execute on function public.record_check(uuid, text, text)           to authenticated;
@@ -736,6 +809,7 @@ grant execute on function public.export_resident_record(uuid)             to aut
 grant execute on function public.erase_resident(uuid, text)               to authenticated;
 grant execute on function public.site_today()                               to authenticated;
 grant execute on function public.compliance_required(date, date, date, date, integer) to authenticated;
+grant execute on function public.record_checkin(uuid, text)               to authenticated;
 
 commit;
 
