@@ -573,8 +573,13 @@ begin
   v_day := (v_now at time zone v_tz)::date;
 
   -- Touchscreens double-fire. A repeat inside 60 seconds is one presentation.
+  -- Scoped to the site-local day: a check-in at 23:59:30 followed by one at
+  -- 00:00:10 is 40 seconds apart but a genuine new-day presentation, not a
+  -- double tap, and must not be swallowed together with the previous day's row.
   select max(occurred_at) into v_last
-  from public.checkin_events where resident_id = p_resident_id;
+  from public.checkin_events
+  where resident_id = p_resident_id
+    and (occurred_at at time zone v_tz)::date = v_day;
 
   if v_last is null or v_last < v_now - interval '60 seconds' then
     insert into public.checkin_events (resident_id, guard_id, occurred_at, note)
@@ -597,6 +602,14 @@ begin
 
   select * into v_out from public.daily_compliance
   where resident_id = p_resident_id and compliance_date = v_day;
+  if not found then
+    -- The insert/on-conflict above is unconditional whenever the dedupe guard
+    -- lets the branch run, and once a row exists for (resident_id, v_day) it
+    -- is never deleted. Reaching here means that invariant broke — surface it
+    -- loudly rather than hand the guard's screen a silent NULL.
+    raise exception 'record_checkin: no daily_compliance row for resident % on %; this is a bug',
+      p_resident_id, v_day using errcode = 'XX000';
+  end if;
   return v_out;
 end;
 $$;
