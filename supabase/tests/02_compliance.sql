@@ -228,3 +228,96 @@ set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
 select pg_temp.try('suspended account records a check-in',
                    'select public.record_checkin(' || quote_literal(:'adult_id') || ')');
 reset role;
+
+\echo ''
+\echo '=========== RECORD_CHECKIN: DAY BOUNDARY ==========='
+-- A repeat within 60 seconds is a double tap only if it is the SAME site-local
+-- day. A check-in at 23:59:30 followed by one at 00:00:10 the next day is 40
+-- seconds apart in real time but a genuine new-day presentation. If the
+-- dedupe query is not scoped to the day, both the event and the register row
+-- for the new day are silently swallowed, and the guard sees a blank result
+-- with no error.
+--
+-- This is exercised without waiting for real midnight: app_settings.
+-- local_timezone is set to a synthetic UTC offset that places "right now" a
+-- few seconds after local midnight, a presentation is seeded 30 real seconds
+-- earlier (landing just before that synthetic midnight, i.e. on the previous
+-- site-local day), and record_checkin() is called immediately after. The
+-- offset is derived from clock_timestamp() at run time, so this does not
+-- depend on the wall-clock time the suite happens to run at.
+reset role;
+select id as boundary_id from public.residents where last_name='Brennan' \gset
+delete from public.daily_compliance where resident_id = :'boundary_id';
+delete from public.checkin_events   where resident_id = :'boundary_id';
+
+do $$
+declare
+  v_epoch_of_day double precision;
+  v_n            double precision;
+  v_sign         text;
+  v_abs          integer;
+  v_offset       text;
+begin
+  v_epoch_of_day := extract(epoch from (clock_timestamp()::time));
+  v_n := v_epoch_of_day - 20;  -- put local time-of-day at 00:00:20
+  if v_n > 43200 then
+    v_n := v_n - 86400;
+  elsif v_n < -43200 then
+    v_n := v_n + 86400;
+  end if;
+  v_sign := case when v_n < 0 then '-' else '+' end;
+  v_abs  := round(abs(v_n))::integer;
+  v_offset := v_sign || lpad((v_abs / 3600)::text, 2, '0') || ':' ||
+              lpad(((v_abs % 3600) / 60)::text, 2, '0') || ':' ||
+              lpad((v_abs % 60)::text, 2, '0');
+  update public.app_settings set local_timezone = v_offset;
+end $$;
+
+select public.site_today() as boundary_today \gset
+select (clock_timestamp() - interval '30 seconds') as seed_ts \gset
+select ((:'seed_ts'::timestamptz) at time zone
+          (select local_timezone from public.app_settings))::date as seed_local_date \gset
+
+select pg_temp.expect('day boundary: seed timestamp lands on the day before the synthetic today',
+  (:'seed_local_date')::date, (:'boundary_today')::date - 1);
+
+insert into public.checkin_events (resident_id, guard_id, occurred_at, note)
+values (:'boundary_id', '11111111-1111-1111-1111-111111111111', :'seed_ts'::timestamptz, null);
+
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count)
+values (:'boundary_id', :'seed_local_date'::date, true, true, :'seed_ts'::timestamptz, 1);
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- a check-in 30 real seconds later, but on the new site-local day, is recorded, not swallowed'
+with r as (
+  select public.record_checkin(:'boundary_id') as rec
+)
+select (r.rec).compliance_date as compliance_date,
+       (r.rec).required        as required,
+       (r.rec).presented       as presented,
+       (r.rec).checkin_count   as checkin_count,
+       ((r.rec).resident_id is not null) as returned_row
+from r \gset newday_
+
+select pg_temp.expect('day boundary: record_checkin does not return a null row',
+  (:'newday_returned_row')::boolean, true);
+select pg_temp.expect('day boundary: new row is dated the synthetic today, not yesterday',
+  (:'newday_compliance_date')::date, (:'boundary_today')::date);
+select pg_temp.expect('day boundary: new day presented = true',
+  (:'newday_presented')::boolean, true);
+select pg_temp.expect('day boundary: new day checkin_count = 1, not swallowed as a double tap',
+  (:'newday_checkin_count')::integer, 1);
+
+reset role;
+select checkin_count as cnt, presented as pres
+from public.daily_compliance
+where resident_id = :'boundary_id' and compliance_date = (:'boundary_today')::date - 1 \gset prior_
+
+select pg_temp.expect('day boundary: the previous day''s row keeps its own separate count',
+  (:'prior_cnt')::integer, 1);
+select pg_temp.expect('day boundary: the previous day''s row is untouched',
+  (:'prior_pres')::boolean, true);
+
+update public.app_settings set local_timezone = 'Europe/Dublin';
