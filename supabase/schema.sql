@@ -193,6 +193,7 @@ create or replace function public.compliance_required(
 returns boolean
 language sql
 immutable
+set search_path = public, extensions
 as $$
   select p_day >= p_registered_on
      and (p_departed_on is null or p_day <= p_departed_on)
