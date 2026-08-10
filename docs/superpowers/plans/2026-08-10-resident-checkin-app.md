@@ -499,6 +499,27 @@ select checkin_count as after_double_tap from public.record_checkin(:'adult_id')
 select required as minor_required, presented as minor_presented
 from public.record_checkin(:'minor_id');
 
+\echo '--- append-only probes, now that real rows exist'
+-- Task 3's LEDGER INTEGRITY probes run against empty tables, so they report
+-- "no-op (0 rows)" whether or not a write policy exists — they prove nothing on
+-- their own. Repeat them here, where record_checkin has just created real rows,
+-- so a stray UPDATE or DELETE policy would actually show up as ALLOWED.
+select pg_temp.try('guard UPDATEs a populated checkin_events',
+                   'update public.checkin_events set note=''x'' where true');
+select pg_temp.try('guard DELETEs from a populated checkin_events',
+                   'delete from public.checkin_events where true');
+select pg_temp.try('guard UPDATEs a populated daily_compliance',
+                   'update public.daily_compliance set presented=false where true');
+select pg_temp.try('guard DELETEs from a populated daily_compliance',
+                   'delete from public.daily_compliance where true');
+do $$
+begin
+  perform pg_temp.expect('checkin_events still populated after guard write attempts',
+    (select count(*) > 0 from public.checkin_events), true);
+  perform pg_temp.expect('daily_compliance still populated after guard write attempts',
+    (select count(*) > 0 from public.daily_compliance), true);
+end $$;
+
 \echo '--- attribution and authorisation'
 select count(*) as events_attributed_to_guard from public.checkin_events
  where guard_id = '11111111-1111-1111-1111-111111111111';
@@ -1149,6 +1170,19 @@ revoke all on function public.purge_expired_compliance() from anon, public;
 ```
 
 Annotations cascade via their foreign key — no separate purge.
+
+**Also fix a misleading comment on `daily_compliance`** (flagged in Task 3's review). Its header currently says the rows "are kept for the statutory proof horizon", which reads as though they survive anything. They do not: `resident_id` cascades from `residents`, so a GDPR erasure deletes the register along with the person. That is intended — erasure means erasure — but the comment must say what is actually true:
+
+```sql
+comment on table public.daily_compliance is
+  'The permanent daily register. Outlives checkin_events: the granular event log
+   is purged at event_retention_days, these rows at the much longer
+   compliance_retention_days. "Permanent" is relative to those purges only — an
+   Art. 17 erasure cascades from residents and removes the register too, which
+   is deliberate. If a statutory duty ever requires proof to survive an erasure
+   request, that is an Art. 17(3)(b) refusal decision made by a human, not
+   something this schema should quietly enforce.';
+```
 
 - [ ] **Step 4: Extend export and erasure**
 
