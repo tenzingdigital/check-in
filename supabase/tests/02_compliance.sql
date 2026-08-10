@@ -11,6 +11,25 @@ begin
 end;
 $$;
 
+-- Assertion helper. RLS does not raise on SELECT, it silently filters rows to
+-- zero, so reporting on success/failure alone would call a blocked read
+-- "ALLOWED". Report the affected row count too.
+-- Copied verbatim from 01_acceptance.sql: pg_temp does not carry across
+-- separate psql sessions, and each `psql -f` invocation is its own session.
+create or replace function pg_temp.try(label text, stmt text) returns text
+language plpgsql as $$
+declare n bigint;
+begin
+  execute stmt;
+  get diagnostics n = row_count;
+  if n = 0 then
+    return format('  no-op    %s  (0 rows)', label);
+  end if;
+  return format('  ALLOWED  %s  (%s row(s))', label, n);
+exception when others then
+  return format('  blocked  %s  (%s)', label, sqlerrm);
+end $$;
+
 \echo '=========== CALENDAR-DAY HELPERS ==========='
 \echo '--- site_today() follows app_settings.local_timezone, not the server clock'
 update public.app_settings set local_timezone = 'Pacific/Kiritimati';  -- UTC+14
@@ -86,3 +105,17 @@ begin
   perform pg_temp.expect('after_departure = false',
     public.compliance_required(date '1990-01-01', date '2026-08-05', date '2026-08-20', date '2026-08-21', 18), false);
 end $$;
+
+\echo ''
+\echo '=========== LEDGER INTEGRITY ==========='
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.try('guard UPDATEs a checkin event',
+                   'update public.checkin_events set note=''x'' where true');
+select pg_temp.try('guard DELETEs a checkin event',
+                   'delete from public.checkin_events where true');
+select pg_temp.try('guard UPDATEs the register directly',
+                   'update public.daily_compliance set presented=true where true');
+select pg_temp.try('guard DELETEs a register row',
+                   'delete from public.daily_compliance where true');
+reset role;

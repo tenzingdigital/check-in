@@ -285,6 +285,48 @@ comment on table public.gate_events is
 
 
 -- ---------------------------------------------------------------------------
+-- Check-in events (append-only ledger) and the daily compliance register
+-- ---------------------------------------------------------------------------
+
+-- Deliberate presentation at the hut. Separate from gate_events because a gate
+-- sign-out does NOT satisfy the daily requirement: the duty is to present, not
+-- merely to be seen leaving.
+create table if not exists public.checkin_events (
+  id          bigint generated always as identity primary key,
+  resident_id uuid not null references public.residents (id) on delete cascade,
+  guard_id    uuid not null references public.profiles (id) on delete restrict,
+  occurred_at timestamptz not null default now(),
+  note        text
+);
+
+create index if not exists checkin_events_resident_time_idx
+  on public.checkin_events (resident_id, occurred_at desc, id desc);
+create index if not exists checkin_events_time_idx
+  on public.checkin_events (occurred_at desc);
+
+-- The permanent register. Outlives checkin_events: the granular event log is
+-- purged at 90 days for data minimisation, these rows are kept for the
+-- statutory proof horizon.
+create table if not exists public.daily_compliance (
+  resident_id     uuid not null references public.residents (id) on delete cascade,
+  compliance_date date not null,
+  required        boolean not null,
+  presented       boolean not null,
+  first_seen_at   timestamptz,
+  checkin_count   integer not null default 0,
+  closed_at       timestamptz,
+  primary key (resident_id, compliance_date),
+  constraint presented_implies_seen check (presented = (first_seen_at is not null))
+);
+
+create index if not exists daily_compliance_date_idx
+  on public.daily_compliance (compliance_date desc);
+create index if not exists daily_compliance_breach_idx
+  on public.daily_compliance (resident_id, compliance_date desc)
+  where required and not presented;
+
+
+-- ---------------------------------------------------------------------------
 -- Erasure log (GDPR Art. 17 accountability)
 -- ---------------------------------------------------------------------------
 -- Proves an erasure happened without retaining the erased person's data: the
@@ -616,6 +658,8 @@ alter table public.app_settings enable row level security;
 alter table public.profiles     enable row level security;
 alter table public.residents    enable row level security;
 alter table public.gate_events  enable row level security;
+alter table public.checkin_events   enable row level security;
+alter table public.daily_compliance enable row level security;
 alter table public.erasure_log  enable row level security;
 
 -- app_settings: everyone on staff reads it, only admins change it.
@@ -650,6 +694,16 @@ drop policy if exists gate_events_insert on public.gate_events;
 create policy gate_events_read   on public.gate_events for select using (public.is_staff());
 create policy gate_events_insert on public.gate_events for insert
   with check (public.is_staff() and guard_id = auth.uid());
+
+-- checkin_events / daily_compliance: staff read only. No insert, update or
+-- delete policy for any role — both tables are written only by the
+-- SECURITY DEFINER functions in Tasks 4 and 6, which bypass RLS by design
+-- and enforce their own authorisation.
+drop policy if exists checkin_events_read on public.checkin_events;
+create policy checkin_events_read on public.checkin_events for select using (public.is_staff());
+
+drop policy if exists daily_compliance_read on public.daily_compliance;
+create policy daily_compliance_read on public.daily_compliance for select using (public.is_staff());
 
 -- erasure_log: admins only.
 drop policy if exists erasure_log_admin on public.erasure_log;
