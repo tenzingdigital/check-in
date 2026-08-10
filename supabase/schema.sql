@@ -169,6 +169,37 @@ as $$
 $$;
 
 
+-- The current date at the site, not on the server. Every compliance decision
+-- routes through this so there is exactly one definition of "a day".
+create or replace function public.site_today()
+returns date
+language sql
+stable
+set search_path = public, extensions
+as $$
+  select (now() at time zone (select local_timezone from public.app_settings where id))::date;
+$$;
+
+-- Was the daily rule in force for this person on this specific day? Age is
+-- computed as of p_day, never as of today — otherwise backfilling a resident's
+-- history would retroactively apply the duty to days when they were 17.
+create or replace function public.compliance_required(
+  p_dob           date,
+  p_registered_on date,
+  p_departed_on   date,
+  p_day           date,
+  p_adult_age     integer
+)
+returns boolean
+language sql
+immutable
+as $$
+  select p_day >= p_registered_on
+     and (p_departed_on is null or p_day <= p_departed_on)
+     and p_dob <= (p_day - make_interval(years => p_adult_age))::date;
+$$;
+
+
 -- ---------------------------------------------------------------------------
 -- Residents
 -- ---------------------------------------------------------------------------
@@ -640,12 +671,16 @@ revoke all on function public.hut_summary()                              from an
 revoke all on function public.export_resident_record(uuid)               from anon, public;
 revoke all on function public.erase_resident(uuid, text)                 from anon, public;
 revoke all on function public.purge_expired_gate_events()                from anon, public;
+revoke all on function public.site_today()                               from anon, public;
+revoke all on function public.compliance_required(date, date, date, date, integer) from anon, public;
 
 grant execute on function public.search_residents(text, boolean, integer) to authenticated;
 grant execute on function public.record_check(uuid, text, text)           to authenticated;
 grant execute on function public.hut_summary()                            to authenticated;
 grant execute on function public.export_resident_record(uuid)             to authenticated;
 grant execute on function public.erase_resident(uuid, text)               to authenticated;
+grant execute on function public.site_today()                               to authenticated;
+grant execute on function public.compliance_required(date, date, date, date, integer) to authenticated;
 
 commit;
 

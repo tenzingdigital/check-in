@@ -66,6 +66,10 @@ psql -q -v ON_ERROR_STOP=1 \
      -v seed_path="$REPO/supabase/seed.sql" \
      -d hut -f "$HERE/01_acceptance.sql" | tee "$WORK/out.txt"
 
+echo "==> running compliance suite"
+psql -q -v ON_ERROR_STOP=1 \
+     -d hut -f "$HERE/02_compliance.sql" | tee -a "$WORK/out.txt"
+
 echo
 echo "==> authorisation summary"
 grep -E "^   (blocked|no-op|ALLOWED)" "$WORK/out.txt" || true
