@@ -21,6 +21,21 @@
 - Guard identity always comes from `auth.uid()`, never from a function argument.
 - The calendar day is defined by `app_settings.local_timezone`. Never use the server's or browser's local date for compliance.
 - `supabase/tests/run.sh` must exit 0. It fails the build if any line matching `^   ALLOWED` appears in the authorisation summary.
+- **Every expected value must be asserted, not printed.** `run.sh`'s only other gate is the `^   ALLOWED` grep, which compliance output never matches — so a printed-but-unchecked value lets a regression through with a green build. Assert with `pg_temp.expect()`, defined at the top of `02_compliance.sql`:
+
+  ```sql
+  create or replace function pg_temp.expect(label text, actual anyelement, expected anyelement)
+  returns void language plpgsql as $$
+  begin
+    if actual is distinct from expected then
+      raise exception 'ASSERTION FAILED: % — expected %, got %', label, expected, actual;
+    end if;
+    raise notice '  ok  %', label;
+  end;
+  $$;
+  ```
+
+  Under `ON_ERROR_STOP=1` a failed assertion aborts psql and fails the build. Keep the `\echo` and `select` lines where they aid diagnosis, but every documented expected value in this plan gets a matching `expect()` call. Values that legitimately vary per run (timestamps, generated ids, today's date) are asserted on their invariant instead — a relationship or a range, not a literal.
 - Commit after every task.
 
 ---
