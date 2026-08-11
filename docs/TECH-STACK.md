@@ -64,7 +64,7 @@ Realistic steady state: **~$45/mo**, or ~$25/mo with Option 2's hosting.
 
 ## Option 2 — Supabase + Cloudflare Pages *(recommended tweak)*
 
-Identical to Option 1 with the static file served by Cloudflare Pages instead.
+Identical to Option 1 with the static files served by Cloudflare Pages instead.
 
 | | |
 |---|---|
@@ -72,9 +72,9 @@ Identical to Option 1 with the static file served by Cloudflare Pages instead.
 | Commercial use on the free tier | **Yes** — unlike Vercel Hobby |
 | Migration effort | Minutes |
 
-The front end is one static file with no build step, so hosting is nearly
-free to change. Cloudflare's free tier permits commercial use and has no
-meaningful bandwidth ceiling for a hut.
+The front end is a couple of static files with no build step, so hosting is
+nearly free to change. Cloudflare's free tier permits commercial use and has
+no meaningful bandwidth ceiling for a hut.
 
 `vercel.json`'s headers translate to a `_headers` file; keep the same CSP.
 
@@ -171,6 +171,14 @@ that property: keep Supabase-specific features out of the schema, and this
 stays a Postgres app that happens to run on Supabase.
 
 The front end has the same property for the opposite reason — no build step and
-no framework means no lock-in to a host. One `<script>` tag and roughly 400
-lines of vanilla JS will still run in ten years, which is a reasonable planning
-horizon for a security hut and not one most JavaScript stacks can claim.
+no framework means no lock-in to a host. A `<script>` tag and plain vanilla JS
+will still run in ten years, which is a reasonable planning horizon for a
+security hut and not one most JavaScript stacks can claim.
+
+There are now **two** static front ends, `index.html` (gate app) and
+`checkin.html` (check-in app), sharing `app-common.css` and `app-common.js`.
+That strengthens this argument rather than weakening it: two HTML files and
+two small JS/CSS includes are still nothing for a host to build or serve —
+there is no bundler output to reproduce, no framework version to match, no
+routing config beyond what `vercel.json` already has. Whichever option above
+is chosen, hosting both apps costs exactly as little as hosting one.
