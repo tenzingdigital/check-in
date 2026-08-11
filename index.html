@@ -48,10 +48,8 @@
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
     <div class="stats">
-      <div class="stat ok">   <b id="statOnSite">–</b><span>On site</span></div>
-      <div class="stat bad">  <b id="statOverdue">–</b><span>Overdue</span></div>
-      <div class="stat warn"> <b id="statDueSoon">–</b><span>Due soon</span></div>
-      <div class="stat">      <b id="statToday">–</b><span>Today</span></div>
+      <div class="stat ok"> <b id="statOnSite">–</b><span>On site</span></div>
+      <div class="stat">    <b id="statToday">–</b><span>Today</span></div>
     </div>
   </header>
 
@@ -59,9 +57,8 @@
     <div id="appError" class="alert" hidden></div>
 
     <nav class="tabs" role="tablist">
-      <button role="tab" id="tabSearch"  aria-selected="true"  aria-controls="panelSearch">Search</button>
-      <button role="tab" id="tabOverdue" aria-selected="false" aria-controls="panelOverdue">Overdue<span class="pip" id="overduePip" hidden>0</span></button>
-      <button role="tab" id="tabLog"     aria-selected="false" aria-controls="panelLog">Log</button>
+      <button role="tab" id="tabSearch" aria-selected="true"  aria-controls="panelSearch">Search</button>
+      <button role="tab" id="tabLog"    aria-selected="false" aria-controls="panelLog">Log</button>
     </nav>
 
     <!-- ---- search ---- -->
@@ -71,15 +68,6 @@
       <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before signing them in.</p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
-    </section>
-
-    <!-- ---- overdue ---- -->
-    <section id="panelOverdue" role="tabpanel" aria-labelledby="tabOverdue" hidden>
-      <div class="row">
-        <p class="hint" style="flex:1;margin:0">Adults who have not presented at the hut within the required window. Under-18s are exempt.</p>
-        <button class="btn ghost" id="refreshOverdue">Refresh</button>
-      </div>
-      <div id="overdueList" class="list"></div>
     </section>
 
     <!-- ---- log ---- -->
@@ -133,33 +121,8 @@ const state = {
    ====================================================================== */
 // $, esc(), toast(), showError(), ago() come from app-common.js.
 
-function until(iso) {
-  if (!iso) return "";
-  const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
-  const abs = Math.abs(mins);
-  const h = Math.floor(abs / 60), m = abs % 60;
-  const span = h ? (m ? `${h}h ${m}m` : `${h}h`) : `${abs}m`;
-  return mins >= 0 ? `due in ${span}` : `overdue by ${span}`;
-}
-
 function timeOfDay(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-const COMPLIANCE_LABEL = {
-  ok:       "Signed in",
-  due_soon: "Due soon",
-  overdue:  "OVERDUE",
-  never:    "Never signed in",
-  exempt:   "Under 18 — exempt",
-  inactive: "Departed",
-};
-
-function complianceText(r) {
-  const label = COMPLIANCE_LABEL[r.compliance] || r.compliance;
-  if (r.compliance === "exempt" || r.compliance === "inactive") return label;
-  if (r.compliance === "never") return label;
-  return `${label} · ${until(r.due_by)}`;
 }
 
 // Local-day boundaries for the log's date filter. Using the browser's timezone
@@ -184,18 +147,17 @@ function todayISODate() {
 
 function residentCard(r, { clickable = true } = {}) {
   const tag = clickable ? "button" : "div";
-  const cls = ["card", r.compliance].join(" ");
+  const cls = ["card"].join(" ");
   const bits = [];
   if (r.room_ref) bits.push(esc(r.room_ref));
   bits.push(`age ${r.age_years}`);
-  bits.push(r.last_in_at ? `last in ${ago(r.last_in_at)}` : "no check-in on record");
+  bits.push(r.last_event_at ? `last movement ${ago(r.last_event_at)}` : "no movement on record");
 
   return `
     <${tag} class="${cls}" ${clickable ? `data-id="${esc(r.id)}" type="button"` : ""}>
       <span class="who">
         <span class="name">${esc(r.full_name)}</span>
         <span class="meta">${bits.join(" · ")}</span>
-        <span class="meta badge ${esc(r.compliance)}">${esc(complianceText(r))}</span>
       </span>
       <span class="pill ${r.presence === "in" ? "in" : "out"}">${r.presence === "in" ? "On site" : "Off site"}</span>
     </${tag}>`;
@@ -217,9 +179,6 @@ function renderDetail(r) {
   if (!r) { el.hidden = true; el.innerHTML = ""; return; }
 
   const isIn = r.presence === "in";
-  const dueFact = r.compliance === "exempt"
-    ? "Exempt (under 18)"
-    : (r.due_by ? esc(until(r.due_by)) : "Not yet signed in");
 
   el.innerHTML = `
     <h2>${esc(r.full_name)}</h2>
@@ -227,8 +186,7 @@ function renderDetail(r) {
 
     <div class="facts">
       <div class="fact"><span>Status</span><b>${isIn ? "On site" : "Off site"}</b></div>
-      <div class="fact"><span>Last check-in</span><b>${esc(ago(r.last_in_at))}</b></div>
-      <div class="fact"><span>24h rule</span><b class="badge ${esc(r.compliance)}">${dueFact}</b></div>
+      <div class="fact"><span>Last check-in</span><b>${r.last_event_at ? esc(ago(r.last_event_at)) : "No movement on record"}</b></div>
     </div>
 
     <div class="actions">
@@ -273,15 +231,8 @@ async function refreshSummary() {
   if (error) return;                       // header counts are non-critical
   const s = Array.isArray(data) ? data[0] : data;
   if (!s) return;
-  $("statOnSite").textContent  = s.on_site;
-  $("statOverdue").textContent = s.overdue;
-  $("statDueSoon").textContent = s.due_soon;
-  $("statToday").textContent   = s.events_today;
-
-  const outstanding = (s.overdue || 0) + (s.never_signed_in || 0);
-  const pip = $("overduePip");
-  pip.textContent = outstanding;
-  pip.hidden = outstanding === 0;
+  $("statOnSite").textContent = s.on_site;
+  $("statToday").textContent  = s.events_today;
 }
 
 let searchToken = 0;
@@ -324,15 +275,7 @@ async function record(residentId, direction) {
   toast(`${row.full_name} signed ${direction.toUpperCase()}`, "ok");
   renderDetail(row);
   refreshSummary();
-  if (state.tab === "overdue") loadOverdue();
   if ($("q").value.trim().length >= 2) runSearch($("q").value);
-}
-
-async function loadOverdue() {
-  const { data, error } = await sb.rpc("overdue_residents", { max_results: 200 });
-  if (error) { showError("Could not load the overdue list: " + error.message); return; }
-  showError("");
-  renderList($("overdueList"), data, "Everyone is within the 24-hour window.");
 }
 
 async function loadLog(dateStr) {
@@ -354,14 +297,13 @@ async function loadLog(dateStr) {
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["search", "overdue", "log"]) {
+  for (const t of ["search", "log"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
   }
-  if (name === "search")  $("q").focus();
-  if (name === "overdue") loadOverdue();
-  if (name === "log")     loadLog($("logDate").value || todayISODate());
+  if (name === "search") $("q").focus();
+  if (name === "log")    loadLog($("logDate").value || todayISODate());
 }
 
 /* ========================================================================
@@ -445,10 +387,8 @@ document.addEventListener("click", (e) => {
   renderDetail(row);
 });
 
-$("tabSearch").addEventListener("click",  () => selectTab("search"));
-$("tabOverdue").addEventListener("click", () => selectTab("overdue"));
-$("tabLog").addEventListener("click",     () => selectTab("log"));
-$("refreshOverdue").addEventListener("click", loadOverdue);
+$("tabSearch").addEventListener("click", () => selectTab("search"));
+$("tabLog").addEventListener("click",    () => selectTab("log"));
 $("logDate").addEventListener("change", (e) => loadLog(e.target.value || todayISODate()));
 $("logToday").addEventListener("click", () => {
   $("logDate").value = todayISODate();
@@ -456,12 +396,11 @@ $("logToday").addEventListener("click", () => {
 });
 
 // Clock in the header, plus a periodic summary refresh so a terminal left open
-// overnight does not show stale overdue counts.
+// overnight does not show a stale on-site count.
 setInterval(() => {
   $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }, 1000);
 setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
-setInterval(() => { if (state.profile && state.tab === "overdue") loadOverdue(); }, 120000);
 
 sb.auth.onAuthStateChange((event) => {
   if (event === "SIGNED_OUT") showLogin();
