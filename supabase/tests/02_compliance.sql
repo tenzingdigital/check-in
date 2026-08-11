@@ -452,3 +452,137 @@ where r.last_name = 'Marchetti' \gset
 
 select pg_temp.expect('minor: required = false on every backfilled day',
   (:'minor_never_required')::boolean, true);
+
+\echo ''
+\echo '=========== STATES AND ATTENTION LIST ==========='
+reset role;
+delete from public.compliance_annotations;
+delete from public.daily_compliance;
+delete from public.checkin_events;
+select id as adult_id from public.residents where last_name='Brennan' \gset
+select id as other_id from public.residents where last_name='Haddad'  \gset
+
+-- Brennan: missed the last 3 completed days. Haddad: missed 1, explained.
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, checkin_count, closed_at)
+select :'adult_id', public.site_today() - g, true, false, 0, now() from generate_series(1,3) g;
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, checkin_count, closed_at)
+values (:'other_id', public.site_today() - 1, true, false, 0, now());
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- an annotation records a reason without changing the outcome'
+select compliance_date = public.site_today() - 1 as dated_yesterday
+from public.annotate_compliance_day(:'other_id', public.site_today() - 1, 'In hospital, ward confirmed') \gset ann_
+
+select pg_temp.expect('annotation is dated to the day it explains',
+  (:'ann_dated_yesterday')::boolean, true);
+
+select presented as still_not_presented from public.daily_compliance
+ where resident_id = :'other_id' and compliance_date = public.site_today() - 1 \gset
+
+select pg_temp.expect('annotation does not flip presented',
+  (:'still_not_presented')::boolean, false);
+
+\echo '--- states and consecutive-miss ordering'
+select full_name, state, open_breaches, noted_breaches, consecutive_missed
+from public.attention_list() order by consecutive_missed desc, full_name;
+
+select state, open_breaches, noted_breaches, consecutive_missed
+from public.v_resident_compliance where id = :'adult_id' \gset brennan_
+
+select pg_temp.expect('Brennan: state = breach_open', (:'brennan_state')::text, 'breach_open');
+select pg_temp.expect('Brennan: open_breaches = 3', (:'brennan_open_breaches')::integer, 3);
+select pg_temp.expect('Brennan: consecutive_missed = 3', (:'brennan_consecutive_missed')::integer, 3);
+
+select state, open_breaches, noted_breaches, consecutive_missed
+from public.v_resident_compliance where id = :'other_id' \gset haddad_
+
+select pg_temp.expect('Haddad: state = breach_noted', (:'haddad_state')::text, 'breach_noted');
+select pg_temp.expect('Haddad: open_breaches = 0', (:'haddad_open_breaches')::integer, 0);
+select pg_temp.expect('Haddad: noted_breaches = 1', (:'haddad_noted_breaches')::integer, 1);
+
+\echo '--- attention_list: explained breach is demoted below the unexplained one, never suppressed'
+-- Other residents pick up a 'never' state here (their history was wiped
+-- above), which legitimately outranks an explained breach per the case
+-- ordering in attention_list() — so this asserts relative rank, not adjacency.
+with ordered as (
+  select id, row_number() over () as rn from public.attention_list()
+)
+select
+  (select rn from ordered where id = :'adult_id') as brennan_rank,
+  (select rn from ordered where id = :'other_id') as haddad_rank
+\gset ordrank_
+
+select pg_temp.expect('attention_list: Brennan (unexplained) appears in the list',
+  :'ordrank_brennan_rank' is not null, true);
+select pg_temp.expect('attention_list: Haddad (explained) still appears, not suppressed',
+  :'ordrank_haddad_rank' is not null, true);
+select pg_temp.expect('attention_list: unexplained breach ranks ahead of the explained one',
+  (:'ordrank_brennan_rank')::integer < (:'ordrank_haddad_rank')::integer, true);
+
+\echo '--- checking in flips today''s state'
+select state as before_checkin from public.v_resident_compliance where id = :'adult_id' \gset
+
+select pg_temp.expect('before check-in: state = breach_open', (:'before_checkin')::text, 'breach_open');
+
+select 1 as _ from public.record_checkin(:'adult_id') limit 1;
+
+select state as after_checkin, seen_today from public.v_resident_compliance where id = :'adult_id' \gset
+
+select pg_temp.expect('after check-in: state stays breach_open (past breach unresolved)',
+  (:'after_checkin')::text, 'breach_open');
+select pg_temp.expect('after check-in: seen_today = true (today satisfied)',
+  (:'seen_today')::boolean, true);
+
+\echo '--- annotations are append-only'
+-- Printed (not \gset) so these land in run.sh's authorisation-summary grep
+-- alongside every other privileged-operation probe. The positive assertion
+-- below then proves the row genuinely survived, the same pattern used for
+-- checkin_events / daily_compliance above, rather than string-matching the
+-- try() report.
+select pg_temp.try('guard edits an annotation',
+                   'update public.compliance_annotations set note=''changed'' where true');
+select pg_temp.try('guard deletes an annotation',
+                   'delete from public.compliance_annotations where true');
+
+select note from public.compliance_annotations
+ where resident_id = :'other_id' and compliance_date = public.site_today() - 1 \gset
+
+select pg_temp.expect('annotation survives guard UPDATE/DELETE attempts: note unchanged',
+  (:'note')::text, 'In hospital, ward confirmed');
+
+\echo '--- streak: a day that was not required is skipped, not a break'
+-- This is the highest-risk part of consecutive_missed: a not-required day
+-- (under 18 / before registration / after departure) must be transparent to
+-- the streak, neither counted nor able to end it. Synthetic rows isolate the
+-- CTE from Brennan's real age/registration facts.
+reset role;
+delete from public.daily_compliance where resident_id = :'adult_id';
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at) values
+  (:'adult_id', public.site_today() - 1, true,  false, null, 0, now()),  -- missed, required: counts
+  (:'adult_id', public.site_today() - 2, false, false, null, 0, now()),  -- not required: must be skipped
+  (:'adult_id', public.site_today() - 3, true,  false, null, 0, now()),  -- missed, required: counts
+  (:'adult_id', public.site_today() - 4, true,  true,  now(), 1, now()),  -- presented: breaks the streak
+  (:'adult_id', public.site_today() - 5, true,  false, null, 0, now()); -- before the break: must not count
+
+select consecutive_missed from public.v_resident_compliance where id = :'adult_id' \gset streak_
+
+select pg_temp.expect(
+  'streak: a not-required day between two missed required days neither counts nor breaks the streak',
+  (:'streak_consecutive_missed')::integer, 2);
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- hut_summary() still reports the gate counters'
+-- Restores coverage lost when Task 1 deleted acceptance-suite section C, which
+-- held the only test of this function. Its signature changed in Task 1 and no
+-- other task touches it, so without this it would ship untested.
+select on_site, events_today from public.hut_summary() \gset hut_
+
+select pg_temp.expect('hut_summary: on_site is a non-negative count',
+  (:'hut_on_site')::integer >= 0, true);
+select pg_temp.expect('hut_summary: events_today is a non-negative count',
+  (:'hut_events_today')::integer >= 0, true);
+reset role;

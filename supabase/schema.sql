@@ -339,6 +339,23 @@ create index if not exists daily_compliance_open_idx
   on public.daily_compliance (compliance_date)
   where closed_at is null;
 
+-- Append-only. A separate table rather than columns on daily_compliance so that
+-- adding context later never overwrites what someone wrote before, and so that
+-- no annotation can alter the outcome it explains.
+create table if not exists public.compliance_annotations (
+  id              bigint generated always as identity primary key,
+  resident_id     uuid not null,
+  compliance_date date not null,
+  note            text not null check (length(btrim(note)) > 0),
+  author_id       uuid not null references public.profiles (id) on delete restrict,
+  created_at      timestamptz not null default now(),
+  foreign key (resident_id, compliance_date)
+    references public.daily_compliance (resident_id, compliance_date) on delete cascade
+);
+
+create index if not exists compliance_annotations_day_idx
+  on public.compliance_annotations (resident_id, compliance_date);
+
 
 -- ---------------------------------------------------------------------------
 -- Erasure log (GDPR Art. 17 accountability)
@@ -417,6 +434,94 @@ where public.is_staff();
 
 comment on view public.v_check_log is
   'Human-readable event feed. Filter by occurred_at range for "today''s log".';
+
+
+create or replace view public.v_resident_compliance as
+with s as (select * from public.app_settings where id),
+today as (select public.site_today() as d),
+tally as (
+  select
+    dc.resident_id,
+    count(*) filter (where dc.required and not dc.presented
+                       and not exists (select 1 from public.compliance_annotations a
+                                        where a.resident_id = dc.resident_id
+                                          and a.compliance_date = dc.compliance_date))::integer as open_breaches,
+    count(*) filter (where dc.required and not dc.presented
+                       and exists (select 1 from public.compliance_annotations a
+                                    where a.resident_id = dc.resident_id
+                                      and a.compliance_date = dc.compliance_date))::integer as noted_breaches,
+    max(dc.compliance_date) filter (where dc.presented) as last_seen_on
+  from public.daily_compliance dc
+  where dc.closed_at is not null
+  group by dc.resident_id
+),
+-- Consecutive required-and-missed days counting back from the last completed
+-- day. A day that was never required (under 18, before registration, after
+-- departure) must be transparent to the streak: it neither counts towards it
+-- nor breaks it. That means it cannot simply add to a running "break" total
+-- the way a presented day does — it has to be excluded from the sequence
+-- entirely before the running sum is taken, otherwise a single skippable day
+-- permanently truncates everything behind it. So required=false rows are
+-- filtered out of the window first; only required rows are ranked, and the
+-- running sum of "presented" among just those decides where the streak ends.
+streak as (
+  select d.resident_id,
+         count(*)::integer as consecutive_missed
+  from (
+    select dc.*,
+           sum(case when dc.presented then 1 else 0 end)
+             over (partition by dc.resident_id order by dc.compliance_date desc
+                   rows between unbounded preceding and current row) as breaks
+    from public.daily_compliance dc
+    where dc.closed_at is not null and dc.required
+  ) d
+  where d.breaks = 0
+  group by d.resident_id
+),
+todayrow as (
+  select dc.resident_id, dc.presented, dc.checkin_count, dc.required
+  from public.daily_compliance dc, today
+  where dc.compliance_date = today.d
+)
+select
+  r.id,
+  btrim(r.first_name) || ' ' || btrim(r.last_name) as full_name,
+  r.room_ref,
+  r.status,
+  (date_part('year', age(r.date_of_birth)))::integer as age_years,
+  public.compliance_required(r.date_of_birth, (r.registered_at at time zone s.local_timezone)::date,
+                             r.departed_on, today.d, s.adult_age_years) as required_today,
+  coalesce(tr.presented, false) as seen_today,
+  coalesce(tr.checkin_count, 0) as checkins_today,
+  coalesce(t.open_breaches, 0)  as open_breaches,
+  coalesce(t.noted_breaches, 0) as noted_breaches,
+  coalesce(st.consecutive_missed, 0) as consecutive_missed,
+  t.last_seen_on,
+  case
+    when r.status <> 'active' then 'not_required'
+    when not public.compliance_required(r.date_of_birth, (r.registered_at at time zone s.local_timezone)::date,
+                                        r.departed_on, today.d, s.adult_age_years) then 'exempt'
+    when coalesce(t.open_breaches, 0) > 0 then 'breach_open'
+    when coalesce(t.noted_breaches, 0) > 0 then 'breach_noted'
+    when coalesce(tr.presented, false) then 'seen_today'
+    when t.last_seen_on is null and coalesce(t.noted_breaches,0) = 0
+         and not exists (select 1 from public.daily_compliance x
+                          where x.resident_id = r.id and x.presented) then 'never'
+    when date_part('hour', now() at time zone s.local_timezone) >= s.due_soon_after_hour then 'due_today'
+    else 'expected'
+  end as state
+from public.residents r
+cross join s
+cross join today
+left join tally    t  on t.resident_id  = r.id
+left join streak   st on st.resident_id = r.id
+left join todayrow tr on tr.resident_id = r.id
+where public.is_staff();
+
+comment on view public.v_resident_compliance is
+  'State precedence is deliberate: an open breach outranks seen_today, because '
+  'clearing today does not clear a missed Tuesday. The front end shows state '
+  'for the badge and seen_today for the tick, separately.';
 
 
 -- ---------------------------------------------------------------------------
@@ -730,6 +835,66 @@ as $$
 $$;
 
 
+-- Attach a reason to a missed day. Deliberately cannot touch daily_compliance
+-- itself — there is no update path to `presented` outside record_checkin() /
+-- close_out_compliance_days() — so an annotation can explain a breach but
+-- never make it disappear from the record.
+create or replace function public.annotate_compliance_day(
+  p_resident_id uuid,
+  p_date        date,
+  p_note        text
+)
+returns public.compliance_annotations
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare v_out public.compliance_annotations;
+begin
+  if not public.is_staff() then
+    raise exception 'Not authorised to annotate the register' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.daily_compliance
+                  where resident_id = p_resident_id and compliance_date = p_date) then
+    raise exception 'No register row for that resident and date' using errcode = 'P0002';
+  end if;
+
+  insert into public.compliance_annotations (resident_id, compliance_date, note, author_id)
+  values (p_resident_id, p_date, btrim(p_note), auth.uid())
+  returning * into v_out;
+  return v_out;
+end;
+$$;
+
+-- The guard's worklist: who needs attention right now. Explained breaches are
+-- demoted below unexplained ones, and 'never'-seen residents are surfaced
+-- ahead of explained breaches too — but nothing in this ordering removes a
+-- row. Suppression happens in the guard's attention, never in the record.
+create or replace function public.attention_list(max_results integer default 200)
+returns setof public.v_resident_compliance
+language sql
+stable
+security invoker
+set search_path = public, extensions
+as $$
+  select *
+  from public.v_resident_compliance
+  where public.is_staff()
+    and status = 'active'
+    and (state in ('breach_open', 'breach_noted', 'never', 'due_today'))
+  order by
+    -- Unexplained first, then explained, then today's gap. Explained breaches
+    -- are demoted but never removed: suppression happens in the guard's
+    -- attention, never in the record.
+    case state when 'breach_open' then 0 when 'never' then 1
+               when 'breach_noted' then 2 else 3 end,
+    consecutive_missed desc,
+    open_breaches desc,
+    full_name
+  limit greatest(1, least(coalesce(max_results, 200), 500));
+$$;
+
+
 -- ---------------------------------------------------------------------------
 -- GDPR operations (admin only)
 -- ---------------------------------------------------------------------------
@@ -844,6 +1009,7 @@ alter table public.residents    enable row level security;
 alter table public.gate_events  enable row level security;
 alter table public.checkin_events   enable row level security;
 alter table public.daily_compliance enable row level security;
+alter table public.compliance_annotations enable row level security;
 alter table public.erasure_log  enable row level security;
 
 -- app_settings: everyone on staff reads it, only admins change it.
@@ -889,6 +1055,14 @@ create policy checkin_events_read on public.checkin_events for select using (pub
 drop policy if exists daily_compliance_read on public.daily_compliance;
 create policy daily_compliance_read on public.daily_compliance for select using (public.is_staff());
 
+-- compliance_annotations: staff read only. No insert policy — writes go
+-- through annotate_compliance_day(), which is SECURITY DEFINER and bypasses
+-- RLS as the table owner. No update or delete policy for any role: the
+-- annotation log is append-only, same as checkin_events / daily_compliance.
+drop policy if exists compliance_annotations_read on public.compliance_annotations;
+create policy compliance_annotations_read on public.compliance_annotations
+  for select using (public.is_staff());
+
 -- erasure_log: admins only.
 drop policy if exists erasure_log_admin on public.erasure_log;
 create policy erasure_log_admin on public.erasure_log for all using (public.is_admin()) with check (public.is_admin());
@@ -899,10 +1073,12 @@ create policy erasure_log_admin on public.erasure_log for all using (public.is_a
 -- ---------------------------------------------------------------------------
 -- Nothing is reachable without a session. The anon key alone gets you nowhere.
 
-revoke all on public.v_resident_status from anon, public;
-revoke all on public.v_check_log       from anon, public;
-grant select on public.v_resident_status to authenticated;
-grant select on public.v_check_log       to authenticated;
+revoke all on public.v_resident_status     from anon, public;
+revoke all on public.v_check_log           from anon, public;
+revoke all on public.v_resident_compliance from anon, public;
+grant select on public.v_resident_status     to authenticated;
+grant select on public.v_check_log           to authenticated;
+grant select on public.v_resident_compliance to authenticated;
 
 revoke all on function public.search_residents(text, boolean, integer)   from anon, public;
 revoke all on function public.record_check(uuid, text, text)             from anon, public;
@@ -914,6 +1090,8 @@ revoke all on function public.site_today()                               from an
 revoke all on function public.compliance_required(date, date, date, date, integer) from anon, public;
 revoke all on function public.record_checkin(uuid, text)                 from anon, public;
 revoke all on function public.close_out_compliance_days(date)            from anon, public;
+revoke all on function public.annotate_compliance_day(uuid, date, text)  from anon, public;
+revoke all on function public.attention_list(integer)                    from anon, public;
 
 grant execute on function public.search_residents(text, boolean, integer) to authenticated;
 grant execute on function public.record_check(uuid, text, text)           to authenticated;
@@ -923,6 +1101,8 @@ grant execute on function public.erase_resident(uuid, text)               to aut
 grant execute on function public.site_today()                               to authenticated;
 grant execute on function public.compliance_required(date, date, date, date, integer) to authenticated;
 grant execute on function public.record_checkin(uuid, text)               to authenticated;
+grant execute on function public.annotate_compliance_day(uuid, date, text) to authenticated;
+grant execute on function public.attention_list(integer)                   to authenticated;
 
 commit;
 
