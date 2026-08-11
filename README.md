@@ -7,12 +7,18 @@ and it is deliberately the first thing in the file.
 
 | | |
 |---|---|
-| **Hosting** | Render — static site, config in `render.yaml` |
+| **Hosting** | ⚠️ **UNCONFIRMED — check your dashboard and fix this line** |
 | **Database + auth** | Supabase (Postgres), EU region |
 | **Live URL** | _fill in_ |
-| **Render dashboard** | _fill in_ |
+| **Host dashboard** | _fill in_ |
 | **Supabase project** | _fill in_ |
-| **Also supported** | Vercel (`vercel.json`), kept in sync — see below |
+
+Configs for **both** Render (`render.yaml`) and Vercel (`vercel.json`) are
+committed, so either works. The original brief for this project said Vercel; a
+later note said Render. Nobody has actually checked, so this file does not
+pretend to know — open whichever dashboard has the deployment, write the answer
+above, and delete the config you are not using. Two configs is a reasonable
+hedge while it's unclear; it is clutter once it isn't.
 
 Both host configs are committed and `./check.sh` fails if their security headers
 drift apart, because whichever host you are *not* on ignores its config in
