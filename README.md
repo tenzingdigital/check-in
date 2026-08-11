@@ -7,24 +7,27 @@ and it is deliberately the first thing in the file.
 
 | | |
 |---|---|
-| **Hosting** | **Not deployed yet.** Configs for Render and Vercel are both ready |
-| **Database + auth** | Supabase (Postgres) — project not yet created; pick an **EU region** |
-| **Live URL** | — |
-| **Host dashboard** | — |
-| **Supabase project** | — |
+| **Hosting** | **Vercel** — config in `vercel.json` |
+| **Database + auth** | Supabase (Postgres) — use an **EU region** |
+| **Live URL** | _fill in_ |
+| **Vercel project** | _fill in_ |
+| **Supabase project** | _fill in_ |
 
-Nothing here is live. This repo went from empty to complete in one sitting, and
-no deployment has been made. Fill the table in when it is.
+> **Check the Vercel plan.** Hobby prohibits commercial use. If this runs for a
+> client — or for anyone paying for the site it guards — it needs Pro
+> (~$20/user/mo), or a host whose free tier permits commercial use. This is a
+> licensing problem, not a technical one: nothing breaks, you are simply in
+> breach of terms. `render.yaml` is committed and kept header-identical for
+> exactly that reason, so switching is a dashboard change rather than a rewrite.
 
-If you have another app already running on Render, it is not this one — that
-confusion cost an afternoon once already. This project's Render service would be
-named `hut-check-in` (see `render.yaml`) and serves `/index.html` and
-`/checkin.html`. It has no `/login` route: login is a section inside the gate
-app, so a static host would 404 on that path.
+`./check.sh` fails if `vercel.json` and `render.yaml` disagree about security
+headers, so the escape hatch stays usable rather than rotting.
 
-Both `render.yaml` and `vercel.json` are committed and `./check.sh` fails if
-their security headers drift apart. Once you pick a host, delete the config you
-are not using — two is a hedge while it's undecided, clutter afterwards.
+You have other apps on other hosts. If you are ever unsure which is which: this
+project's Vercel deployment serves `/index.html` (gate app) and `/checkin.html`
+(daily register). It has **no `/login` route** — login is a section inside the
+gate app, so a static host 404s on that path. That detail is what finally
+identified a Render URL as a different application.
 
 Both host configs are committed and `./check.sh` fails if their security headers
 drift apart, because whichever host you are *not* on ignores its config in

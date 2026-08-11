@@ -34,7 +34,7 @@ at 3am when it breaks?** Managed services cost money and save incidents.
 
 ---
 
-## Option 1 — Supabase + Vercel (what this repo builds)
+## Option 1 — Supabase + Vercel *(in use)*
 
 | | |
 |---|---|
@@ -62,7 +62,7 @@ Realistic steady state: **~$45/mo**, or ~$25/mo with Option 2's hosting.
 
 ---
 
-## Option 2 — Supabase + Render *(recommended; nothing is deployed yet)*
+## Option 2 — Supabase + Render *(the escape hatch, config committed)*
 
 | | |
 |---|---|
@@ -164,17 +164,19 @@ None of these beat Option 2 on either axis. Listed because they come up.
 
 | Option | ~Monthly | EU-hosted | EU-owned | Migration from here |
 |---|---|---|---|---|
-| 1. Supabase + Vercel | $45 | Yes | No | — (built) |
-| **2. Supabase + Render** | **$25** | **Yes** | **No** | **config committed** |
+| **1. Supabase + Vercel** | **$45** | **Yes** | **No** | **— (in use)** |
+| 2. Supabase + Render | $25 | Yes | No | config committed, header-checked |
 | 2b. Supabase + Cloudflare | $25 | Yes | No | Minutes |
 | 3. Self-hosted Supabase, Hetzner | €5–15 | Yes | Yes | Low — schema runs as-is |
 | 4. PocketBase, EU VPS | €4 | Yes | Yes | High — full rewrite |
 | 5. Neon / Nhost / Appwrite | $0–25 | Yes | No | Medium to high |
 
-**Recommendation: Option 2 (Supabase + Render).**
-It is the cheapest option that keeps the database model, keeps ops burden at
-zero, and drops a processor. Keep Option 3 as the escape hatch if EU ownership
-becomes a requirement.
+**In use: Option 1 (Supabase + Vercel).** The one thing to settle is the Vercel
+plan — Hobby prohibits commercial use, so a client-facing deployment needs Pro
+(~$20/user/mo). If that cost is unwelcome, Option 2 is the same architecture on
+a free tier that permits commercial use, and `render.yaml` is already committed
+and header-checked, so the switch is a dashboard change. Keep Option 3 as the
+escape hatch if EU *ownership* ever becomes a requirement.
 
 ---
 
