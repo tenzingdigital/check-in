@@ -323,26 +323,93 @@ select pg_temp.expect('day boundary: the previous day''s row is untouched',
 update public.app_settings set local_timezone = 'Europe/Dublin';
 
 \echo ''
+\echo '=========== RESIDENT DEPARTURE INVARIANT ==========='
+-- departed_on_matches_status is biconditional: without it, a resident could be
+-- marked departed with no date and would then be treated by close-out as still
+-- subject to the rule forever (departed_on is null passes its window check
+-- unconditionally), collecting an unclearable statutory breach every night,
+-- since record_checkin() refuses non-active residents and can never clear it.
+reset role;
+do $$
+declare
+  v_raised boolean := false;
+begin
+  begin
+    insert into public.residents (first_name, last_name, date_of_birth, status)
+    values ('Invalid', 'NoDepartureDate', '1980-01-01', 'departed');
+  exception when check_violation then
+    v_raised := true;
+  end;
+  perform pg_temp.expect(
+    'status=''departed'' with departed_on null violates departed_on_matches_status',
+    v_raised, true);
+  -- Defensive cleanup in case the insert unexpectedly succeeded (i.e. the
+  -- constraint has regressed) — do not let a bad row leak into later counts.
+  delete from public.residents where first_name = 'Invalid' and last_name = 'NoDepartureDate';
+end $$;
+
+\echo ''
 \echo '=========== CLOSE-OUT AND BACKFILL ==========='
 reset role;
 delete from public.daily_compliance;
 delete from public.checkin_events;
+
+-- A resident who departed partway through the outage window, to prove the
+-- departed_on upper bound is inclusive of the departure day and exclusive of
+-- the day after (>= not >).
+insert into public.residents (first_name, last_name, date_of_birth, status, departed_on)
+values ('Cormac', 'Doyle', '1980-06-15', 'departed', public.site_today() - 3);
+
 update public.residents set registered_at = now() - interval '10 days';
 
--- Resident count is NOT hardcoded: 01_acceptance.sql erases Nair via
--- erase_resident() before this file runs, so only 9 of the 10 seeded
--- residents remain by the time this section executes.
-select count(*) as resident_count from public.residents \gset
+select id as adult_id    from public.residents where last_name='Brennan' \gset
+select id as departed_id from public.residents where last_name='Doyle'    \gset
+
+-- Expected population per backfilled day is computed the same way
+-- close_out_compliance_days() computes it — a registration/departure window
+-- join, not a headcount — because the headcount itself is not stable: Nair was
+-- erased by 01_acceptance.sql before this file runs, and Doyle above is
+-- deliberately departed mid-window with a shorter valid range than everyone
+-- else.
+select count(*) as expected_backfill_rows
+from public.residents r
+cross join generate_series(public.site_today() - 10, public.site_today() - 1, interval '1 day') gs(d)
+where (r.registered_at at time zone (select local_timezone from public.app_settings where id))::date <= gs.d::date
+  and (r.departed_on is null or r.departed_on >= gs.d::date) \gset
+
+\echo '--- a check-in recorded today, before close-out runs, to prove the day-in-progress clamp for real'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.record_checkin(:'adult_id');
+reset role;
 
 \echo '--- a 10-day outage: one run backfills every missing day'
 select public.close_out_compliance_days() as rows_written \gset
+-- Scoped to compliance_date < today so the check-in seeded above (today,
+-- presented=true) cannot be mistaken for a backfilled day.
 select count(*) as distinct_days, count(*) filter (where presented) as any_presented
-from (select distinct compliance_date, presented from public.daily_compliance) d \gset
+from (select distinct compliance_date, presented from public.daily_compliance
+       where compliance_date < public.site_today()) d \gset
 
 select pg_temp.expect('backfill: distinct_days = 10', (:distinct_days)::integer, 10);
 select pg_temp.expect('backfill: any_presented = 0', (:any_presented)::integer, 0);
-select pg_temp.expect('backfill: rows_written = resident_count * distinct_days',
-  (:rows_written)::integer, (:resident_count)::integer * (:distinct_days)::integer);
+select pg_temp.expect('backfill: rows_written = expected_backfill_rows (registration/departure window, not a headcount)',
+  (:rows_written)::integer, (:expected_backfill_rows)::integer);
+
+\echo '--- a departed resident is required only up to and including their departure day'
+select exists (
+  select 1 from public.daily_compliance
+  where resident_id = :'departed_id' and compliance_date = public.site_today() - 3
+) as has_row_on_departure_day \gset
+select exists (
+  select 1 from public.daily_compliance
+  where resident_id = :'departed_id' and compliance_date = public.site_today() - 2
+) as has_row_after_departure \gset
+
+select pg_temp.expect('departed resident: has a register row ON their departure day',
+  (:'has_row_on_departure_day')::boolean, true);
+select pg_temp.expect('departed resident: no register row for the day AFTER departure',
+  (:'has_row_after_departure')::boolean, false);
 
 \echo '--- idempotency: a second run writes nothing and overwrites nothing'
 select public.close_out_compliance_days() as second_run_rows \gset
@@ -350,7 +417,6 @@ select public.close_out_compliance_days() as second_run_rows \gset
 select pg_temp.expect('idempotent second run: second_run_rows = 0', (:second_run_rows)::integer, 0);
 
 \echo '--- close-out never overwrites a recorded presence'
-select id as adult_id from public.residents where last_name='Brennan' \gset
 delete from public.daily_compliance where resident_id = :'adult_id' and compliance_date = public.site_today() - 1;
 insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count)
 values (:'adult_id', public.site_today() - 1, true, true, now() - interval '1 day', 1);
@@ -362,12 +428,20 @@ select pg_temp.expect('overwrite-safety: third_run_rows = 0', (:third_run_rows):
 select pg_temp.expect('overwrite-safety: still_presented = true', (:'still_presented')::boolean, true);
 
 \echo '--- today is left open; only completed days are closed'
-select count(*) as open_rows_today from public.daily_compliance
- where compliance_date = public.site_today() and closed_at is null \gset
+-- Not a bare count-of-zero (that passes whether today is correctly skipped OR
+-- wrongly closed-then-reopened by nobody touching it). Anchor on the row
+-- seeded via record_checkin() above and prove close-out left it alone.
+select closed_at is null as today_checkin_still_open from public.daily_compliance
+ where resident_id = :'adult_id' and compliance_date = public.site_today() \gset
+select count(*) as today_row_count from public.daily_compliance
+ where compliance_date = public.site_today() \gset
 select count(*) as unclosed_past_rows from public.daily_compliance
  where compliance_date < public.site_today() and closed_at is null \gset
 
-select pg_temp.expect('today is left open: open_rows_today = 0', (:open_rows_today)::integer, 0);
+select pg_temp.expect('today''s check-in stays open after three close-out runs',
+  (:'today_checkin_still_open')::boolean, true);
+select pg_temp.expect('close-out wrote no row for today besides the seeded check-in',
+  (:today_row_count)::integer, 1);
 select pg_temp.expect('all past days are closed: unclosed_past_rows = 0', (:unclosed_past_rows)::integer, 0);
 
 \echo '--- the minor is required=false on every backfilled day'

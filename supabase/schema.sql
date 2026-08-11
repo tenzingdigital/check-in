@@ -236,9 +236,17 @@ create table if not exists public.residents (
     ))
   ) stored,
 
-  constraint departed_on_requires_status
-    check (departed_on is null or status = 'departed')
+  constraint departed_on_matches_status
+    check ((status = 'departed') = (departed_on is not null))
 );
+
+comment on constraint departed_on_matches_status on public.residents is
+  'Biconditional, not one-directional: forces departed_on to be set whenever '
+  'status=''departed'', and forbids it otherwise. Without this a resident could '
+  'be marked departed with no date, which close_out_compliance_days() would '
+  'then treat as still active forever (departed_on is null passes its window '
+  'check unconditionally) — an unclearable statutory breach against someone '
+  'who has simply moved out, since record_checkin() refuses non-active residents.';
 
 create index if not exists residents_search_key_trgm_idx
   on public.residents using gin (search_key gin_trgm_ops);
