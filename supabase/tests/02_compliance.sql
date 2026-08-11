@@ -514,12 +514,35 @@ select
   (select rn from ordered where id = :'other_id') as haddad_rank
 \gset ordrank_
 
-select pg_temp.expect('attention_list: Brennan (unexplained) appears in the list',
-  :'ordrank_brennan_rank' is not null, true);
-select pg_temp.expect('attention_list: Haddad (explained) still appears, not suppressed',
-  :'ordrank_haddad_rank' is not null, true);
-select pg_temp.expect('attention_list: unexplained breach ranks ahead of the explained one',
-  (:'ordrank_brennan_rank')::integer < (:'ordrank_haddad_rank')::integer, true);
+-- Direct value assertions, not "is not null": with \gset, a NULL column
+-- leaves the psql variable unset, so referencing it with :'var' would leave
+-- the literal text unexpanded and fail the query with a SQL syntax error
+-- rather than a clean assertion failure — "is not null" could never itself
+-- report false. Asserting the exact rank both proves presence (a NULL would
+-- error before the comparison ever ran) and proves the ordering.
+select pg_temp.expect('attention_list: Brennan (unexplained breach) ranks first',
+  (:'ordrank_brennan_rank')::integer, 1);
+select pg_temp.expect('attention_list: Haddad (explained breach) ranks last, behind every never-seen resident, but still present',
+  (:'ordrank_haddad_rank')::integer, 8);
+
+\echo '--- attention_list: the cap never drops a breach, open or annotated'
+-- 'never' sorts above 'breach_noted' by deliberate product ranking (an
+-- unknown outranks a human-triaged known), and there are 6 never-seen
+-- residents in play here — more than enough to push Haddad's annotated
+-- breach past a max_results of 2 if the LIMIT were applied uniformly. The
+-- product rule is "flag but never suppress": an annotation may demote a
+-- breach in the guard's attention, but it must never make the row vanish.
+select count(*) filter (where id = :'adult_id') as brennan_present,
+       count(*) filter (where id = :'other_id') as haddad_present,
+       count(*) as total_returned
+from public.attention_list(2) \gset cap_
+
+select pg_temp.expect('attention_list(2): the open breach (Brennan) is never dropped by the cap',
+  (:'cap_brennan_present')::integer, 1);
+select pg_temp.expect('attention_list(2): the annotated breach (Haddad) is never dropped by the cap',
+  (:'cap_haddad_present')::integer, 1);
+select pg_temp.expect('attention_list(2): the cap still limits the less-critical never/due_today rows',
+  (:'cap_total_returned')::integer, 4);
 
 \echo '--- checking in flips today''s state'
 select state as before_checkin from public.v_resident_compliance where id = :'adult_id' \gset

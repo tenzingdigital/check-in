@@ -504,9 +504,13 @@ select
     when coalesce(t.open_breaches, 0) > 0 then 'breach_open'
     when coalesce(t.noted_breaches, 0) > 0 then 'breach_noted'
     when coalesce(tr.presented, false) then 'seen_today'
-    when t.last_seen_on is null and coalesce(t.noted_breaches,0) = 0
-         and not exists (select 1 from public.daily_compliance x
-                          where x.resident_id = r.id and x.presented) then 'never'
+    -- last_seen_on is null and noted_breaches=0 whenever this branch is
+    -- reached: any noted breach was already caught by the breach_noted arm
+    -- above, and last_seen_on (aggregated only from closed days) can only be
+    -- non-null when a presented row exists, which the NOT EXISTS below would
+    -- already have ruled out. The NOT EXISTS is the only condition doing work.
+    when not exists (select 1 from public.daily_compliance x
+                      where x.resident_id = r.id and x.presented) then 'never'
     when date_part('hour', now() at time zone s.local_timezone) >= s.due_soon_after_hour then 'due_today'
     else 'expected'
   end as state
@@ -870,6 +874,22 @@ $$;
 -- demoted below unexplained ones, and 'never'-seen residents are surfaced
 -- ahead of explained breaches too — but nothing in this ordering removes a
 -- row. Suppression happens in the guard's attention, never in the record.
+--
+-- The cap is exempt for breach_open and breach_noted rows. Applying LIMIT
+-- after the ordering, uniformly, would let a big enough 'never' bucket (it
+-- ranks above breach_noted) push an annotated breach past max_results and
+-- off the list entirely — the one place "flag but never suppress" would
+-- otherwise be violated by a plain LIMIT.
+--
+-- rn is ranked WITHIN the capped partition (never/due_today) only, not
+-- across the whole ordering: if it ranked globally, every breach row ahead
+-- of a never/due_today row would consume one of its max_results slots even
+-- though breach rows are already unconditionally kept, silently shrinking
+-- how many of the capped rows actually get through. Ranking the two
+-- partitions separately means the cap always admits exactly
+-- min(max_results, count of never/due_today rows), regardless of how many
+-- breach rows precede them, while breach rows themselves cannot be dropped
+-- at any max_results value.
 create or replace function public.attention_list(max_results integer default 200)
 returns setof public.v_resident_compliance
 language sql
@@ -877,21 +897,32 @@ stable
 security invoker
 set search_path = public, extensions
 as $$
-  select *
-  from public.v_resident_compliance
-  where public.is_staff()
-    and status = 'active'
-    and (state in ('breach_open', 'breach_noted', 'never', 'due_today'))
-  order by
-    -- Unexplained first, then explained, then today's gap. Explained breaches
-    -- are demoted but never removed: suppression happens in the guard's
-    -- attention, never in the record.
-    case state when 'breach_open' then 0 when 'never' then 1
-               when 'breach_noted' then 2 else 3 end,
-    consecutive_missed desc,
-    open_breaches desc,
-    full_name
-  limit greatest(1, least(coalesce(max_results, 200), 500));
+  with ranked as (
+    select v.*,
+           case v.state when 'breach_open' then 0 when 'never' then 1
+                        when 'breach_noted' then 2 else 3 end as bucket,
+           row_number() over (
+             partition by (v.state in ('breach_open', 'breach_noted'))
+             order by case v.state when 'breach_open' then 0 when 'never' then 1
+                                   when 'breach_noted' then 2 else 3 end,
+                      v.consecutive_missed desc, v.open_breaches desc, v.full_name
+           ) as rn
+    from public.v_resident_compliance v
+    where public.is_staff()
+      and v.status = 'active'
+      and v.state in ('breach_open', 'breach_noted', 'never', 'due_today')
+  )
+  -- Column order here must match v_resident_compliance's physical SELECT
+  -- list order (state is its last column, not where the interface doc lists
+  -- it), because a language-sql function returning setof a view type is
+  -- matched positionally, not by name.
+  select id, full_name, room_ref, status, age_years, required_today, seen_today,
+         checkins_today, open_breaches, noted_breaches, consecutive_missed,
+         last_seen_on, state
+  from ranked
+  where state in ('breach_open', 'breach_noted')                          -- never truncated
+     or rn <= greatest(1, least(coalesce(max_results, 200), 500))
+  order by bucket, consecutive_missed desc, open_breaches desc, full_name;
 $$;
 
 
