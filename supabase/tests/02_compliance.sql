@@ -529,9 +529,32 @@ select pg_temp.expect('attention_list: Haddad (explained breach) ranks last, beh
 -- 'never' sorts above 'breach_noted' by deliberate product ranking (an
 -- unknown outranks a human-triaged known), and there are 6 never-seen
 -- residents in play here — more than enough to push Haddad's annotated
--- breach past a max_results of 2 if the LIMIT were applied uniformly. The
+-- breach past a small max_results if the LIMIT were applied uniformly. The
 -- product rule is "flag but never suppress": an annotation may demote a
 -- breach in the guard's attention, but it must never make the row vanish.
+--
+-- Two cap values, deliberately either side of the breach count (2 breach
+-- rows: Brennan open, Haddad noted):
+--   cap=1 is SMALLER than the breach count, so if the two breach rows
+--   were not exempt from the cap at all, at most one of them could survive
+--   — this is the only value that actually exercises the exemption clause.
+--   A cap of 2 or more can't distinguish "exempted" from "coincidentally
+--   fit inside the cap anyway", since both breach rows would rank 1 and 2
+--   within their own partition regardless.
+--   cap=2 proves the cap still does real work on the less-critical rows
+--   once the exempt ones are accounted for.
+select count(*) filter (where id = :'adult_id') as brennan_present,
+       count(*) filter (where id = :'other_id') as haddad_present,
+       count(*) as total_returned
+from public.attention_list(1) \gset cap1_
+
+select pg_temp.expect('attention_list(1): the open breach (Brennan) is never dropped by a cap smaller than the breach count',
+  (:'cap1_brennan_present')::integer, 1);
+select pg_temp.expect('attention_list(1): the annotated breach (Haddad) is never dropped by a cap smaller than the breach count',
+  (:'cap1_haddad_present')::integer, 1);
+select pg_temp.expect('attention_list(1): both breaches plus exactly 1 never-seen row (the cap) get through',
+  (:'cap1_total_returned')::integer, 3);
+
 select count(*) filter (where id = :'adult_id') as brennan_present,
        count(*) filter (where id = :'other_id') as haddad_present,
        count(*) as total_returned
