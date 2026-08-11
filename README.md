@@ -7,18 +7,24 @@ and it is deliberately the first thing in the file.
 
 | | |
 |---|---|
-| **Hosting** | ⚠️ **UNCONFIRMED — check your dashboard and fix this line** |
-| **Database + auth** | Supabase (Postgres), EU region |
-| **Live URL** | _fill in_ |
-| **Host dashboard** | _fill in_ |
-| **Supabase project** | _fill in_ |
+| **Hosting** | **Not deployed yet.** Configs for Render and Vercel are both ready |
+| **Database + auth** | Supabase (Postgres) — project not yet created; pick an **EU region** |
+| **Live URL** | — |
+| **Host dashboard** | — |
+| **Supabase project** | — |
 
-Configs for **both** Render (`render.yaml`) and Vercel (`vercel.json`) are
-committed, so either works. The original brief for this project said Vercel; a
-later note said Render. Nobody has actually checked, so this file does not
-pretend to know — open whichever dashboard has the deployment, write the answer
-above, and delete the config you are not using. Two configs is a reasonable
-hedge while it's unclear; it is clutter once it isn't.
+Nothing here is live. This repo went from empty to complete in one sitting, and
+no deployment has been made. Fill the table in when it is.
+
+If you have another app already running on Render, it is not this one — that
+confusion cost an afternoon once already. This project's Render service would be
+named `hut-check-in` (see `render.yaml`) and serves `/index.html` and
+`/checkin.html`. It has no `/login` route: login is a section inside the gate
+app, so a static host would 404 on that path.
+
+Both `render.yaml` and `vercel.json` are committed and `./check.sh` fails if
+their security headers drift apart. Once you pick a host, delete the config you
+are not using — two is a hedge while it's undecided, clutter afterwards.
 
 Both host configs are committed and `./check.sh` fails if their security headers
 drift apart, because whichever host you are *not* on ignores its config in

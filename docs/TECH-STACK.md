@@ -62,7 +62,7 @@ Realistic steady state: **~$45/mo**, or ~$25/mo with Option 2's hosting.
 
 ---
 
-## Option 2 — Supabase + Render *(likely, but unconfirmed — see README)*
+## Option 2 — Supabase + Render *(recommended; nothing is deployed yet)*
 
 | | |
 |---|---|
