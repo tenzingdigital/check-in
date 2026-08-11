@@ -20,203 +20,7 @@
   is gated on an authenticated session. See supabase/schema.sql.
 -->
 
-<style>
-  :root {
-    --bg:        #0e1116;
-    --surface:   #161b23;
-    --surface-2: #1e2530;
-    --line:      #2b3441;
-    --text:      #e8edf4;
-    --muted:     #8d9bb0;
-    --accent:    #4c8dff;
-    --ok:        #35c88a;
-    --warn:      #f0b429;
-    --bad:       #f2604e;
-    --exempt:    #7b8798;
-    --radius:    14px;
-  }
-
-  * { box-sizing: border-box; }
-
-  html, body {
-    margin: 0;
-    min-height: 100%;
-    background: var(--bg);
-    color: var(--text);
-    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    -webkit-text-size-adjust: 100%;
-  }
-
-  body { padding-bottom: env(safe-area-inset-bottom); }
-
-  button, input, select { font: inherit; color: inherit; }
-  button { cursor: pointer; }
-  [hidden] { display: none !important; }
-
-  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
-
-  /* ---- header ---- */
-  header {
-    position: sticky; top: 0; z-index: 20;
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--line);
-  }
-  .bar {
-    max-width: 760px; margin: 0 auto; padding: 12px 16px;
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  }
-  .brand { font-weight: 650; letter-spacing: -0.01em; margin-right: auto; }
-  .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
-  .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
-
-  .stats {
-    max-width: 760px; margin: 0 auto; padding: 0 16px 12px;
-    display: flex; gap: 8px; flex-wrap: wrap;
-  }
-  .stat {
-    flex: 1 1 0; min-width: 84px;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: 10px; padding: 8px 10px;
-  }
-  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.15; }
-  .stat span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-  .stat.bad  b { color: var(--bad); }
-  .stat.warn b { color: var(--warn); }
-  .stat.ok   b { color: var(--ok); }
-
-  /* ---- tabs ---- */
-  nav.tabs {
-    display: flex; gap: 6px; margin: 16px 0;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: 12px; padding: 5px;
-  }
-  nav.tabs button {
-    flex: 1; padding: 11px 8px; border: 0; border-radius: 8px;
-    background: transparent; color: var(--muted); font-weight: 550;
-  }
-  nav.tabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); }
-  nav.tabs .pip {
-    display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 5px;
-    border-radius: 999px; background: var(--bad); color: #fff;
-    font-size: 12px; font-weight: 700; vertical-align: 1px;
-  }
-
-  /* ---- inputs ---- */
-  .field {
-    width: 100%; padding: 15px 16px;
-    background: var(--surface); color: var(--text);
-    border: 1px solid var(--line); border-radius: 12px;
-  }
-  .field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
-  input[type="search"]::-webkit-search-cancel-button { filter: invert(.6); }
-
-  /* ---- resident cards ---- */
-  .list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
-
-  .card {
-    width: 100%; text-align: left;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 14px 16px;
-    display: flex; align-items: center; gap: 12px;
-  }
-  button.card:hover { border-color: #3b4757; }
-  button.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-  /* The three lines are spans in the markup, so they need explicit block
-     display — otherwise the name, the metadata and the compliance badge all
-     reflow into one run of text. */
-  .card .who  { flex: 1; min-width: 0; display: block; }
-  .card .name { display: block; font-size: 17px; font-weight: 600; }
-  .card .meta { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
-
-  .pill {
-    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-    padding: 4px 9px; border-radius: 999px; white-space: nowrap;
-    border: 1px solid transparent;
-  }
-  .pill.in   { background: color-mix(in srgb, var(--ok) 18%, transparent);   color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
-  .pill.out  { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
-
-  .badge { font-size: 12px; font-weight: 600; }
-  .badge.ok       { color: var(--ok); }
-  .badge.due_soon { color: var(--warn); }
-  .badge.overdue  { color: var(--bad); }
-  .badge.never    { color: var(--bad); }
-  .badge.exempt   { color: var(--exempt); }
-
-  .card.overdue, .card.never { border-left: 4px solid var(--bad); }
-  .card.due_soon { border-left: 4px solid var(--warn); }
-
-  /* ---- detail panel ---- */
-  .detail {
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 18px; margin-top: 14px;
-  }
-  .detail h2 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
-  .detail .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
-  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
-  .fact { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
-  .fact span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-  .fact b { font-weight: 600; font-size: 15px; }
-
-  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .btn {
-    padding: 20px 16px; border-radius: 12px; border: 1px solid var(--line);
-    background: var(--surface-2); color: var(--text);
-    font-size: 17px; font-weight: 650; letter-spacing: -0.01em;
-  }
-  .btn:disabled { opacity: .5; cursor: not-allowed; }
-  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .btn.primary-in  { background: var(--ok);  color: #06231a; border-color: transparent; }
-  .btn.primary-out { background: var(--warn); color: #2b1d00; border-color: transparent; }
-  .btn.wide { grid-column: 1 / -1; }
-  .btn.ghost { background: transparent; color: var(--muted); padding: 13px; font-size: 15px; font-weight: 500; }
-
-  /* ---- log ---- */
-  .logrow {
-    display: flex; align-items: baseline; gap: 12px;
-    padding: 11px 14px; background: var(--surface);
-    border: 1px solid var(--line); border-radius: 10px;
-  }
-  .logrow time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 46px; }
-  .logrow .dir { font-size: 11px; font-weight: 700; letter-spacing: .06em; min-width: 34px; }
-  .logrow .dir.in  { color: var(--ok); }
-  .logrow .dir.out { color: var(--muted); }
-  .logrow .body { flex: 1; min-width: 0; }
-  .logrow .by { display: block; font-size: 12px; color: var(--muted); }
-
-  .row { display: flex; gap: 10px; align-items: center; }
-  .empty { text-align: center; color: var(--muted); padding: 36px 16px; }
-  .hint { color: var(--muted); font-size: 13px; }
-
-  /* ---- login ---- */
-  .login { max-width: 380px; margin: 12vh auto; padding: 0 20px; }
-  .login h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
-  .login p  { color: var(--muted); margin: 0 0 22px; font-size: 14px; }
-  .login .field { margin-bottom: 10px; }
-  .login .btn { width: 100%; background: var(--accent); color: #041025; border-color: transparent; }
-
-  .alert {
-    background: color-mix(in srgb, var(--bad) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
-    color: #ffd9d3; border-radius: 10px; padding: 11px 13px; font-size: 14px; margin-bottom: 12px;
-  }
-
-  /* ---- toast ---- */
-  #toast {
-    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120%);
-    background: var(--surface-2); border: 1px solid var(--line);
-    padding: 13px 18px; border-radius: 12px; font-weight: 600;
-    box-shadow: 0 10px 34px rgb(0 0 0 / .5);
-    transition: transform .22s ease; z-index: 60; max-width: calc(100vw - 32px);
-  }
-  #toast.show { transform: translateX(-50%) translateY(0); }
-  #toast.ok  { border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
-  #toast.err { border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
-
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
-</style>
+<link rel="stylesheet" href="/app-common.css">
 </head>
 <body>
 
@@ -295,6 +99,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"
         integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE"
         crossorigin="anonymous"></script>
+<script src="/app-common.js"></script>
 
 <script>
 "use strict";
@@ -307,18 +112,7 @@ const CONFIG = {
   key: window.CHECKIN_SUPABASE_ANON_KEY || "YOUR-PUBLISHABLE-ANON-KEY",
 };
 
-const $ = (id) => document.getElementById(id);
-
-if (!window.supabase) {
-  document.body.innerHTML =
-    '<div class="login"><h1>Offline</h1><p>The Supabase client could not be loaded. ' +
-    'Check the hut’s internet connection and reload.</p></div>';
-  throw new Error("supabase-js failed to load");
-}
-
-const sb = window.supabase.createClient(CONFIG.url, CONFIG.key, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-});
+const sb = createHutClient(CONFIG);
 
 /* ========================================================================
    State
@@ -337,42 +131,7 @@ const state = {
 /* ========================================================================
    Helpers
    ====================================================================== */
-
-// Resident and guard names are entered by staff, so treat them as untrusted
-// when building markup.
-function esc(v) {
-  return String(v ?? "").replace(/[&<>"']/g, (c) => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-  ));
-}
-
-function toast(msg, kind = "ok") {
-  const el = $("toast");
-  el.textContent = msg;
-  el.className = "show " + kind;
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.className = ""; }, 3200);
-}
-
-function showError(msg) {
-  const el = $("appError");
-  el.textContent = msg;
-  el.hidden = !msg;
-}
-
-// "3h 12m ago" — guards read this at a glance, absolute times go in the log.
-// Hours are kept all the way to 72 rather than rolling over at 24: against a
-// 24-hour rule, "30h ago" is the number that matters and "1 day ago" hides it.
-function ago(iso) {
-  if (!iso) return "never";
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1)  return "just now";
-  if (mins < 60) return mins + "m ago";
-  const h = Math.floor(mins / 60), m = mins % 60;
-  if (h < 72) return m ? `${h}h ${m}m ago` : `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d} days ago`;
-}
+// $, esc(), toast(), showError(), ago() come from app-common.js.
 
 function until(iso) {
   if (!iso) return "";
@@ -651,29 +410,7 @@ function showLogin(message) {
    Wiring
    ====================================================================== */
 
-$("loginForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const btn = $("loginBtn");
-  btn.disabled = true;
-  btn.textContent = "Logging in…";
-  $("loginError").hidden = true;
-
-  const { error } = await sb.auth.signInWithPassword({
-    email: $("email").value.trim(),
-    password: $("password").value,
-  });
-
-  btn.disabled = false;
-  btn.textContent = "Log in";
-
-  if (error) {
-    $("loginError").textContent = error.message;
-    $("loginError").hidden = false;
-    return;
-  }
-  $("password").value = "";
-  enterApp();
-});
+mountLogin({ onReady: enterApp });
 
 $("logoutBtn").addEventListener("click", async () => {
   await sb.auth.signOut();

@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<title>Hut Check-In — Daily Register</title>
+
+<!--
+  Hut Check-In — Daily Register. Single-file front end, no build step.
+  Shares its CSS/JS layer with index.html (the gate app) via app-common.css
+  and app-common.js — see those files rather than duplicating them here.
+
+  Configuration: set the two values in the CONFIG block below, or define
+  window.CHECKIN_SUPABASE_URL / window.CHECKIN_SUPABASE_ANON_KEY before this
+  script runs (e.g. from a small config.js you keep out of git).
+
+  The anon key is a public value — it identifies the project, it does not grant
+  access. Every table is behind row-level security and every read a guard makes
+  is gated on an authenticated session. See supabase/schema.sql.
+-->
+
+<link rel="stylesheet" href="/app-common.css">
+<style>
+  /* ---- compliance state badges (this page only — index.html has its own
+     24h-rule badge palette in app-common.css under .badge.<compliance>) ---- */
+  .badge.seen_today    { color: var(--ok); }
+  .badge.expected      { color: var(--muted); }
+  .badge.due_today     { color: var(--warn); }
+  .badge.exempt        { color: var(--exempt); }
+  .badge.breach_open   { color: var(--bad); }
+  .badge.breach_noted  { color: var(--bad); }
+  .badge.never         { color: var(--bad); }
+  .badge.not_required  { color: var(--muted); }
+
+  .card.breach_open, .card.never    { border-left: 4px solid var(--bad); }
+  .card.breach_noted                { border-left: 4px solid var(--bad); }
+  .card.due_today                   { border-left: 4px solid var(--warn); }
+
+  /* Demoted, never hidden: an annotated breach still needs a border and a
+     badge, just not the guard's full attention. */
+  .card.noted { opacity: .6; }
+
+  /* ---- 30-day strip ---- */
+  .stripTitle { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
+  .strip { line-height: 0; }
+  .cell { display: inline-block; width: 10px; height: 18px; margin: 1px; border-radius: 2px; }
+  .cell.ok  { background: var(--ok); }
+  .cell.miss { background: var(--bad); cursor: pointer; }
+  .cell.na  { background: var(--surface-2); }
+  .cell.miss:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+</style>
+</head>
+<body>
+
+<!-- ========================= LOGIN ========================= -->
+<section id="login" class="login" hidden>
+  <h1>Hut Check-In</h1>
+  <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
+  <div id="loginError" class="alert" hidden></div>
+  <form id="loginForm" autocomplete="on">
+    <input id="email" class="field" type="email" placeholder="Email" autocomplete="username" required>
+    <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button id="loginBtn" class="btn" type="submit">Log in</button>
+  </form>
+</section>
+
+<!-- ========================= APP ========================= -->
+<div id="app" hidden>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <span id="siteName">Security Hut</span>
+        <small id="guardName">&nbsp;</small>
+      </div>
+      <span class="clock" id="clock"></span>
+      <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
+    </div>
+    <div class="stats">
+      <div class="stat bad">  <b id="statNotSeen">–</b><span>Not seen today</span></div>
+      <div class="stat bad">  <b id="statOpenBreach">–</b><span>Open breaches</span></div>
+      <div class="stat ok">   <b id="statCheckins">–</b><span>Check-ins today</span></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="appError" class="alert" hidden></div>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tabCheckin"   aria-selected="true"  aria-controls="panelCheckin">Check in</button>
+      <button role="tab" id="tabAttention" aria-selected="false" aria-controls="panelAttention">Attention<span class="pip" id="attentionPip" hidden>0</span></button>
+    </nav>
+
+    <!-- ---- check in ---- -->
+    <section id="panelCheckin" role="tabpanel" aria-labelledby="tabCheckin">
+      <input id="q" class="field" type="search" placeholder="Search resident by name or room…"
+             autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before recording a check-in.</p>
+      <div id="searchResults" class="list"></div>
+    </section>
+
+    <!-- ---- attention ---- -->
+    <section id="panelAttention" role="tabpanel" aria-labelledby="tabAttention" hidden>
+      <div class="row">
+        <p class="hint" style="flex:1;margin:0">Open and noted breaches, plus residents never seen or due today. Annotated breaches stay listed, dimmed.</p>
+        <button class="btn ghost" id="refreshAttention">Refresh</button>
+      </div>
+      <div id="attentionList" class="list"></div>
+    </section>
+
+    <!-- ---- resident detail (shared by both tabs) ---- -->
+    <div id="detail" class="detail" hidden></div>
+  </main>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"
+        integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE"
+        crossorigin="anonymous"></script>
+<script src="/app-common.js"></script>
+
+<script>
+"use strict";
+
+/* ========================================================================
+   Configuration
+   ====================================================================== */
+const CONFIG = {
+  url: window.CHECKIN_SUPABASE_URL  || "https://YOUR-PROJECT.supabase.co",
+  key: window.CHECKIN_SUPABASE_ANON_KEY || "YOUR-PUBLISHABLE-ANON-KEY",
+};
+
+const sb = createHutClient(CONFIG);
+
+/* ========================================================================
+   State
+   ====================================================================== */
+const state = {
+  profile:   null,   // { full_name, role }
+  settings:  null,   // app_settings row
+  selected:  null,   // resident row shown in the detail panel
+  tab:       "checkin",
+  busy:      false,
+  attention: [],      // last attention_list() result, for the header stats and pip
+  // Every row we have rendered, by id. Tapping a card reads from here rather
+  // than making a second round trip.
+  rows:      new Map(),
+};
+
+/* ========================================================================
+   Helpers
+   ====================================================================== */
+// $, esc(), toast(), ago() come from app-common.js. showError() too — this
+// page reuses its default element id ("appError"), same as index.html.
+
+const STATE_LABEL = {
+  seen_today:   "Seen today",
+  expected:     "Expected",
+  due_today:    "Due today",
+  exempt:       "Exempt (under 18)",
+  breach_open:  "BREACH",
+  breach_noted: "Breach (noted)",
+  never:        "Never checked in",
+  not_required: "Not required",
+};
+
+function stateLabel(s) {
+  return STATE_LABEL[s] || s;
+}
+
+// last_seen_on only ever counts CLOSED days (see v_resident_compliance) — a
+// resident who checked in an hour ago has seen_today=true but last_seen_on
+// still null, because today hasn't closed yet. seen_today is the only safe
+// source for "have they presented today"; last_seen_on is history, not today.
+function lastSeenText(r) {
+  if (r.seen_today) return "Today";
+  if (r.last_seen_on) return formatDate(r.last_seen_on);
+  return "Never";
+}
+
+function formatDate(yyyy_mm_dd) {
+  const d = new Date(yyyy_mm_dd + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return yyyy_mm_dd;
+  return d.toLocaleDateString([], { day: "2-digit", month: "short" });
+}
+
+/* ========================================================================
+   Rendering
+   ====================================================================== */
+
+function residentCard(r) {
+  const cls = ["card", esc(r.state)];
+  if (r.state === "breach_noted") cls.push("noted");
+
+  const bits = [];
+  if (r.room_ref) bits.push(esc(r.room_ref));
+  bits.push(`age ${r.age_years}`);
+  bits.push(`last seen ${esc(lastSeenText(r))}`);
+
+  return `
+    <button class="${cls.join(" ")}" data-id="${esc(r.id)}" type="button">
+      <span class="who">
+        <span class="name">${esc(r.full_name)}</span>
+        <span class="meta">${bits.join(" · ")}</span>
+        <span class="meta badge ${esc(r.state)}">${esc(stateLabel(r.state))}</span>
+      </span>
+      <span class="pill ${r.seen_today ? "in" : "out"}">${r.seen_today ? "Seen today" : "Not yet"}</span>
+    </button>`;
+}
+
+function renderList(container, rows, emptyMsg) {
+  (rows || []).forEach((r) => state.rows.set(r.id, r));
+  if (!rows || rows.length === 0) {
+    container.innerHTML = `<p class="empty">${esc(emptyMsg)}</p>`;
+    return;
+  }
+  // No cap assumed here: attention_list() deliberately returns every open or
+  // noted breach uncapped, so this list can be long on a site with a large
+  // backlog. It just renders in the ordinary scrolling flow — nothing here
+  // slices it down or gives it a fixed clipped height.
+  container.innerHTML = rows.map((r) => residentCard(r)).join("");
+}
+
+function renderDetail(r) {
+  state.selected = r;
+  if (r) state.rows.set(r.id, r);
+  const el = $("detail");
+  if (!r) { el.hidden = true; el.innerHTML = ""; return; }
+
+  el.innerHTML = `
+    <h2>${esc(r.full_name)}</h2>
+    <div class="sub">${r.room_ref ? esc(r.room_ref) + " · " : ""}age ${r.age_years}</div>
+
+    <div class="facts">
+      <div class="fact"><span>Status</span><b class="badge ${esc(r.state)}">${esc(stateLabel(r.state))}</b></div>
+      <div class="fact"><span>Today</span><b>${r.seen_today ? `Seen (${r.checkins_today}×)` : "Not yet"}</b></div>
+      <div class="fact"><span>Last seen</span><b>${esc(lastSeenText(r))}</b></div>
+      <div class="fact"><span>Consecutive missed</span><b>${r.consecutive_missed || 0}</b></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary-in wide" id="doCheckin" type="button">Record check-in</button>
+      <button class="btn ghost wide" id="closeDetail" type="button">Close</button>
+    </div>
+
+    <div class="stripTitle">Last 30 days</div>
+    <div id="strip" class="strip"><span class="hint">Loading…</span></div>`;
+  el.hidden = false;
+
+  $("doCheckin").onclick = () => checkin(r.id);
+  $("closeDetail").onclick = () => renderDetail(null);
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  loadStrip(r.id).then((html) => {
+    if (!state.selected || state.selected.id !== r.id) return; // a newer selection already won
+    const stripEl = $("strip");
+    if (!stripEl) return;
+    stripEl.innerHTML = html || '<span class="hint">No history yet.</span>';
+    wireStripClicks(r.id);
+  });
+}
+
+/* ========================================================================
+   Data access
+   ====================================================================== */
+
+// Header stats: "Not seen today" and "Open breaches" come from
+// attention_list() (it is the one source guaranteed never to drop a breach
+// under a cap); "Check-ins today" comes straight from v_resident_compliance,
+// since residents who already satisfied today's requirement are excluded
+// from attention_list() entirely.
+async function refreshSummary() {
+  const [{ data: attn, error: aErr }, { count: seenToday }] = await Promise.all([
+    sb.rpc("attention_list", { max_results: 200 }),
+    sb.from("v_resident_compliance")
+      .select("id", { count: "exact", head: true })
+      .eq("seen_today", true),
+  ]);
+
+  if (!aErr) {
+    state.attention = attn || [];
+    const notSeen    = state.attention.filter((r) => r.required_today && !r.seen_today).length;
+    const openBreach = state.attention.filter((r) => r.open_breaches > 0).length;
+    $("statNotSeen").textContent    = notSeen;
+    $("statOpenBreach").textContent = openBreach;
+  }
+  $("statCheckins").textContent = seenToday ?? "–";
+
+  const pip = $("attentionPip");
+  pip.textContent = state.attention.length;
+  pip.hidden = state.attention.length === 0;
+}
+
+let searchToken = 0;
+async function runSearch(q) {
+  const token = ++searchToken;
+  const box = $("searchResults");
+
+  if (!q || q.trim().length < 2) {
+    box.innerHTML = "";
+    return;
+  }
+
+  const { data: residents, error } = await sb.rpc("search_residents", {
+    q: q.trim(), include_departed: false, max_results: 20,
+  });
+  if (token !== searchToken) return;       // a newer keystroke already won
+  if (error) { showError("Search failed: " + error.message); return; }
+
+  // search_residents() returns v_resident_status rows — typo-tolerant, but
+  // without the compliance state a guard needs on the card. Fetch the
+  // matching v_resident_compliance rows in one follow-up query and merge, so
+  // search stays cheap while the badge stays accurate.
+  const ids = (residents || []).map((r) => r.id);
+  const compliance = new Map();
+  if (ids.length) {
+    const { data: comp } = await sb
+      .from("v_resident_compliance")
+      .select("id, state, required_today, seen_today, checkins_today, open_breaches, noted_breaches, consecutive_missed, last_seen_on")
+      .in("id", ids);
+    (comp || []).forEach((c) => compliance.set(c.id, c));
+  }
+  if (token !== searchToken) return;
+
+  showError("");
+  const rows = (residents || []).map((r) => ({ ...r, ...(compliance.get(r.id) || {}) }));
+  renderList(box, rows, `No resident matching “${q.trim()}”.`);
+}
+
+async function checkin(residentId) {
+  if (state.busy) return;
+  state.busy = true;
+  const { data, error } = await sb.rpc("record_checkin", {
+    p_resident_id: residentId, p_note: null,
+  });
+  state.busy = false;
+  if (error) { toast("Not recorded: " + error.message, "err"); return; }
+  const row = Array.isArray(data) ? data[0] : data;
+  toast(`Check-in recorded — ${row.checkin_count > 1 ? "already seen today" : "day satisfied"}`, "ok");
+  refreshSummary();
+  if ($("q").value.trim().length >= 2) runSearch($("q").value);
+  if (state.tab === "attention") loadAttention();
+  if (state.selected && state.selected.id === residentId) refreshResident(residentId);
+}
+
+async function loadAttention() {
+  const { data, error } = await sb.rpc("attention_list", { max_results: 200 });
+  if (error) { showError("Could not load the attention list: " + error.message); return; }
+  showError("");
+  state.attention = data || [];
+  const pip = $("attentionPip");
+  pip.textContent = state.attention.length;
+  pip.hidden = state.attention.length === 0;
+  renderList($("attentionList"), data, "Nobody is outstanding.");
+}
+
+async function loadStrip(residentId) {
+  const from = new Date(Date.now() - 29 * 86400e3).toISOString().slice(0, 10);
+  const { data } = await sb.from("daily_compliance")
+    .select("compliance_date, required, presented")
+    .eq("resident_id", residentId).gte("compliance_date", from)
+    .order("compliance_date", { ascending: true });
+  return (data || []).map(d =>
+    `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(d.compliance_date)}"></i>`
+  ).join("");
+}
+
+// Only cells with class "miss" ever get a click handler — a day the resident
+// presented ("ok") or that wasn't required ("na") is never offered for
+// annotation. This also cannot show up for the day in progress: close-out
+// never writes a negative row for today, so today has no daily_compliance
+// row — and no cell — until the resident actually checks in.
+function wireStripClicks(residentId) {
+  document.querySelectorAll("#strip .cell.miss").forEach((cell) => {
+    cell.addEventListener("click", () => annotateCell(residentId, cell.dataset.date));
+  });
+}
+
+async function annotateCell(residentId, dateStr) {
+  const note = prompt(`Note for the missed check-in on ${dateStr}:`);
+  if (note === null) return;               // cancelled
+  const trimmed = note.trim();
+  if (!trimmed) { toast("Note cannot be empty — nothing saved", "err"); return; }
+
+  const { error } = await sb.rpc("annotate_compliance_day", {
+    p_resident_id: residentId, p_date: dateStr, p_note: trimmed,
+  });
+  if (error) { toast("Could not save note: " + error.message, "err"); return; }
+
+  toast("Note saved", "ok");
+  // An annotation can move a resident from breach_open to breach_noted —
+  // demoted, never hidden — so refresh its badge and, if visible, the
+  // Attention list and header stats.
+  await refreshResident(residentId);
+  if (state.tab === "attention") loadAttention();
+  refreshSummary();
+}
+
+// Re-reads one resident's compliance row and, if it is still the one shown
+// in the detail panel, re-renders the panel (and reloads the strip) with it.
+async function refreshResident(residentId) {
+  const { data, error } = await sb
+    .from("v_resident_compliance")
+    .select("id, full_name, room_ref, age_years, required_today, seen_today, checkins_today, open_breaches, noted_breaches, consecutive_missed, last_seen_on, state")
+    .eq("id", residentId)
+    .maybeSingle();
+  if (error || !data) return;
+  if (state.selected && state.selected.id === residentId) renderDetail(data);
+}
+
+/* ========================================================================
+   Tabs
+   ====================================================================== */
+function selectTab(name) {
+  state.tab = name;
+  for (const t of ["checkin", "attention"]) {
+    const cap = t[0].toUpperCase() + t.slice(1);
+    $("tab" + cap).setAttribute("aria-selected", String(t === name));
+    $("panel" + cap).hidden = t !== name;
+  }
+  renderDetail(null);
+  if (name === "checkin")   $("q").focus();
+  if (name === "attention") loadAttention();
+}
+
+/* ========================================================================
+   Session
+   ====================================================================== */
+
+async function enterApp() {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return showLogin();
+
+  const [{ data: profile, error: pErr }, { data: settings }] = await Promise.all([
+    sb.from("profiles").select("full_name, role, active").eq("id", user.id).maybeSingle(),
+    sb.from("app_settings").select("*").maybeSingle(),
+  ]);
+
+  if (pErr || !profile || !profile.active) {
+    await sb.auth.signOut();
+    return showLogin("This account has no active guard profile. Ask an administrator to enable it.");
+  }
+
+  state.profile = profile;
+  state.settings = settings;
+
+  $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
+  if (settings?.site_name) $("siteName").textContent = settings.site_name;
+
+  $("login").hidden = true;
+  $("app").hidden = false;
+
+  selectTab("checkin");
+  refreshSummary();
+}
+
+function showLogin(message) {
+  state.profile = null;
+  $("app").hidden = true;
+  $("login").hidden = false;
+  $("loginError").hidden = !message;
+  if (message) $("loginError").textContent = message;
+  $("email").focus();
+}
+
+/* ========================================================================
+   Wiring
+   ====================================================================== */
+
+mountLogin({ onReady: enterApp });
+
+$("logoutBtn").addEventListener("click", async () => {
+  await sb.auth.signOut();
+  $("q").value = "";
+  $("searchResults").innerHTML = "";
+  renderDetail(null);
+  showLogin();
+});
+
+let searchTimer;
+$("q").addEventListener("input", (e) => {
+  clearTimeout(searchTimer);
+  const v = e.target.value;
+  searchTimer = setTimeout(() => runSearch(v), 220);
+});
+
+// Enter opens the top result — one-handed operation at the window.
+$("q").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const first = $("searchResults").querySelector("button.card");
+  if (first) first.click();
+});
+
+// Card clicks are delegated so re-rendering never orphans a listener.
+document.addEventListener("click", (e) => {
+  const card = e.target.closest("button.card");
+  if (!card) return;
+  const row = state.rows.get(card.dataset.id);
+  if (!row) return;
+  renderDetail(row);
+});
+
+$("tabCheckin").addEventListener("click",   () => selectTab("checkin"));
+$("tabAttention").addEventListener("click", () => selectTab("attention"));
+$("refreshAttention").addEventListener("click", loadAttention);
+
+// Clock in the header, plus a periodic summary refresh so a terminal left open
+// overnight does not show a stale attention count.
+setInterval(() => {
+  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}, 1000);
+setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
+setInterval(() => { if (state.profile && state.tab === "attention") loadAttention(); }, 120000);
+
+sb.auth.onAuthStateChange((event) => {
+  if (event === "SIGNED_OUT") showLogin();
+});
+
+// Boot.
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await enterApp(); else showLogin();
+})();
+</script>
+</body>
+</html>
