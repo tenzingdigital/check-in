@@ -20,7 +20,8 @@ index.html             the gate app — Search and Log
 checkin.html            the check-in app — Check in and Attention
 app-common.css          styles shared by both front ends
 app-common.js           Supabase client setup and helpers shared by both
-vercel.json             static hosting config and security headers
+vercel.json             static hosting config and security headers (Vercel)
+render.yaml             static hosting config and security headers (Render)
 supabase/schema.sql     tables, views, RPCs, row-level security, GDPR functions
 supabase/seed.sql       optional demo data (test projects only)
 supabase/tests/         throwaway-Postgres acceptance suite (authorisation + compliance)
@@ -232,21 +233,32 @@ gitignored) that sets `window.CHECKIN_SUPABASE_URL` before either app runs.
 
 ### 7. Deploy
 
+There is no build step on any host — four static files served as-is. Configs
+for two hosts are committed; use whichever you are on.
+
+**Render** (`render.yaml`) — dashboard → New → Blueprint → point at this repo.
+Or New → Static Site with publish directory `.` and an empty build command.
+
+**Vercel** (`vercel.json`):
+
 ```bash
 npx vercel --prod
 ```
 
-No build step. `vercel.json` sets the framework to `null` and serves the
-directory as static files.
+`render.yaml` and `vercel.json` carry the **same security headers**. If you edit
+one, edit the other — those headers are what stop the resident register being
+framed, MIME-sniffed, or leaked through a referrer. Anything else static
+(Cloudflare Pages, Netlify, S3) works too; port the header set.
 
 Two things to check before this is genuinely live:
 
-- **Vercel's Hobby plan is non-commercial.** A security contractor running this
-  for a client needs a paid plan. `docs/TECH-STACK.md` compares hosts that allow
-  commercial use for free.
+- **Check your plan allows commercial use.** Render's free static sites do.
+  Vercel's Hobby plan does **not** — a security contractor running this for a
+  client is commercial and needs a paid plan. See `docs/TECH-STACK.md`.
 - **Restrict who can reach it.** Add the deployment's domain to Supabase's
-  allowed redirect URLs, and consider Vercel's deployment protection or an
-  IP allowlist so the login page is not simply on the open internet.
+  allowed redirect URLs, and put the login page behind something — Render
+  supports password protection and IP allowlists, Vercel has deployment
+  protection — so it is not simply open on the internet.
 
 ---
 

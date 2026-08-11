@@ -1,0 +1,52 @@
+# Render blueprint — static site.
+#
+# Both front ends are plain static files with no build step, so there is nothing
+# to compile: Render serves the repo root directly.
+#
+# This mirrors vercel.json's security headers. Keep the two in sync if you edit
+# either; whichever host you use, the headers are what stop the resident
+# register being framed, sniffed, or leaked via referrer.
+#
+# Deploy: Render dashboard → New → Blueprint → point at this repo.
+# Or: New → Static Site, publish directory ".", build command left empty.
+
+services:
+  - type: web
+    runtime: static          # older Render docs call this `env: static`
+    name: hut-check-in
+    # No build step. Serve the repository root as-is.
+    buildCommand: ""
+    staticPublishPath: .
+    # Guards reach the two apps directly; there is no client-side router, so
+    # no rewrite rules are needed. /index.html is the gate app, /checkin.html
+    # is the daily register.
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Permissions-Policy
+        value: "camera=(), microphone=(), geolocation=(), interest-cohort=(), browsing-topics=()"
+      - path: /*
+        name: Strict-Transport-Security
+        value: "max-age=31536000; includeSubDomains"
+      - path: /*
+        name: X-Robots-Tag
+        value: "noindex, nofollow"
+      # The two apps must never be served stale — a guard reloading after a
+      # deploy needs the new code, not a cached page.
+      - path: /index.html
+        name: Cache-Control
+        value: "public, max-age=0, must-revalidate"
+      - path: /checkin.html
+        name: Cache-Control
+        value: "public, max-age=0, must-revalidate"

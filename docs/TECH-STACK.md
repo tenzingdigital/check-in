@@ -62,9 +62,29 @@ Realistic steady state: **~$45/mo**, or ~$25/mo with Option 2's hosting.
 
 ---
 
-## Option 2 — Supabase + Cloudflare Pages *(recommended tweak)*
+## Option 2 — Supabase + Render *(what this project uses)*
 
-Identical to Option 1 with the static files served by Cloudflare Pages instead.
+| | |
+|---|---|
+| Cost | ~$25/mo (Supabase Pro only) |
+| Commercial use on the free tier | **Yes** — unlike Vercel Hobby |
+| EU-hosted | Yes — Frankfurt region available |
+| Migration effort | Already done — `render.yaml` is committed |
+
+Render's free static sites permit commercial use, which is the trap that makes
+Vercel's Hobby plan unusable for a security contractor running this for a
+client. `render.yaml` carries the same security headers as `vercel.json`; keep
+the two in sync.
+
+Nothing about the app is Render-specific — it is four static files with no build
+step, so this is a hosting choice you can reverse in an afternoon if Render
+stops suiting you.
+
+---
+
+## Option 2b — Supabase + Cloudflare Pages
+
+Identical to Option 2 with the static files served by Cloudflare Pages instead.
 
 | | |
 |---|---|
@@ -145,12 +165,13 @@ None of these beat Option 2 on either axis. Listed because they come up.
 | Option | ~Monthly | EU-hosted | EU-owned | Migration from here |
 |---|---|---|---|---|
 | 1. Supabase + Vercel | $45 | Yes | No | — (built) |
-| **2. Supabase + Cloudflare** | **$25** | **Yes** | **No** | **Minutes** |
+| **2. Supabase + Render** | **$25** | **Yes** | **No** | **— (in use)** |
+| 2b. Supabase + Cloudflare | $25 | Yes | No | Minutes |
 | 3. Self-hosted Supabase, Hetzner | €5–15 | Yes | Yes | Low — schema runs as-is |
 | 4. PocketBase, EU VPS | €4 | Yes | Yes | High — full rewrite |
 | 5. Neon / Nhost / Appwrite | $0–25 | Yes | No | Medium to high |
 
-**Recommendation: build on Option 1, switch hosting to Option 2 before go-live.**
+**Recommendation: Option 2 (Supabase + Render), which is what this project uses.**
 It is the cheapest option that keeps the database model, keeps ops burden at
 zero, and drops a processor. Keep Option 3 as the escape hatch if EU ownership
 becomes a requirement.
