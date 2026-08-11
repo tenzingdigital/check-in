@@ -695,11 +695,19 @@ begin
   if not found then
     raise exception 'Resident not found' using errcode = 'P0002';
   end if;
-  if v_res.status <> 'active' then
-    raise exception 'Resident is not active and cannot check in' using errcode = '23514';
-  end if;
 
   v_day := (v_now at time zone v_tz)::date;
+
+  -- Must agree with compliance_required(), which treats p_day <= departed_on
+  -- as still required (and close_out_compliance_days() writes a row for that
+  -- day, filtering on departed_on >= v_day). A departed resident's final day
+  -- is therefore a day they must still be able to satisfy here — otherwise it
+  -- becomes an unclearable statutory breach, since no role can UPDATE
+  -- daily_compliance and annotate_compliance_day() cannot flip an outcome.
+  if v_res.status <> 'active'
+     and (v_res.departed_on is null or v_day > v_res.departed_on) then
+    raise exception 'Resident is not active and cannot check in' using errcode = '23514';
+  end if;
 
   -- Touchscreens double-fire. A repeat inside 60 seconds is one presentation.
   -- Scoped to the site-local day: a check-in at 23:59:30 followed by one at

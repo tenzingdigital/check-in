@@ -339,3 +339,15 @@ can disagree about what day it is.
 - **Offline queueing.** A hut with flaky wifi would benefit, but it means
   holding resident names in `localStorage` on a shared terminal. If you add it,
   encrypt the queue and clear it on logout.
+
+**Backdated departures.** `required` is written once per day by close-out and
+nothing recomputes it. If a supervisor learns on Friday that a resident left
+on Monday, the rows already written for Tue–Thu stay on the register as
+breaches. Set `departed_on` before the next nightly close-out. Correcting
+earlier days needs an admin database correction — the system deliberately has
+no self-service path that can flip a recorded outcome.
+
+**Data import.** `close_out_compliance_days()` resumes from the latest closed
+day globally, not per resident, so importing a resident with a backdated
+`registered_at` silently skips every day of theirs before that point. Import
+residents before their history matters, or backfill deliberately.

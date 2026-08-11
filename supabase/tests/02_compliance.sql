@@ -349,6 +349,53 @@ begin
 end $$;
 
 \echo ''
+\echo '=========== RECORD_CHECKIN AND A DEPARTED RESIDENT''S FINAL DAY ==========='
+-- compliance_required() treats p_day <= departed_on as still required, and
+-- close_out_compliance_days() writes a daily_compliance row for that day
+-- (its filter is departed_on >= v_day). record_checkin() must therefore still
+-- accept a check-in on that final day, or it becomes an unclearable
+-- statutory breach: no role holds UPDATE on daily_compliance, and
+-- annotate_compliance_day() deliberately cannot flip an outcome.
+reset role;
+insert into public.residents (first_name, last_name, date_of_birth, status, departed_on)
+values ('Fiona', 'Leaving', '1980-01-01', 'departed', public.site_today());
+select id as leaving_id from public.residents where last_name='Leaving' \gset
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- a resident departed as of TODAY can still check in today (the bug)'
+select presented, compliance_date = public.site_today() as dated_today
+from public.record_checkin(:'leaving_id') \gset leave_today_
+
+select pg_temp.expect('departed today: check-in succeeds', (:'leave_today_presented')::boolean, true);
+select pg_temp.expect('departed today: dated today', (:'leave_today_dated_today')::boolean, true);
+
+reset role;
+update public.residents set departed_on = public.site_today() - 1 where id = :'leaving_id';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- the same resident, a day after their departure, cannot check in'
+select pg_temp.try('departed-yesterday resident attempts a check-in today',
+                   'select public.record_checkin(' || quote_literal(:'leaving_id') || ')') as leave_after_result \gset
+
+select pg_temp.expect('departed after their day: blocked',
+  (:'leave_after_result' like '%blocked%'), true);
+
+reset role;
+\echo '--- an active resident is unaffected by the departed-resident branch'
+select id as active_probe_id from public.residents where last_name='Brennan' \gset
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select presented from public.record_checkin(:'active_probe_id') \gset active_probe_
+
+select pg_temp.expect('active resident: check-in still succeeds', (:'active_probe_presented')::boolean, true);
+
+reset role;
+delete from public.residents where id = :'leaving_id';
+
+\echo ''
 \echo '=========== CLOSE-OUT AND BACKFILL ==========='
 reset role;
 delete from public.daily_compliance;

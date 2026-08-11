@@ -24,8 +24,11 @@
 
 <link rel="stylesheet" href="/app-common.css">
 <style>
-  /* ---- compliance state badges (this page only — index.html has its own
-     24h-rule badge palette in app-common.css under .badge.<compliance>) ---- */
+  /* ---- compliance state badges (this page only — index.html's compliance
+     UI was removed, so it no longer uses badge colors at all; the
+     .badge.<state> rules still in app-common.css are orphaned leftovers from
+     that removed UI, not something this page shares. The states here are the
+     current daily-register set, defined only on this page) ---- */
   .badge.seen_today    { color: var(--ok); }
   .badge.expected      { color: var(--muted); }
   .badge.due_today     { color: var(--warn); }
@@ -81,7 +84,7 @@
     <div class="stats">
       <div class="stat bad">  <b id="statNotSeen">–</b><span>Not seen today</span></div>
       <div class="stat bad">  <b id="statOpenBreach">–</b><span>Open breaches</span></div>
-      <div class="stat ok">   <b id="statCheckins">–</b><span>Check-ins today</span></div>
+      <div class="stat ok">   <b id="statCheckins">–</b><span>Seen today</span></div>
     </div>
   </header>
 
@@ -267,26 +270,32 @@ function renderDetail(r) {
    Data access
    ====================================================================== */
 
-// Header stats: "Not seen today" and "Open breaches" come from
-// attention_list() (it is the one source guaranteed never to drop a breach
-// under a cap); "Check-ins today" comes straight from v_resident_compliance,
-// since residents who already satisfied today's requirement are excluded
-// from attention_list() entirely.
+// Header stats: "Open breaches" comes from attention_list() (it is the one
+// source guaranteed never to drop a breach under a cap). "Not seen today" and
+// "Seen today" are queried straight from v_resident_compliance instead of
+// being derived from attention_list() — attention_list() only ever admits
+// states breach_open | breach_noted | never | due_today, so a resident who is
+// required today but not yet past due_soon_after_hour sits in "expected" and
+// would silently fall out of a count derived from that list, understating how
+// many residents are actually still outstanding.
 async function refreshSummary() {
-  const [{ data: attn, error: aErr }, { count: seenToday }] = await Promise.all([
+  const [{ data: attn, error: aErr }, { count: seenToday }, { count: notSeen }] = await Promise.all([
     sb.rpc("attention_list", { max_results: 200 }),
     sb.from("v_resident_compliance")
       .select("id", { count: "exact", head: true })
       .eq("seen_today", true),
+    sb.from("v_resident_compliance")
+      .select("id", { count: "exact", head: true })
+      .eq("required_today", true)
+      .eq("seen_today", false),
   ]);
 
   if (!aErr) {
     state.attention = attn || [];
-    const notSeen    = state.attention.filter((r) => r.required_today && !r.seen_today).length;
     const openBreach = state.attention.filter((r) => r.open_breaches > 0).length;
-    $("statNotSeen").textContent    = notSeen;
     $("statOpenBreach").textContent = openBreach;
   }
+  $("statNotSeen").textContent  = notSeen ?? "–";
   $("statCheckins").textContent = seenToday ?? "–";
 
   const pip = $("attentionPip");
