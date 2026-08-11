@@ -1,5 +1,29 @@
 # Hut Check-In
 
+## Where this runs
+
+Keep this block current. It is the answer to "what is this deployed on again?",
+and it is deliberately the first thing in the file.
+
+| | |
+|---|---|
+| **Hosting** | Render — static site, config in `render.yaml` |
+| **Database + auth** | Supabase (Postgres), EU region |
+| **Live URL** | _fill in_ |
+| **Render dashboard** | _fill in_ |
+| **Supabase project** | _fill in_ |
+| **Also supported** | Vercel (`vercel.json`), kept in sync — see below |
+
+Both host configs are committed and `./check.sh` fails if their security headers
+drift apart, because whichever host you are *not* on ignores its config in
+silence: a mistake there ships the resident register with no clickjacking or
+MIME-sniffing protection and nothing in the app looks wrong.
+
+Run `./check.sh` before every deploy. It checks the host configs agree, both
+front ends parse, and the database suite passes.
+
+---
+
 Two front ends, one Supabase backend, one resident register.
 
 **`index.html` — the gate app.** Who is on site right now. A guard logs in,
@@ -20,8 +44,10 @@ index.html             the gate app — Search and Log
 checkin.html            the check-in app — Check in and Attention
 app-common.css          styles shared by both front ends
 app-common.js           Supabase client setup and helpers shared by both
-vercel.json             static hosting config and security headers (Vercel)
-render.yaml             static hosting config and security headers (Render)
+render.yaml             static hosting config and security headers (Render — in use)
+vercel.json             the same headers for Vercel; check.sh fails if they drift
+check.sh                one command: host configs + front ends + database suite
+scripts/                check-deploy-headers.py — the host-config parity check
 supabase/schema.sql     tables, views, RPCs, row-level security, GDPR functions
 supabase/seed.sql       optional demo data (test projects only)
 supabase/tests/         throwaway-Postgres acceptance suite (authorisation + compliance)
