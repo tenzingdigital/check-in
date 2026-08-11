@@ -632,3 +632,58 @@ select pg_temp.expect('hut_summary: on_site is a non-negative count',
 select pg_temp.expect('hut_summary: events_today is a non-negative count',
   (:'hut_events_today')::integer >= 0, true);
 reset role;
+
+\echo ''
+\echo '=========== RETENTION AND GDPR ==========='
+reset role;
+select id as adult_id from public.residents where last_name='Brennan' \gset
+
+-- One old check-in event and one old register row, both beyond the event window.
+insert into public.checkin_events (resident_id, guard_id, occurred_at)
+values (:'adult_id', '11111111-1111-1111-1111-111111111111', now() - interval '200 days');
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
+values (:'adult_id', public.site_today() - 200, true, true, now() - interval '200 days', 1, now())
+on conflict do nothing;
+
+\echo '--- the movement log is purged at 90 days'
+select public.purge_expired_checkin_events() as events_purged \gset
+select count(*) as old_events_left from public.checkin_events
+ where occurred_at < now() - interval '100 days' \gset
+
+select pg_temp.expect('purge_expired_checkin_events: no check-in events older than 100 days remain',
+  (:'old_events_left')::integer, 0);
+
+\echo '--- but the register survives: this is the defect the spec fixes'
+select count(*) as old_register_rows_kept from public.daily_compliance
+ where compliance_date = public.site_today() - 200 \gset
+
+select pg_temp.expect('the 200-day-old register row survives the event purge',
+  (:'old_register_rows_kept')::integer, 1);
+
+\echo '--- the register is purged at its own, longer horizon'
+update public.app_settings set compliance_retention_days = 30;
+select public.purge_expired_compliance() as register_rows_purged \gset
+select count(*) as old_register_rows_left from public.daily_compliance
+ where compliance_date < public.site_today() - 30 \gset
+update public.app_settings set compliance_retention_days = 2555;
+
+select pg_temp.expect('purge_expired_compliance: no register rows older than the (temporarily lowered) horizon remain',
+  (:'old_register_rows_left')::integer, 0);
+
+\echo '--- export includes the register; erasure removes it'
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.export_resident_record(:'adult_id') ? 'daily_compliance' as export_has_register \gset
+select public.erase_resident(:'adult_id', 'test') is not null as erased \gset
+reset role;
+select count(*) as register_rows_after_erasure from public.daily_compliance where resident_id = :'adult_id' \gset
+select count(*) as annotations_after_erasure  from public.compliance_annotations where resident_id = :'adult_id' \gset
+
+select pg_temp.expect('export_resident_record includes a daily_compliance key',
+  (:'export_has_register')::boolean, true);
+select pg_temp.expect('erase_resident returns a non-null result',
+  (:'erased')::boolean, true);
+select pg_temp.expect('erase_resident cascades: no register rows remain for the erased resident',
+  (:'register_rows_after_erasure')::integer, 0);
+select pg_temp.expect('erase_resident cascades: no annotations remain for the erased resident',
+  (:'annotations_after_erasure')::integer, 0);

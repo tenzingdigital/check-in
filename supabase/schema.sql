@@ -312,9 +312,6 @@ create index if not exists checkin_events_resident_time_idx
 create index if not exists checkin_events_time_idx
   on public.checkin_events (occurred_at desc);
 
--- The permanent register. Outlives checkin_events: the granular event log is
--- purged at 90 days for data minimisation, these rows are kept for the
--- statutory proof horizon.
 create table if not exists public.daily_compliance (
   resident_id     uuid not null references public.residents (id) on delete cascade,
   compliance_date date not null,
@@ -338,6 +335,15 @@ create index if not exists daily_compliance_breach_idx
 create index if not exists daily_compliance_open_idx
   on public.daily_compliance (compliance_date)
   where closed_at is null;
+
+comment on table public.daily_compliance is
+  'The permanent daily register. Outlives checkin_events: the granular event log
+   is purged at event_retention_days, these rows at the much longer
+   compliance_retention_days. "Permanent" is relative to those purges only — an
+   Art. 17 erasure cascades from residents and removes the register too, which
+   is deliberate. If a statutory duty ever requires proof to survive an erasure
+   request, that is an Art. 17(3)(b) refusal decision made by a human, not
+   something this schema should quietly enforce.';
 
 -- Append-only. A separate table rather than columns on daily_compliance so that
 -- adding context later never overwrites what someone wrote before, and so that
@@ -958,6 +964,32 @@ begin
       from public.gate_events e
       join public.profiles g on g.id = e.guard_id
       where e.resident_id = r.id
+    ), '[]'::jsonb),
+    'checkin_events', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'occurred_at', c.occurred_at,
+               'note', c.note,
+               'recorded_by', g.full_name
+             ) order by c.occurred_at)
+      from public.checkin_events c
+      join public.profiles g on g.id = c.guard_id
+      where c.resident_id = r.id
+    ), '[]'::jsonb),
+    'daily_compliance', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'date', dc.compliance_date,
+               'required', dc.required,
+               'presented', dc.presented,
+               'checkins', dc.checkin_count,
+               'annotations', coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                          'note', a.note, 'at', a.created_at, 'by', p.full_name) order by a.created_at)
+                 from public.compliance_annotations a
+                 join public.profiles p on p.id = a.author_id
+                 where a.resident_id = dc.resident_id and a.compliance_date = dc.compliance_date
+               ), '[]'::jsonb)
+             ) order by dc.compliance_date)
+      from public.daily_compliance dc where dc.resident_id = r.id
     ), '[]'::jsonb)
   )
   into v_out
@@ -982,8 +1014,9 @@ security invoker
 set search_path = public, extensions   -- digest() comes from pgcrypto
 as $$
 declare
-  v_events  integer;
-  v_digest  text;
+  v_events   integer;
+  v_register integer;
+  v_digest   text;
 begin
   if not public.is_admin() then
     raise exception 'Only an admin may erase a resident' using errcode = '42501';
@@ -996,14 +1029,24 @@ begin
   select count(*)::integer into v_events
   from public.gate_events where resident_id = p_resident_id;
 
+  select count(*)::integer into v_register
+  from public.daily_compliance where resident_id = p_resident_id;
+
   v_digest := encode(digest(p_resident_id::text, 'sha256'), 'hex');
 
-  delete from public.residents where id = p_resident_id;  -- cascades to events
+  -- Cascades to gate_events, checkin_events, daily_compliance, and (via
+  -- daily_compliance) compliance_annotations.
+  delete from public.residents where id = p_resident_id;
 
   insert into public.erasure_log (resident_digest, events_removed, reason, performed_by)
   values (v_digest, v_events, nullif(btrim(p_reason), ''), auth.uid());
 
-  return jsonb_build_object('erased', true, 'events_removed', v_events, 'digest', v_digest);
+  return jsonb_build_object(
+    'erased', true,
+    'events_removed', v_events,
+    'register_rows_removed', v_register,
+    'digest', v_digest
+  );
 end;
 $$;
 
@@ -1028,6 +1071,43 @@ $$;
 
 comment on function public.purge_expired_gate_events is
   'Deletes gate events older than app_settings.event_retention_days. Schedule daily with pg_cron.';
+
+
+create or replace function public.purge_expired_checkin_events()
+returns integer
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare v_days integer; v_deleted integer;
+begin
+  select event_retention_days into v_days from public.app_settings where id;
+  delete from public.checkin_events where occurred_at < now() - make_interval(days => v_days);
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
+comment on function public.purge_expired_checkin_events is
+  'Deletes check-in events older than app_settings.event_retention_days. Schedule daily with pg_cron.';
+
+-- The register outlives the events it was derived from. Deleting these rows
+-- destroys the only proof of daily reporting, so this window is separate from
+-- and much longer than event_retention_days.
+create or replace function public.purge_expired_compliance()
+returns integer
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare v_days integer; v_deleted integer;
+begin
+  select compliance_retention_days into v_days from public.app_settings where id;
+  delete from public.daily_compliance
+   where compliance_date < (public.site_today() - v_days);
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
+comment on function public.purge_expired_compliance is
+  'Deletes daily_compliance rows older than app_settings.compliance_retention_days. Schedule daily with pg_cron.';
 
 
 -- ---------------------------------------------------------------------------
@@ -1117,6 +1197,8 @@ revoke all on function public.hut_summary()                              from an
 revoke all on function public.export_resident_record(uuid)               from anon, public;
 revoke all on function public.erase_resident(uuid, text)                 from anon, public;
 revoke all on function public.purge_expired_gate_events()                from anon, public;
+revoke all on function public.purge_expired_checkin_events()             from anon, public;
+revoke all on function public.purge_expired_compliance()                 from anon, public;
 revoke all on function public.site_today()                               from anon, public;
 revoke all on function public.compliance_required(date, date, date, date, integer) from anon, public;
 revoke all on function public.record_checkin(uuid, text)                 from anon, public;
@@ -1158,6 +1240,11 @@ commit;
 --     $$ select public.close_out_compliance_days(); $$
 --   );
 --
+--   select cron.schedule('purge-expired-checkin-events', '20 3 * * *',
+--     $$ select public.purge_expired_checkin_events(); $$);
+--   select cron.schedule('purge-expired-compliance', '25 3 * * *',
+--     $$ select public.purge_expired_compliance(); $$);
+--
 -- If the site timezone is far from UTC, move the close-out schedule so it
 -- runs after local midnight. Running it early only defers rows to the next
 -- run — it never writes a wrong day, because v_through is clamped to
@@ -1166,3 +1253,5 @@ commit;
 -- To confirm:   select * from cron.job;
 -- To remove:    select cron.unschedule('purge-expired-gate-events');
 --               select cron.unschedule('close-out-compliance-days');
+--               select cron.unschedule('purge-expired-checkin-events');
+--               select cron.unschedule('purge-expired-compliance');
