@@ -25,14 +25,14 @@ python3 scripts/check-deploy-headers.py || fail=1
 step "Front ends parse"
 node -e "
 const fs=require('fs'),vm=require('vm');
-for (const f of ['index.html','checkin.html']) {
+for (const f of ['public/index.html','public/checkin.html']) {
   const h=fs.readFileSync(f,'utf8');
   [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
     .forEach((m,i)=>new vm.Script(m[1],{filename:f+':'+i}));
 }
-new vm.Script(fs.readFileSync('app-common.js','utf8'));
+new vm.Script(fs.readFileSync('public/app-common.js','utf8'));
 JSON.parse(fs.readFileSync('vercel.json','utf8'));
-console.log('index.html, checkin.html, app-common.js parse; vercel.json valid');
+console.log('public/index.html, public/checkin.html, public/app-common.js parse; vercel.json valid');
 " || fail=1
 
 step "Database suite"

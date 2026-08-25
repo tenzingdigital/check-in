@@ -16,7 +16,10 @@ services:
     name: hut-check-in
     # No build step. Serve the repository root as-is.
     buildCommand: ""
-    staticPublishPath: .
+    # Publish ONLY the front end. Publishing the repo root would serve
+    # docs/KNOWN-ISSUES.md — a map of every known weakness — plus the
+    # schema and RLS policies, at predictable public URLs.
+    staticPublishPath: ./public
     # Guards reach the two apps directly; there is no client-side router, so
     # no rewrite rules are needed. /index.html is the gate app, /checkin.html
     # is the daily register.

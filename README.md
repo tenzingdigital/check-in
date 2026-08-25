@@ -7,32 +7,30 @@ and it is deliberately the first thing in the file.
 
 | | |
 |---|---|
-| **Hosting** | **Vercel** — config in `vercel.json` |
+| **Hosting** | **Render** — static site, config in `render.yaml`, Frankfurt |
 | **Database + auth** | Supabase (Postgres) — use an **EU region** |
 | **Live URL** | _fill in_ |
-| **Vercel project** | _fill in_ |
-| **Supabase project** | _fill in_ |
+| **Render service** | _fill in_ (workspace: My Workspace, region **Frankfurt**) |
+| **Supabase project** | _fill in_ — use an EU region |
 
-> **Check the Vercel plan.** Hobby prohibits commercial use. If this runs for a
-> client — or for anyone paying for the site it guards — it needs Pro
-> (~$20/user/mo), or a host whose free tier permits commercial use. This is a
-> licensing problem, not a technical one: nothing breaks, you are simply in
-> breach of terms. `render.yaml` is committed and kept header-identical for
-> exactly that reason, so switching is a dashboard change rather than a rewrite.
+Render was chosen over Vercel for two reasons. Its free static sites permit
+commercial use, where Vercel's Hobby plan does not — and this workspace already
+runs paid services in Frankfurt, so the hut apps add nothing to the bill and sit
+in the same EU region as everything else.
 
-`./check.sh` fails if `vercel.json` and `render.yaml` disagree about security
-headers, so the escape hatch stays usable rather than rotting.
+`vercel.json` stays committed as an escape hatch, and `./check.sh` fails if the
+two configs disagree about security headers — so whichever one you are not using
+cannot quietly rot.
 
-You have other apps on other hosts. If you are ever unsure which is which: this
-project's Vercel deployment serves `/index.html` (gate app) and `/checkin.html`
-(daily register). It has **no `/login` route** — login is a section inside the
-gate app, so a static host 404s on that path. That detail is what finally
-identified a Render URL as a different application.
+**Only `public/` is served.** The repo root is deliberately NOT the publish
+directory: doing that would expose `docs/KNOWN-ISSUES.md` — a list of every
+known weakness in this system — plus the schema and RLS policies, at guessable
+public URLs. Anything you add that must not be public goes outside `public/`.
 
-Both host configs are committed and `./check.sh` fails if their security headers
-drift apart, because whichever host you are *not* on ignores its config in
-silence: a mistake there ships the resident register with no clickjacking or
-MIME-sniffing protection and nothing in the app looks wrong.
+If you are ever unsure which of your deployments this is: it serves
+`/index.html` (gate app) and `/checkin.html` (daily register), and has **no
+`/login` route** — login is a section inside the gate app, so a static host 404s
+on that path.
 
 Run `./check.sh` before every deploy. It checks the host configs agree, both
 front ends parse, and the database suite passes.
@@ -55,10 +53,11 @@ recorded it. Both apps share `app-common.css` and `app-common.js`, loaded as
 plain `<script>`/`<link>` tags — still no build step, no framework.
 
 ```
-index.html             the gate app — Search and Log
-checkin.html            the check-in app — Check in and Attention
-app-common.css          styles shared by both front ends
-app-common.js           Supabase client setup and helpers shared by both
+public/                 the ONLY directory served publicly
+  index.html            the gate app — Search and Log
+  checkin.html          the check-in app — Check in and Attention
+  app-common.css        styles shared by both front ends
+  app-common.js         Supabase client setup and helpers shared by both
 render.yaml             static hosting config and security headers (Render — in use)
 vercel.json             the same headers for Vercel; check.sh fails if they drift
 check.sh                one command: host configs + front ends + database suite
