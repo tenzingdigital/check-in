@@ -329,6 +329,49 @@ for a human to eyeball — that discipline caught five real defects during the
 build that a printed report would likely have let through unnoticed. Keep new
 tests written that way; do not add a test that just prints a result.
 
+---
+
+## Not being locked into Supabase
+
+Supabase supplies exactly one thing this app cannot supply itself:
+**authentication** — proving that whoever is at the keyboard is a particular
+guard. Everything else, all of the authorisation, lives in `schema.sql` as
+row-level security policies and belongs to you.
+
+`supabase/portable-auth.sql` is the replacement for that one thing. Apply it
+to any plain PostgreSQL database (Render, Neon, a box you rent) *before*
+`schema.sql`, and `schema.sql` then applies **completely unchanged** — no
+edited foreign keys, no rewritten policies.
+
+```bash
+./supabase/tests/run.sh --portable
+```
+
+runs the identical suite against it: the same 84 assertions, plus 23 more
+covering `auth.resolve_user()`, the one piece of new logic it introduces.
+`./check.sh` runs both modes, so the exit route is proven to still work rather
+than assumed to.
+
+What the shim does **not** do is authenticate anybody. You bring an external
+provider — Clerk, Logto, Zitadel, Auth0, Keycloak — and a small backend that,
+per request:
+
+1. verifies the provider's token (signature, issuer, audience, expiry),
+2. maps its `sub` claim to a local uuid via `auth.resolve_user()`, once per
+   login,
+3. opens a transaction, runs `SET LOCAL request.jwt.claim.sub = '<uuid>'`, and
+   issues the query **as the `authenticated` role**.
+
+Two of those steps are load-bearing in a way that is easy to get wrong.
+Connecting as the database owner bypasses RLS entirely and silently disables
+every protection in `schema.sql`. And `SET LOCAL` rather than `SET` is what
+stops a pooled connection carrying one guard's identity into the next
+request's query. The file documents both at the point they apply.
+
+Note that this is a bigger job than it looks: you would be taking on a backend
+service that does not exist today, and its correctness is the whole security
+model. `docs/TECH-STACK.md` covers when that trade is worth making.
+
 It reproduces Supabase's **default table grants** to `anon` and `authenticated`
 deliberately. Testing without them would make RLS look effective when a missing
 `GRANT` was really doing the work — and that grant exists on every real

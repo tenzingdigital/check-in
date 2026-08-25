@@ -10,6 +10,13 @@
 #
 #   ./supabase/tests/run.sh
 #
+# With --portable it applies supabase/portable-auth.sql instead of the stub —
+# the file you would really deploy on Render, Neon or any plain PostgreSQL —
+# and runs the identical suite against it. A pass means the security model
+# survives leaving Supabase.
+#
+#   ./supabase/tests/run.sh --portable
+#
 # Requires the postgresql server binaries (Debian/Ubuntu: postgresql-16).
 # Nothing here touches a real Supabase project.
 
@@ -17,6 +24,18 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
+
+AUTH_SQL="$HERE/00_supabase_stub.sql"
+AUTH_LABEL="the Supabase stub (auth.users, auth.uid, role grants)"
+for arg in "$@"; do
+  case "$arg" in
+    --portable)
+      AUTH_SQL="$REPO/supabase/portable-auth.sql"
+      AUTH_LABEL="portable-auth.sql (plain PostgreSQL, no Supabase)"
+      ;;
+    *) echo "usage: run.sh [--portable]" >&2; exit 2 ;;
+  esac
+done
 
 PGBIN="${PGBIN:-$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)}"
 if [[ ! -x "$PGBIN/initdb" ]]; then
@@ -55,8 +74,8 @@ as_pg "'$PGBIN/pg_ctl' -D '$WORK/data' -o '-p $PORT -k $WORK' -l '$WORK/pg.log' 
 export PGHOST="$WORK" PGPORT="$PORT" PGUSER=postgres
 psql -q -c "create database hut;"
 
-echo "==> applying the Supabase stub (auth.users, auth.uid, role grants)"
-psql -q -v ON_ERROR_STOP=1 -d hut -f "$HERE/00_supabase_stub.sql"
+echo "==> applying $AUTH_LABEL"
+psql -q -v ON_ERROR_STOP=1 -d hut -f "$AUTH_SQL"
 
 echo "==> applying schema.sql"
 psql -q -v ON_ERROR_STOP=1 -d hut -f "$REPO/supabase/schema.sql"
@@ -69,6 +88,14 @@ psql -q -v ON_ERROR_STOP=1 \
 echo "==> running compliance suite"
 psql -q -v ON_ERROR_STOP=1 \
      -d hut -f "$HERE/02_compliance.sql" | tee -a "$WORK/out.txt"
+
+# auth.resolve_user() only exists in the portable shim, so this suite only
+# applies there. It is the one piece of new logic on the login path.
+if [[ "$AUTH_SQL" != "$HERE/00_supabase_stub.sql" ]]; then
+  echo "==> running portable auth suite"
+  psql -q -v ON_ERROR_STOP=1 \
+       -d hut -f "$HERE/03_portable_auth.sql" | tee -a "$WORK/out.txt"
+fi
 
 echo
 echo "==> authorisation summary"

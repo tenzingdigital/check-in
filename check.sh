@@ -4,14 +4,20 @@
 #
 #   ./check.sh
 #
-# Three layers, cheapest first, so it fails fast:
+# Four layers, cheapest first, so it fails fast:
 #   1. Deploy configs agree about security headers across both hosts
 #   2. Both front ends and the shared JS parse
 #   3. The database suite — authorisation model and calendar-day compliance
+#   4. The same suite again on plain PostgreSQL, via supabase/portable-auth.sql
 #
-# Layer 3 needs the PostgreSQL server binaries (Debian/Ubuntu: postgresql-16).
-# If they are missing it is skipped with a warning rather than a failure, so
-# the first two layers still give you something on a machine without Postgres.
+# Layer 4 is what keeps the exit route open. The portable shim is not the
+# deployed path today, so nothing else would notice it rotting; by the time it
+# mattered — mid-migration — it would be too late to find out.
+#
+# Layers 3 and 4 need the PostgreSQL server binaries (Debian/Ubuntu:
+# postgresql-16). If they are missing both are skipped with a warning rather
+# than a failure, so the first two layers still give you something on a machine
+# without Postgres.
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -35,18 +41,27 @@ JSON.parse(fs.readFileSync('vercel.json','utf8'));
 console.log('public/index.html, public/checkin.html, public/app-common.js parse; vercel.json valid');
 " || fail=1
 
-step "Database suite"
-if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/null 2>&1; then
-  ./supabase/tests/run.sh >/tmp/hut-check-suite.log 2>&1
+suite() {   # suite <log> [flag...]
+  local log="$1"; shift
+  ./supabase/tests/run.sh "$@" >"$log" 2>&1
   if [ $? -eq 0 ]; then
-    printf 'PASS — %s assertions\n' "$(grep -cE 'NOTICE:.* ok ' /tmp/hut-check-suite.log)"
-    grep -E '^   ALLOWED' /tmp/hut-check-suite.log && { echo "FAIL: privilege escalation"; fail=1; }
+    printf 'PASS — %s assertions\n' "$(grep -cE 'NOTICE:.* ok ' "$log")"
+    grep -E '^   ALLOWED' "$log" && { echo "FAIL: privilege escalation"; fail=1; }
   else
-    echo "FAIL — full output in /tmp/hut-check-suite.log"
-    tail -20 /tmp/hut-check-suite.log
+    echo "FAIL — full output in $log"
+    tail -20 "$log"
     fail=1
   fi
+}
+
+if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/null 2>&1; then
+  step "Database suite (Supabase)"
+  suite /tmp/hut-check-suite.log
+
+  step "Database suite (plain PostgreSQL, via supabase/portable-auth.sql)"
+  suite /tmp/hut-check-portable.log --portable
 else
+  step "Database suite"
   echo "SKIPPED — PostgreSQL server binaries not found (install postgresql-16)"
 fi
 
