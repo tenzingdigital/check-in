@@ -1,55 +1,116 @@
-# Render blueprint — static site.
+# Render blueprint — the whole system.
 #
-# Both front ends are plain static files with no build step, so there is nothing
-# to compile: Render serves the repo root directly.
+#   Render dashboard → New → Blueprint → point at this repo.
 #
-# This mirrors vercel.json's security headers. Keep the two in sync if you edit
-# either; whichever host you use, the headers are what stop the resident
-# register being framed, sniffed, or leaked via referrer.
+# Three resources, all in Frankfurt so the resident data stays in the EU:
 #
-# Deploy: Render dashboard → New → Blueprint → point at this repo.
-# Or: New → Static Site, publish directory ".", build command left empty.
+#   hut-db          Postgres. The register.
+#   hut-check-in    Node web service. Serves public/ and /api.
+#   hut-nightly     Cron job. The four maintenance functions pg_cron used to
+#                   run inside Supabase.
+#
+# Nothing else is needed: there is no separate static site, because the web
+# service serves the two front ends itself. That is deliberate — same origin
+# means a first-party session cookie and no CORS, and one service is one bill,
+# one deploy and one log to read.
+#
+# ---------------------------------------------------------------------------
+# Plans and what they cost
+# ---------------------------------------------------------------------------
+# The plans below are the smallest ones that are honest for a hut in
+# production, roughly $14/month all in. Both can be set to `free` to evaluate,
+# with two consequences you must know about:
+#
+#   - A free Postgres instance is DELETED after 30 days. Not paused — deleted.
+#     For a database that is a statutory audit trail, that is not a tier, it is
+#     a countdown. Never run the real register on it.
+#   - A free web service spins down after 15 minutes of inactivity and takes
+#     the best part of a minute to answer the next request. A guard at 3am
+#     waiting a minute for a login screen will conclude the system is broken.
+#
+# See docs/TECH-STACK.md for the full comparison.
+
+databases:
+  - name: hut-db
+    databaseName: hut
+    user: hut
+    region: frankfurt
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    ipAllowList: []          # private network only; no public connections
 
 services:
+  # -------------------------------------------------------------------------
+  # The app
+  # -------------------------------------------------------------------------
   - type: web
-    runtime: static          # older Render docs call this `env: static`
     name: hut-check-in
-    # No build step. Serve the repository root as-is.
-    buildCommand: ""
-    # Publish ONLY the front end. Publishing the repo root would serve
-    # docs/KNOWN-ISSUES.md — a map of every known weakness — plus the
-    # schema and RLS policies, at predictable public URLs.
-    staticPublishPath: ./public
-    # Guards reach the two apps directly; there is no client-side router, so
-    # no rewrite rules are needed. /index.html is the gate app, /checkin.html
-    # is the daily register.
-    headers:
-      - path: /*
-        name: Content-Security-Policy
-        value: "default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-      - path: /*
-        name: X-Frame-Options
-        value: DENY
-      - path: /*
-        name: Referrer-Policy
-        value: no-referrer
-      - path: /*
-        name: Permissions-Policy
-        value: "camera=(), microphone=(), geolocation=(), interest-cohort=(), browsing-topics=()"
-      - path: /*
-        name: Strict-Transport-Security
-        value: "max-age=31536000; includeSubDomains"
-      - path: /*
-        name: X-Robots-Tag
-        value: "noindex, nofollow"
-      # The two apps must never be served stale — a guard reloading after a
-      # deploy needs the new code, not a cached page.
-      - path: /index.html
-        name: Cache-Control
-        value: "public, max-age=0, must-revalidate"
-      - path: /checkin.html
-        name: Cache-Control
-        value: "public, max-age=0, must-revalidate"
+    runtime: node
+    region: frankfurt
+    plan: starter
+    rootDir: server
+    buildCommand: npm ci --omit=dev
+    startCommand: node index.js
+
+    # Applies db/platform.sql then db/schema.sql before the new version goes
+    # live, so a deploy that adds a column cannot serve traffic against the old
+    # schema. Pre-deploy commands need a paid instance type; on `free` remove
+    # this line and run `node server/migrate.js` by hand after a schema change.
+    preDeployCommand: node migrate.js
+
+    # /healthz runs `select 1` against Postgres rather than just returning 200,
+    # so an instance that has lost the database is taken out of rotation
+    # instead of serving errors to guards.
+    healthCheckPath: /healthz
+
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hut-db
+          property: connectionString
+      - key: NODE_VERSION
+        value: "22"
+      # 12 hours: a shift, not a fortnight. A hut terminal is a shared physical
+      # device, and a session that outlives the shift is one the next person
+      # inherits.
+      - key: HUT_SESSION_HOURS
+        value: "12"
+
+    # Security headers are NOT set here. They live in server/index.js, next to
+    # the Content-Security-Policy hashes they are computed from — the CSP now
+    # lists a SHA-256 for each inline <script> instead of allowing
+    # 'unsafe-inline', and that can only be derived from the files themselves.
+    # Splitting the header set across a host config and the code was how the
+    # old vercel.json / render.yaml pair drifted; there is one copy now, and
+    # check.sh asserts the running server actually sends it.
+
+  # -------------------------------------------------------------------------
+  # Nightly maintenance — what pg_cron used to do
+  # -------------------------------------------------------------------------
+  # Render's managed Postgres has no pg_cron, so the schedule moved out here.
+  #
+  # 00:30 UTC, chosen to fall after local midnight in Europe/Dublin so that
+  # close_out_compliance_days() closes the day that has actually ended. If the
+  # site's timezone is far from UTC, move this. Running early only defers rows
+  # to the next run — it never writes a wrong day — and the function backfills
+  # any day it missed, which is what makes an external scheduler safe here.
+  #
+  # THIS JOB IS NOT OPTIONAL. Without it, daily_compliance only ever gains rows
+  # from record_checkin() — the positive path — so nobody is ever recorded as
+  # having missed a day, and the register silently stops proving compliance.
+  - type: cron
+    name: hut-nightly
+    runtime: node
+    region: frankfurt
+    plan: starter
+    schedule: "30 0 * * *"
+    rootDir: server
+    buildCommand: npm ci --omit=dev
+    startCommand: node jobs.js
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hut-db
+          property: connectionString
+      - key: NODE_VERSION
+        value: "22"

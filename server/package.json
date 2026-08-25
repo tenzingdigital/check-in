@@ -1,0 +1,16 @@
+{
+  "name": "hut-check-in-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Serves the two hut front ends and the API they call. One dependency, no build step.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node index.js",
+    "migrate": "node migrate.js",
+    "jobs": "node jobs.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

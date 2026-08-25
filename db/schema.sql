@@ -1,10 +1,17 @@
 -- ============================================================================
 -- Hut Check-In — database schema
--- Target: Supabase (PostgreSQL 15+)
+-- Target: PostgreSQL 15+ (in use: Render Postgres 16)
 --
--- Run this once in the Supabase SQL editor on a fresh project.
+-- Apply db/platform.sql first — it provides auth.users, auth.uid() and the
+-- anon/authenticated roles that this file depends on. `node server/migrate.js`
+-- does both, in order.
+--
 -- It is written to be re-runnable: every object is created with
 -- "if not exists" / "or replace" and policies are dropped before creation.
+--
+-- This file was written against Supabase and moved to plain Postgres without a
+-- statement changing, which is the property to preserve: no host-specific
+-- features in here, so the security model travels with the schema.
 --
 -- Design notes
 --  * gate_events is an append-only ledger of site entry/exit. It answers
@@ -22,7 +29,8 @@
 
 begin;
 
--- Extensions live in their own schema on Supabase. Creating the schema first
+-- Extensions live in their own schema, a Supabase convention kept because the
+-- search_path settings throughout this file depend on it. Creating it first
 -- and keeping it on the search_path means unqualified calls (digest,
 -- word_similarity, gin_trgm_ops) resolve whether the extension ended up in
 -- "extensions" or in "public" on an older project.
@@ -1229,37 +1237,37 @@ commit;
 
 
 -- ---------------------------------------------------------------------------
--- Scheduled retention purge
+-- Scheduled retention purge and daily close-out
 -- ---------------------------------------------------------------------------
--- Enable the pg_cron extension first: Supabase dashboard → Database →
--- Extensions → pg_cron. Then run the block below once.
+-- These four functions must run once a day. They used to be scheduled with
+-- pg_cron from inside this file; Render's managed Postgres does not offer
+-- pg_cron, so the schedule now lives outside the database:
 --
---   create extension if not exists pg_cron with schema cron;
+--   server/jobs.js          runs all four (plus auth.purge_expired_sessions)
+--   render.yaml             schedules it as the `hut-nightly` cron job, 00:30 UTC
 --
---   select cron.schedule(
---     'purge-expired-gate-events',
---     '15 3 * * *',                        -- 03:15 UTC daily
---     $$ select public.purge_expired_gate_events(); $$
---   );
+-- To run them by hand:
 --
---   select cron.schedule(
---     'close-out-compliance-days',
---     '30 0 * * *',                        -- 00:30 UTC daily, after midnight in Europe/Dublin
---     $$ select public.close_out_compliance_days(); $$
---   );
+--   DATABASE_URL="postgres://…" node server/jobs.js
 --
---   select cron.schedule('purge-expired-checkin-events', '20 3 * * *',
---     $$ select public.purge_expired_checkin_events(); $$);
---   select cron.schedule('purge-expired-compliance', '25 3 * * *',
---     $$ select public.purge_expired_compliance(); $$);
+-- Or individually, from psql:
 --
--- If the site timezone is far from UTC, move the close-out schedule so it
--- runs after local midnight. Running it early only defers rows to the next
--- run — it never writes a wrong day, because v_through is clamped to
--- yesterday in site-local time.
+--   select public.close_out_compliance_days();
+--   select public.purge_expired_gate_events();
+--   select public.purge_expired_checkin_events();
+--   select public.purge_expired_compliance();
 --
--- To confirm:   select * from cron.job;
--- To remove:    select cron.unschedule('purge-expired-gate-events');
---               select cron.unschedule('close-out-compliance-days');
---               select cron.unschedule('purge-expired-checkin-events');
---               select cron.unschedule('purge-expired-compliance');
+-- close_out_compliance_days() is the one that is not optional. Without it,
+-- daily_compliance only ever gains rows from record_checkin() — the positive
+-- path — so nobody is ever recorded as having missed a day.
+--
+-- If the site timezone is far from UTC, move the close-out schedule in
+-- render.yaml so it runs after local midnight. Running it early only defers
+-- rows to the next run — it never writes a wrong day, because v_through is
+-- clamped to yesterday in site-local time, and the function backfills any day
+-- it missed.
+--
+-- If this schema is ever run somewhere that DOES have pg_cron (a self-hosted
+-- Supabase, say), scheduling them in-database is strictly more robust than an
+-- external scheduler that can be deleted by accident — see item 13 in
+-- docs/KNOWN-ISSUES.md.

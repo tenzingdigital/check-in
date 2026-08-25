@@ -48,29 +48,79 @@ function ago(iso) {
 }
 
 /* ========================================================================
-   Supabase client
+   API client
+
+   Everything below used to be supabase-js loaded from a CDN. The app now
+   talks to its own service on the same origin, so the client is a fetch
+   wrapper: there is no key to configure, no token to hold, and no third
+   party in the request path.
+
+   Authentication is a session cookie the browser attaches on its own. That
+   is why nothing here reads or writes a token — the page genuinely cannot
+   see it (HttpOnly), which is the point: an XSS bug can still act as the
+   guard, but it cannot steal a credential and use it from elsewhere.
    ====================================================================== */
 
-// Held here (not sb — a top-level `let`/`const` in one <script> tag shares
-// the same global lexical scope as every other <script> tag in the document,
-// so naming this the same as each page's own `const sb` would throw a
-// SyntaxError as soon as the page's inline script parsed) so mountLogin()
-// below can drive auth against the same client the page created, without
-// every page having to pass it in.
-let _client;
+// Thrown for any non-2xx response so callers can `catch` in one place. The
+// message is whatever the server chose to say — routes.js is careful to send
+// only messages written for a guard to read, never raw database errors.
+class ApiError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
 
-function createHutClient(config) {
-  if (!window.supabase) {
-    document.body.innerHTML =
-      '<div class="login"><h1>Offline</h1><p>The Supabase client could not be loaded. ' +
-      'Check the hut’s internet connection and reload.</p></div>';
-    throw new Error("supabase-js failed to load");
+async function api(path, { method = "GET", body } = {}) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      // Cookies are same-origin here, so "same-origin" (the default) would do.
+      // Stated explicitly because it is the whole authentication mechanism.
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+  } catch {
+    // fetch only rejects on a transport failure: the hut's link is down, or
+    // the service is restarting mid-deploy.
+    throw new ApiError(0, "Cannot reach the server. Check the hut\u2019s internet connection.");
   }
 
-  _client = window.supabase.createClient(config.url, config.key, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-  });
-  return _client;
+  if (res.status === 204) return null;
+
+  let payload = null;
+  try { payload = await res.json(); } catch { /* fall through to status text */ }
+
+  if (!res.ok) {
+    throw new ApiError(res.status, payload?.error || `Request failed (${res.status})`);
+  }
+  return payload;
+}
+
+const apiGet  = (path)        => api(path);
+const apiPost = (path, body)  => api(path, { method: "POST", body });
+const apiDelete = (path)      => api(path, { method: "DELETE" });
+
+// A 401 means the session expired or was revoked (a supervisor disabling the
+// account ends it on the next request). Both pages hand this the function that
+// returns them to the login screen, so an expired session shows the login form
+// rather than a wall of errors.
+let onUnauthenticated = () => {};
+function setUnauthenticatedHandler(fn) { onUnauthenticated = fn; }
+
+// Wraps a data call so that exactly one thing happens on 401, everywhere.
+async function guarded(fn, onError) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err.status === 401) { onUnauthenticated(); return undefined; }
+    if (onError) onError(err);
+    else throw err;
+    return undefined;
+  }
 }
 
 /* ========================================================================
@@ -78,31 +128,33 @@ function createHutClient(config) {
    ====================================================================== */
 
 // Wires the shared #loginForm markup (see the login section duplicated at
-// the top of both pages) against the client created by createHutClient().
-// onReady() is called after a successful sign-in — each page passes its own
-// "enter the app" function.
+// the top of both pages) against the API. onReady() is called after a
+// successful sign-in \u2014 each page passes its own "enter the app" function.
 function mountLogin({ onReady } = {}) {
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = $("loginBtn");
     btn.disabled = true;
-    btn.textContent = "Logging in…";
+    btn.textContent = "Logging in\u2026";
     $("loginError").hidden = true;
 
-    const { error } = await _client.auth.signInWithPassword({
-      email: $("email").value.trim(),
-      password: $("password").value,
-    });
-
-    btn.disabled = false;
-    btn.textContent = "Log in";
-
-    if (error) {
-      $("loginError").textContent = error.message;
+    try {
+      await apiPost("/api/session", {
+        email: $("email").value.trim(),
+        password: $("password").value,
+      });
+      $("password").value = "";
+      if (onReady) onReady();
+    } catch (err) {
+      $("loginError").textContent = err.message;
       $("loginError").hidden = false;
-      return;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Log in";
     }
-    $("password").value = "";
-    if (onReady) onReady();
   });
+}
+
+async function logout() {
+  try { await apiDelete("/api/session"); } catch { /* the cookie is gone either way */ }
 }

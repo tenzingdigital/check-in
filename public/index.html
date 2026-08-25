@@ -9,15 +9,15 @@
 <title>Hut Check-In</title>
 
 <!--
-  Hut Check-In — single-file front end. No build step.
+  Hut Check-In — the gate app. No build step, no framework, no CDN.
 
-  Configuration: set the two values in the CONFIG block below, or define
-  window.CHECKIN_SUPABASE_URL / window.CHECKIN_SUPABASE_ANON_KEY before this
-  script runs (e.g. from a small config.js you keep out of git).
+  There is nothing to configure. The page talks to /api on its own origin,
+  served by the same Render service that served this file, and authenticates
+  with an HttpOnly session cookie it cannot itself read.
 
-  The anon key is a public value — it identifies the project, it does not grant
-  access. Every table is behind row-level security and every read a guard makes
-  is gated on an authenticated session. See supabase/schema.sql.
+  Authorisation still lives in the database, not here: every read a guard makes
+  is gated on `public.is_staff()` inside a view or a SECURITY DEFINER function,
+  under the identity the API binds to the transaction. See db/schema.sql.
 -->
 
 <link rel="stylesheet" href="/app-common.css">
@@ -84,23 +84,10 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"
-        integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE"
-        crossorigin="anonymous"></script>
 <script src="/app-common.js"></script>
 
 <script>
 "use strict";
-
-/* ========================================================================
-   Configuration
-   ====================================================================== */
-const CONFIG = {
-  url: window.CHECKIN_SUPABASE_URL  || "https://YOUR-PROJECT.supabase.co",
-  key: window.CHECKIN_SUPABASE_ANON_KEY || "YOUR-PUBLISHABLE-ANON-KEY",
-};
-
-const sb = createHutClient(CONFIG);
 
 /* ========================================================================
    State
@@ -123,16 +110,6 @@ const state = {
 
 function timeOfDay(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-// Local-day boundaries for the log's date filter. Using the browser's timezone
-// keeps "today" meaning what the guard on shift thinks it means, and handles
-// DST changes for free.
-function dayBounds(yyyy_mm_dd) {
-  const [y, m, d] = yyyy_mm_dd.split("-").map(Number);
-  const start = new Date(y, m - 1, d, 0, 0, 0, 0);
-  const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
-  return { start: start.toISOString(), end: end.toISOString() };
 }
 
 function todayISODate() {
@@ -227,12 +204,13 @@ function renderLog(rows) {
    ====================================================================== */
 
 async function refreshSummary() {
-  const { data, error } = await sb.rpc("hut_summary");
-  if (error) return;                       // header counts are non-critical
-  const s = Array.isArray(data) ? data[0] : data;
-  if (!s) return;
-  $("statOnSite").textContent = s.on_site;
-  $("statToday").textContent  = s.events_today;
+  // Header counts are non-critical: a failure here leaves the previous numbers
+  // on screen rather than interrupting a guard mid-search. A 401 is the one
+  // exception and is handled centrally by guarded().
+  const summary = await guarded(() => apiGet("/api/summary"), () => {});
+  if (!summary) return;
+  $("statOnSite").textContent = summary.on_site;
+  $("statToday").textContent  = summary.events_today;
 }
 
 let searchToken = 0;
@@ -245,14 +223,15 @@ async function runSearch(q) {
     return;
   }
 
-  const { data, error } = await sb.rpc("search_residents", {
-    q: q.trim(), include_departed: false, max_results: 20,
-  });
+  const rows = await guarded(
+    () => apiGet(`/api/residents?q=${encodeURIComponent(q.trim())}&limit=20`),
+    (err) => showError("Search failed: " + err.message),
+  );
   if (token !== searchToken) return;       // a newer keystroke already won
+  if (!rows) return;
 
-  if (error) { showError("Search failed: " + error.message); return; }
   showError("");
-  renderList(box, data, `No resident matching “${q.trim()}”.`);
+  renderList(box, rows, `No resident matching “${q.trim()}”.`);
 }
 
 async function record(residentId, direction) {
@@ -260,36 +239,34 @@ async function record(residentId, direction) {
   state.busy = true;
   document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = true));
 
-  const { data, error } = await sb.rpc("record_check", {
-    p_resident_id: residentId, p_direction: direction, p_note: null,
-  });
+  const row = await guarded(
+    () => apiPost("/api/gate-events", { resident_id: residentId, direction, note: null }),
+    (err) => {
+      toast("Not recorded: " + err.message, "err");
+      document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = false));
+    },
+  );
 
   state.busy = false;
-  if (error) {
-    toast("Not recorded: " + error.message, "err");
-    document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = false));
-    return;
-  }
+  if (!row) return;
 
-  const row = Array.isArray(data) ? data[0] : data;
   toast(`${row.full_name} signed ${direction.toUpperCase()}`, "ok");
   renderDetail(row);
   refreshSummary();
   if ($("q").value.trim().length >= 2) runSearch($("q").value);
 }
 
+// The day window is now computed server-side from app_settings.local_timezone
+// rather than from this terminal's clock, so a machine with a mis-set timezone
+// can no longer shift what "today's log" means. dayBounds() went with it.
 async function loadLog(dateStr) {
-  const { start, end } = dayBounds(dateStr);
-  const { data, error } = await sb
-    .from("v_check_log")
-    .select("*")
-    .gte("occurred_at", start)
-    .lt("occurred_at", end)
-    .order("occurred_at", { ascending: false })
-    .limit(500);
-  if (error) { showError("Could not load the log: " + error.message); return; }
+  const rows = await guarded(
+    () => apiGet(`/api/gate-events?date=${encodeURIComponent(dateStr)}`),
+    (err) => showError("Could not load the log: " + err.message),
+  );
+  if (!rows) return;
   showError("");
-  renderLog(data || []);
+  renderLog(rows);
 }
 
 /* ========================================================================
@@ -310,20 +287,19 @@ function selectTab(name) {
    Session
    ====================================================================== */
 
+// One request answers "is there a session, whose is it, and what is this site
+// called". A deactivated account never gets this far — the API refuses to
+// issue a session for one, and revokes an existing session on the next
+// request — so there is no active-profile check left to do here.
 async function enterApp() {
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return showLogin();
-
-  const [{ data: profile, error: pErr }, { data: settings }] = await Promise.all([
-    sb.from("profiles").select("full_name, role, active").eq("id", user.id).maybeSingle(),
-    sb.from("app_settings").select("*").maybeSingle(),
-  ]);
-
-  if (pErr || !profile || !profile.active) {
-    await sb.auth.signOut();
-    return showLogin("This account has no active guard profile. Ask an administrator to enable it.");
+  let session;
+  try {
+    session = await apiGet("/api/session");
+  } catch (err) {
+    return showLogin(err.status === 401 ? "" : err.message);
   }
 
+  const { profile, settings } = session;
   state.profile = profile;
   state.settings = settings;
 
@@ -355,7 +331,7 @@ function showLogin(message) {
 mountLogin({ onReady: enterApp });
 
 $("logoutBtn").addEventListener("click", async () => {
-  await sb.auth.signOut();
+  await logout();
   $("q").value = "";
   $("searchResults").innerHTML = "";
   renderDetail(null);
@@ -402,15 +378,14 @@ setInterval(() => {
 }, 1000);
 setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
 
-sb.auth.onAuthStateChange((event) => {
-  if (event === "SIGNED_OUT") showLogin();
-});
+// Any request that comes back 401 — an expired session, or a supervisor
+// deactivating the account mid-shift — returns the terminal to the login
+// screen instead of leaving a dead app on display.
+setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
 
-// Boot.
-(async () => {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) await enterApp(); else showLogin();
-})();
+// Boot. enterApp() shows the login form itself if there is no session, so
+// there is no separate "do I have a token" check to make first.
+enterApp();
 </script>
 </body>
 </html>

@@ -13,13 +13,13 @@
   Shares its CSS/JS layer with index.html (the gate app) via app-common.css
   and app-common.js — see those files rather than duplicating them here.
 
-  Configuration: set the two values in the CONFIG block below, or define
-  window.CHECKIN_SUPABASE_URL / window.CHECKIN_SUPABASE_ANON_KEY before this
-  script runs (e.g. from a small config.js you keep out of git).
+  There is nothing to configure. The page talks to /api on its own origin,
+  served by the same Render service that served this file, and authenticates
+  with an HttpOnly session cookie it cannot itself read.
 
-  The anon key is a public value — it identifies the project, it does not grant
-  access. Every table is behind row-level security and every read a guard makes
-  is gated on an authenticated session. See supabase/schema.sql.
+  Authorisation still lives in the database, not here: every read a guard makes
+  is gated on `public.is_staff()` inside a view or a SECURITY DEFINER function,
+  under the identity the API binds to the transaction. See db/schema.sql.
 -->
 
 <link rel="stylesheet" href="/app-common.css">
@@ -120,23 +120,10 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"
-        integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE"
-        crossorigin="anonymous"></script>
 <script src="/app-common.js"></script>
 
 <script>
 "use strict";
-
-/* ========================================================================
-   Configuration
-   ====================================================================== */
-const CONFIG = {
-  url: window.CHECKIN_SUPABASE_URL  || "https://YOUR-PROJECT.supabase.co",
-  key: window.CHECKIN_SUPABASE_ANON_KEY || "YOUR-PUBLISHABLE-ANON-KEY",
-};
-
-const sb = createHutClient(CONFIG);
 
 /* ========================================================================
    State
@@ -279,24 +266,13 @@ function renderDetail(r) {
 // would silently fall out of a count derived from that list, understating how
 // many residents are actually still outstanding.
 async function refreshSummary() {
-  const [{ data: attn, error: aErr }, { count: seenToday }, { count: notSeen }] = await Promise.all([
-    sb.rpc("attention_list", { max_results: 200 }),
-    sb.from("v_resident_compliance")
-      .select("id", { count: "exact", head: true })
-      .eq("seen_today", true),
-    sb.from("v_resident_compliance")
-      .select("id", { count: "exact", head: true })
-      .eq("required_today", true)
-      .eq("seen_today", false),
-  ]);
+  const summary = await guarded(() => apiGet("/api/checkin-summary"), () => {});
+  if (!summary) return;
 
-  if (!aErr) {
-    state.attention = attn || [];
-    const openBreach = state.attention.filter((r) => r.open_breaches > 0).length;
-    $("statOpenBreach").textContent = openBreach;
-  }
-  $("statNotSeen").textContent  = notSeen ?? "–";
-  $("statCheckins").textContent = seenToday ?? "–";
+  state.attention = summary.attention || [];
+  $("statOpenBreach").textContent = state.attention.filter((r) => r.open_breaches > 0).length;
+  $("statNotSeen").textContent  = summary.not_seen ?? "–";
+  $("statCheckins").textContent = summary.seen_today ?? "–";
 
   const pip = $("attentionPip");
   pip.textContent = state.attention.length;
@@ -313,41 +289,31 @@ async function runSearch(q) {
     return;
   }
 
-  const { data: residents, error } = await sb.rpc("search_residents", {
-    q: q.trim(), include_departed: false, max_results: 20,
-  });
-  if (token !== searchToken) return;       // a newer keystroke already won
-  if (error) { showError("Search failed: " + error.message); return; }
-
   // search_residents() returns v_resident_status rows — typo-tolerant, but
-  // without the compliance state a guard needs on the card. Fetch the
-  // matching v_resident_compliance rows in one follow-up query and merge, so
-  // search stays cheap while the badge stays accurate.
-  const ids = (residents || []).map((r) => r.id);
-  const compliance = new Map();
-  if (ids.length) {
-    const { data: comp } = await sb
-      .from("v_resident_compliance")
-      .select("id, state, required_today, seen_today, checkins_today, open_breaches, noted_breaches, consecutive_missed, last_seen_on")
-      .in("id", ids);
-    (comp || []).forEach((c) => compliance.set(c.id, c));
-  }
-  if (token !== searchToken) return;
+  // without the compliance state a guard needs on the card. `compliance=1`
+  // has the server merge the matching v_resident_compliance rows in the same
+  // transaction, so the badge is accurate and consistent with the names, in
+  // one round trip instead of the two this used to take.
+  const rows = await guarded(
+    () => apiGet(`/api/residents?q=${encodeURIComponent(q.trim())}&limit=20&compliance=1`),
+    (err) => showError("Search failed: " + err.message),
+  );
+  if (token !== searchToken) return;       // a newer keystroke already won
+  if (!rows) return;
 
   showError("");
-  const rows = (residents || []).map((r) => ({ ...r, ...(compliance.get(r.id) || {}) }));
   renderList(box, rows, `No resident matching “${q.trim()}”.`);
 }
 
 async function checkin(residentId) {
   if (state.busy) return;
   state.busy = true;
-  const { data, error } = await sb.rpc("record_checkin", {
-    p_resident_id: residentId, p_note: null,
-  });
+  const row = await guarded(
+    () => apiPost("/api/checkins", { resident_id: residentId, note: null }),
+    (err) => toast("Not recorded: " + err.message, "err"),
+  );
   state.busy = false;
-  if (error) { toast("Not recorded: " + error.message, "err"); return; }
-  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return;
   toast(`Check-in recorded — ${row.checkin_count > 1 ? "already seen today" : "day satisfied"}`, "ok");
   refreshSummary();
   if ($("q").value.trim().length >= 2) runSearch($("q").value);
@@ -356,22 +322,23 @@ async function checkin(residentId) {
 }
 
 async function loadAttention() {
-  const { data, error } = await sb.rpc("attention_list", { max_results: 200 });
-  if (error) { showError("Could not load the attention list: " + error.message); return; }
+  const data = await guarded(
+    () => apiGet("/api/attention"),
+    (err) => showError("Could not load the attention list: " + err.message),
+  );
+  if (!data) return;
   showError("");
-  state.attention = data || [];
+  state.attention = data;
   const pip = $("attentionPip");
   pip.textContent = state.attention.length;
   pip.hidden = state.attention.length === 0;
   renderList($("attentionList"), data, "Nobody is outstanding.");
 }
 
+// The 30-day window is anchored to public.site_today() on the server rather
+// than to this terminal's clock, so the strip lines up with the register.
 async function loadStrip(residentId) {
-  const from = new Date(Date.now() - 29 * 86400e3).toISOString().slice(0, 10);
-  const { data } = await sb.from("daily_compliance")
-    .select("compliance_date, required, presented")
-    .eq("resident_id", residentId).gte("compliance_date", from)
-    .order("compliance_date", { ascending: true });
+  const data = await guarded(() => apiGet(`/api/residents/${residentId}/days`), () => {});
   return (data || []).map(d =>
     `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(d.compliance_date)}"></i>`
   ).join("");
@@ -394,10 +361,11 @@ async function annotateCell(residentId, dateStr) {
   const trimmed = note.trim();
   if (!trimmed) { toast("Note cannot be empty — nothing saved", "err"); return; }
 
-  const { error } = await sb.rpc("annotate_compliance_day", {
-    p_resident_id: residentId, p_date: dateStr, p_note: trimmed,
-  });
-  if (error) { toast("Could not save note: " + error.message, "err"); return; }
+  const saved = await guarded(
+    () => apiPost("/api/compliance-annotations", { resident_id: residentId, date: dateStr, note: trimmed }),
+    (err) => toast("Could not save note: " + err.message, "err"),
+  );
+  if (!saved) return;
 
   toast("Note saved", "ok");
   // An annotation can move a resident from breach_open to breach_noted —
@@ -411,12 +379,8 @@ async function annotateCell(residentId, dateStr) {
 // Re-reads one resident's compliance row and, if it is still the one shown
 // in the detail panel, re-renders the panel (and reloads the strip) with it.
 async function refreshResident(residentId) {
-  const { data, error } = await sb
-    .from("v_resident_compliance")
-    .select("id, full_name, room_ref, age_years, required_today, seen_today, checkins_today, open_breaches, noted_breaches, consecutive_missed, last_seen_on, state")
-    .eq("id", residentId)
-    .maybeSingle();
-  if (error || !data) return;
+  const data = await guarded(() => apiGet(`/api/residents/${residentId}/compliance`), () => {});
+  if (!data) return;
   if (state.selected && state.selected.id === residentId) renderDetail(data);
 }
 
@@ -439,20 +403,19 @@ function selectTab(name) {
    Session
    ====================================================================== */
 
+// One request answers "is there a session, whose is it, and what is this site
+// called". A deactivated account never gets this far — the API refuses to
+// issue a session for one, and revokes an existing session on the next
+// request — so there is no active-profile check left to do here.
 async function enterApp() {
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return showLogin();
-
-  const [{ data: profile, error: pErr }, { data: settings }] = await Promise.all([
-    sb.from("profiles").select("full_name, role, active").eq("id", user.id).maybeSingle(),
-    sb.from("app_settings").select("*").maybeSingle(),
-  ]);
-
-  if (pErr || !profile || !profile.active) {
-    await sb.auth.signOut();
-    return showLogin("This account has no active guard profile. Ask an administrator to enable it.");
+  let session;
+  try {
+    session = await apiGet("/api/session");
+  } catch (err) {
+    return showLogin(err.status === 401 ? "" : err.message);
   }
 
+  const { profile, settings } = session;
   state.profile = profile;
   state.settings = settings;
 
@@ -482,7 +445,7 @@ function showLogin(message) {
 mountLogin({ onReady: enterApp });
 
 $("logoutBtn").addEventListener("click", async () => {
-  await sb.auth.signOut();
+  await logout();
   $("q").value = "";
   $("searchResults").innerHTML = "";
   renderDetail(null);
@@ -525,15 +488,14 @@ setInterval(() => {
 setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
 setInterval(() => { if (state.profile && state.tab === "attention") loadAttention(); }, 120000);
 
-sb.auth.onAuthStateChange((event) => {
-  if (event === "SIGNED_OUT") showLogin();
-});
+// Any request that comes back 401 — an expired session, or a supervisor
+// deactivating the account mid-shift — returns the terminal to the login
+// screen instead of leaving a dead app on display.
+setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
 
-// Boot.
-(async () => {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) await enterApp(); else showLogin();
-})();
+// Boot. enterApp() shows the login form itself if there is no session, so
+// there is no separate "do I have a token" check to make first.
+enterApp();
 </script>
 </body>
 </html>

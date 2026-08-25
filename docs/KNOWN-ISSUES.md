@@ -63,14 +63,93 @@ way, so no explained breach can be pushed off the list.
 | 7 | `01_acceptance.sql` has a duplicate no-op `reset role;` and one test label using old "check event" prose | Cosmetic |
 | 8 | `hut_summary()` is covered only by a non-negativity smoke assertion | Unchanged gate-app surface; the suite at least proves it executes under `authenticated` |
 | 9 | `v_resident_status.is_adult` uses the **server** date while everything else uses `site_today()` | Divergent for up to a day in a far-offset timezone — but it has no consumer anywhere: no view, no function, neither front end. Dead output. Drop it, or route it through `site_today()` |
-| 10 | `index.html`'s Log tab filters by **browser** local day while compliance uses `local_timezone` | Documented divergence, filed as Follow-on 2 in the design spec. On a terminal set to the wrong zone the two disagree |
+| 10 | ~~`index.html`'s Log tab filters by **browser** local day while compliance uses `local_timezone`~~ | **Fixed by the Render migration.** The range is now built server-side in `getGateLog()` from `app_settings.local_timezone`, so there is one definition of "today" |
 | 11 | `02_compliance.sql` asserts one resident's attention rank is exactly `8` | Encodes the current seed roster; a change to `seed.sql` breaks a test whose real subject is "an explained breach ranks last but is still present". Prefer asserting against `count(*)` from the list |
+
+---
+
+## Introduced by the move from Supabase to Render
+
+These did not exist while Supabase owned authentication and the HTTP API. They
+are the price of that move, recorded honestly rather than buried in a commit
+message.
+
+### 12. Authentication is ours now
+
+`server/auth.js` is roughly two hundred lines standing where GoTrue used to be:
+password verification, session issue and revocation, cookie flags, login
+throttling. Every one of those is a well-understood problem with a
+well-understood way to get it subtly wrong, and a subtle bug here is a breach
+rather than a wrong number on a screen.
+
+What holds the risk down, and what to preserve:
+
+- **It is small, and it should stay small.** There is no sign-up, no password
+  reset, no email confirmation, no OAuth, no MFA. Each of those is a flow with
+  its own attack surface. Adding one is a decision, not a chore.
+- **Sessions are opaque and server-side.** No JWT, so revocation is a `DELETE`
+  rather than a denylist. Deactivating an account or changing a password ends
+  every session in the same transaction.
+- **`db/tests/api.sh` asserts the properties, not the implementation** —
+  revocation is immediate, tokens do not survive logout, unknown emails are
+  indistinguishable from wrong passwords.
+
+If this ever feels like more than it is worth, Option 3 in `docs/TECH-STACK.md`
+(self-hosted Supabase) hands login back to GoTrue with `db/schema.sql`
+unchanged.
+
+### 13. The nightly schedule left the database
+
+Under Supabase, `pg_cron` ran the maintenance functions from inside Postgres,
+where the schedule was backed up with everything else and could not be deleted
+by accident. It is now `hut-nightly`, a separate Render resource that somebody
+can remove while tidying the dashboard.
+
+The failure is silent and slow: `close_out_compliance_days()` stops writing
+negative rows, so the register keeps recording who *did* attend and quietly
+stops recording who did not. Nothing errors. The Attention tab simply empties.
+
+Mitigations in place: the job runs all five functions and exits non-zero if any
+fails, so a broken run shows red in Render. There is no alert on the job simply
+*not existing*. **A monthly look at the job's run history is a real operational
+requirement**, and it is on the go-live checklist in `docs/GDPR.md`.
+
+### 14. Login throttling is per-instance and in memory
+
+The eight-attempts-per-email-and-IP lockout in `server/auth.js` lives in a `Map`.
+It resets when the service restarts or redeploys, and it would not be shared if
+the service were ever scaled to more than one instance.
+
+Carried deliberately: the alternative is a write to Postgres on every failed
+guess, which is exactly the amplification an online guessing attack wants.
+bcrypt at cost 12 is what actually makes guessing expensive; the lockout is a
+speed bump on top. If this service is ever scaled horizontally, move the
+counter to the database or accept that the limit becomes per-instance.
+
+### 15. A restart is needed after editing an inline `<script>`
+
+The CSP lists a SHA-256 for each inline script block, computed at boot from the
+files on disk — which is what lets it drop `'unsafe-inline'` entirely. Edit an
+inline block without restarting and the browser refuses to run the app, with a
+console error and a blank page.
+
+This never bites in production (a deploy restarts the service) but it will bite
+in local development. `check.sh` asserts the served CSP matches the served HTML,
+so it cannot ship broken.
+
+### 16. `server/` has no linter and no type checking
+
+`check.sh` runs `node --check` on each file, which catches syntax errors and
+nothing else. The suites cover behaviour, but a typo in a rarely-taken error
+path — `err.staus` instead of `err.status` — would pass everything and fail at
+3am. Worth adding `tsc --checkJs` with JSDoc types, or at least a linter, if
+this grows beyond its current size.
 
 ---
 
 ## A note on the test suite
 
-Every expected value in `supabase/tests/` is asserted via `pg_temp.expect()`
+Every expected value in `db/tests/` is asserted via `pg_temp.expect()`
 rather than printed. This is not ceremony — it caught six real defects during the
 build, including two where a test *looked* like it was checking something and
 could not fail:

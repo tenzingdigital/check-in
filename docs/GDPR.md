@@ -145,9 +145,19 @@ function is the mechanism; the decision is a human one.
 
 Every table has RLS enabled; the guard-facing views (`v_resident_status`,
 `v_check_log`, `v_resident_compliance`) and every RPC are revoked from `anon`.
-A logged-out caller holding the publishable key — which is in the page source
-and always will be — can read nothing, search nothing, and write nothing. This
-is asserted by the acceptance suite rather than assumed.
+A logged-out caller can read nothing, search nothing, and write nothing.
+
+Since the move to Render there are two independent barriers rather than one.
+The API refuses any request without a valid session before it opens a database
+transaction at all; and if that check were ever wrong, the request would still
+run as `anon`, where the policies deny everything. Both are asserted by the
+suites rather than assumed — `db/tests/run.sh` for the policies,
+`db/tests/api.sh` for the endpoints.
+
+The browser now holds no database credential of any kind. Under Supabase the
+page source carried a publishable key (harmless by design, but a credential
+that identified the project to anyone who looked); now the page holds nothing,
+and the session is an `HttpOnly` cookie the JavaScript cannot read.
 
 ---
 
@@ -171,40 +181,42 @@ setting where a resident may be in dispute with staff, that matters.
 
 ## Transfers and processors
 
-Both providers in the default stack are **US companies**, even when the data
-sits in the EU:
+**There is now exactly one processor.** This is the clearest single benefit of
+moving off the two-vendor stack, and it is worth stating plainly in the ROPA:
 
 | Processor | Role | Where the data sits |
 |---|---|---|
-| Supabase Inc. (US) | Database, auth | The region chosen at project creation — **pick Frankfurt or Ireland** |
-| Vercel Inc. (US) | Static hosting | Edge; serves `index.html` only, but sees request IPs |
-| jsDelivr / Fastly | CDN for `supabase-js` | Sees the visitor's IP on page load |
+| Render Services, Inc. (US) | Database, hosting, cron | **Frankfurt** — set in `render.yaml`, fixed at creation |
+
+The list used to have three entries. Supabase held the database and auth,
+Vercel served the front ends and saw request IPs, and jsDelivr/Fastly received
+every visitor's IP before anyone logged in, because both pages loaded
+`supabase-js` from a CDN — the same issue that made hotlinked Google Fonts a
+finding in German case law. The CDN tag is gone, so that third-party disclosure
+is gone with it: a browser loading these pages contacts exactly one host, and
+the CSP (`default-src 'none'`, `connect-src 'self'`) enforces that it cannot
+contact another.
+
+Render is still a **US company**, so the transfer analysis has not gone away —
+it has only got shorter.
 
 Actions:
 
-1. **Sign the DPA with both.** Each publishes one; neither is signed by default.
-2. **Choose an EU region at project creation.** It cannot be changed afterwards.
-3. **Record the transfer basis.** Both rely on Standard Contractual Clauses plus
-   the EU–US Data Privacy Framework. Note the current status of both in your
-   ROPA; this area moves.
-4. **Consider the CDN.** Loading `supabase-js` from jsDelivr sends the browser's
-   IP to a third party before anyone logs in — the same issue that made hotlinked
-   Google Fonts a finding in German case law. Both `index.html` and
-   `checkin.html` load it the same way, so both need the change. It is easy to
-   remove:
-
-   ```bash
-   curl -o supabase.js https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js
-   # then in both index.html and checkin.html:
-   #   <script src="/supabase.js"></script>
-   ```
-
-   Still no build step, one fewer processor, and it removes a supply-chain
-   dependency from a security system. The SRI hash in each file pins the exact
-   bytes either way.
+1. **Sign Render's DPA.** They publish one; it is not signed by default.
+2. **Confirm the region is Frankfurt.** A Render Postgres cannot be moved
+   between regions after creation.
+3. **Record the transfer basis.** Render relies on Standard Contractual Clauses
+   plus the EU–US Data Privacy Framework. Note the current status in your ROPA;
+   this area moves.
+4. **Note who can read the database.** Under Supabase, the dashboard's table
+   editor and SQL editor were a route to resident data for anyone with project
+   access. That is now the Render dashboard's psql shell and whoever holds the
+   external connection string. Keep the list of people who have it short, and
+   in the ROPA.
 
 If EU-owned infrastructure is a requirement rather than a preference,
-`docs/TECH-STACK.md` sets out what that costs.
+`docs/TECH-STACK.md` sets out what that costs — and note that self-hosting
+would also hand authentication back to software somebody else maintains.
 
 ---
 
@@ -215,10 +227,11 @@ If EU-owned infrastructure is a requirement rather than a preference,
 - [ ] Privacy notice for residents: what is logged, why, retention, their rights
 - [ ] Set `event_retention_days` to the real retention period for `gate_events` / `checkin_events`
 - [ ] Set `compliance_retention_days` to the real statutory period — the default (2555 days) is a placeholder, not a decision
-- [ ] Confirm `pg_cron` is enabled and all four scheduled jobs are running (`select * from cron.job`), in particular `close-out-compliance-days` — without it the register only ever gains positive rows and no one is ever recorded as having missed a day
-- [ ] DPAs signed with every processor
-- [ ] Supabase project confirmed in an EU region
-- [ ] Public sign-up disabled (verify by trying to register)
+- [ ] Confirm the `hut-nightly` cron job exists in Render and its last run is green — in particular `close-out-compliance-days`, without which the register only ever gains positive rows and no one is ever recorded as having missed a day
+- [ ] DPA signed with Render
+- [ ] Database confirmed in Frankfurt, and **not** on the free plan (free Postgres is deleted after 30 days)
+- [ ] Confirm there is no way to self-register (there is no such endpoint — verify that `POST /api/session` with an unknown email returns 401 and creates nothing)
+- [ ] List of people holding the external `DATABASE_URL` recorded and kept short
 - [ ] Staff briefed that `note` must not carry health or other sensitive data
 - [ ] A named person who can action access and erasure requests
 - [ ] Decide whether guard names are redacted from resident-facing exports

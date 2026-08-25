@@ -1,11 +1,11 @@
-.vercel
 .DS_Store
 node_modules/
 
-# Optional local override for the Supabase URL / anon key. Neither value is a
-# secret (the anon key is designed to be public and is useless without a login),
-# but keeping it out of git means the repo is not tied to one project.
-config.js
+# Local environment: DATABASE_URL and anything else the service needs to run
+# off Render. This is a real secret now — the connection string is the whole
+# database — unlike the Supabase anon key this file used to hold.
+.env
+.env.*
 
 # Subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
