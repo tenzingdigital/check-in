@@ -27,8 +27,8 @@ router.post('/gate-events', wrap(async (req, res) => {
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'select * from public.record_check($1, $2, $3)',
-      [uuidParam(body.resident_id, 'resident_id'), direction, body.note ?? null],
+      'select * from public.record_check($1, $2)',
+      [uuidParam(body.resident_id, 'resident_id'), direction],
     );
     return rows[0];
   });
@@ -52,8 +52,8 @@ router.get('/gate-events', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: log } = await client.query(
       `with s as (select local_timezone as tz from public.app_settings limit 1)
-       select l.id, l.resident_id, l.kind, l.occurred_at, l.note,
-              l.resident_name, l.room_ref, l.guard_id, l.guard_name
+       select l.id, l.resident_id, l.kind, l.occurred_at,
+              l.resident_name, l.guard_id, l.guard_name
          from public.v_check_log l, s
         where l.occurred_at >= ($1::date)::timestamp at time zone s.tz
           and l.occurred_at <  (($1::date) + 1)::timestamp at time zone s.tz

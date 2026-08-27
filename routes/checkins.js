@@ -2,7 +2,7 @@
 const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
-const { uuidParam, intParam, dateParam, HttpError } = require('../lib/api');
+const { uuidParam, intParam } = require('../lib/api');
 
 const router = express.Router();
 
@@ -22,7 +22,7 @@ router.get('/attention', wrap(async (req, res) => {
 //
 // The counts are queried from v_resident_compliance rather than derived from
 // the attention list, for the reason the old client documented at length:
-// attention_list() only admits breach_open | breach_noted | never | due_today,
+// attention_list() only admits breach_open | never | due_today,
 // so a resident who is required today but not yet past due_soon_after_hour
 // would silently fall out of a count derived from it.
 router.get('/checkin-summary', wrap(async (req, res) => {
@@ -49,29 +49,8 @@ router.post('/checkins', wrap(async (req, res) => {
   const body = req.body || {};
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'select * from public.record_checkin($1, $2)',
-      [uuidParam(body.resident_id, 'resident_id'), body.note ?? null],
-    );
-    return rows[0];
-  });
-  res.json(row);
-}));
-
-// POST /api/compliance-annotations — attach a reason to a missed day.
-//
-// Deliberately cannot change the day's outcome: annotate_compliance_day() has
-// no update path to `presented`, so an annotation can explain a breach but
-// never make it disappear from the record.
-router.post('/compliance-annotations', wrap(async (req, res) => {
-  const body = req.body || {};
-  const date = dateParam(body.date, 'date');
-  const note = String(body.note || '').trim();
-  if (!note) throw new HttpError(400, 'note cannot be empty');
-
-  const row = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows } = await client.query(
-      'select * from public.annotate_compliance_day($1, $2, $3)',
-      [uuidParam(body.resident_id, 'resident_id'), date, note],
+      'select * from public.record_checkin($1)',
+      [uuidParam(body.resident_id, 'resident_id')],
     );
     return rows[0];
   });

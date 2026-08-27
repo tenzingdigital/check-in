@@ -41,7 +41,7 @@ router.get('/', wrap(async (req, res) => {
 
     const { rows: comp } = await client.query(
       `select id, state, required_today, seen_today, checkins_today,
-              open_breaches, noted_breaches, consecutive_missed, last_seen_on
+              open_breaches, consecutive_missed, last_seen_on
          from public.v_resident_compliance
         where id = any($1::uuid[])`,
       [found.map(r => r.id)],
@@ -57,8 +57,8 @@ router.get('/', wrap(async (req, res) => {
 router.get('/:id/compliance', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `select id, full_name, room_ref, age_years, required_today, seen_today,
-              checkins_today, open_breaches, noted_breaches, consecutive_missed,
+      `select id, full_name, age_years, required_today, seen_today,
+              checkins_today, open_breaches, consecutive_missed,
               last_seen_on, state
          from public.v_resident_compliance where id = $1`,
       [uuidParam(req.params.id, 'resident id')],

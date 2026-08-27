@@ -68,7 +68,7 @@
 
     <!-- ---- search ---- -->
     <section id="panelSearch" role="tabpanel" aria-labelledby="tabSearch">
-      <input id="q" class="field" type="search" placeholder="Filter residents by name or room…"
+      <input id="q" class="field" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before signing them in.</p>
       <div id="searchResults" class="list"></div>
@@ -160,7 +160,6 @@ function residentCard(r, { clickable = true } = {}) {
   const tag = clickable ? "button" : "div";
   const cls = ["card"].join(" ");
   const bits = [];
-  if (r.room_ref) bits.push(esc(r.room_ref));
   bits.push(r.last_event_at ? `last movement ${ago(r.last_event_at)}` : "no movement on record");
 
   return `
@@ -192,7 +191,6 @@ function renderDetail(r) {
 
   el.innerHTML = `
     <h2>${esc(r.full_name)}</h2>
-    <div class="sub">${[r.room_ref ? esc(r.room_ref) : "", r.note ? esc(r.note) : ""].filter(Boolean).join(" · ")}</div>
 
     <div class="facts">
       <div class="fact"><span>Status</span><b>${isIn ? "On site" : "Off site"}</b></div>
@@ -224,10 +222,10 @@ function renderLog(rows) {
   list.innerHTML = rows.map((e) => `
     <div class="logrow">
       <time datetime="${esc(e.occurred_at)}">${esc(timeOfDay(e.occurred_at))}</time>
-      <span class="dir ${e.direction === "in" ? "in" : "out"}">${e.direction === "in" ? "IN" : "OUT"}</span>
+      <span class="dir ${e.kind === "in" ? "in" : "out"}">${e.kind === "in" ? "IN" : "OUT"}</span>
       <span class="body">
-        ${esc(e.resident_name)}${e.room_ref ? ` <span class="hint">(${esc(e.room_ref)})</span>` : ""}
-        <span class="by">by ${esc(e.guard_name)}${e.note ? " · " + esc(e.note) : ""}</span>
+        ${esc(e.resident_name)}
+        <span class="by">by ${esc(e.guard_name)}</span>
       </span>
     </div>`).join("");
 }
@@ -272,7 +270,7 @@ async function record(residentId, direction) {
   document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = true));
 
   const row = await guarded(
-    () => apiPost("/api/gate-events", { resident_id: residentId, direction, note: null }),
+    () => apiPost("/api/gate-events", { resident_id: residentId, direction }),
     (err) => {
       toast("Not recorded: " + err.message, "err");
       document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = false));

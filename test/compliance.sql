@@ -281,8 +281,8 @@ select ((:'seed_ts'::timestamptz) at time zone
 select pg_temp.expect('day boundary: seed timestamp lands on the day before the synthetic today',
   (:'seed_local_date')::date, (:'boundary_today')::date - 1);
 
-insert into public.checkin_events (resident_id, guard_id, occurred_at, note)
-values (:'boundary_id', '11111111-1111-1111-1111-111111111111', :'seed_ts'::timestamptz, null);
+insert into public.checkin_events (resident_id, guard_id, occurred_at)
+values (:'boundary_id', '11111111-1111-1111-1111-111111111111', :'seed_ts'::timestamptz);
 
 insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count)
 values (:'boundary_id', :'seed_local_date'::date, true, true, :'seed_ts'::timestamptz, 1);
@@ -354,8 +354,7 @@ end $$;
 -- close_out_compliance_days() writes a daily_compliance row for that day
 -- (its filter is departed_on >= v_day). record_checkin() must therefore still
 -- accept a check-in on that final day, or it becomes an unclearable
--- statutory breach: no role holds UPDATE on daily_compliance, and
--- annotate_compliance_day() deliberately cannot flip an outcome.
+-- statutory breach: no role holds UPDATE on daily_compliance.
 reset role;
 insert into public.residents (first_name, last_name, date_of_birth, status, departed_on)
 values ('Fiona', 'Leaving', '1980-01-01', 'departed', public.site_today());
@@ -503,13 +502,12 @@ select pg_temp.expect('minor: required = false on every backfilled day',
 \echo ''
 \echo '=========== STATES AND ATTENTION LIST ==========='
 reset role;
-delete from public.compliance_annotations;
 delete from public.daily_compliance;
 delete from public.checkin_events;
 select id as adult_id from public.residents where last_name='Brennan' \gset
 select id as other_id from public.residents where last_name='Haddad'  \gset
 
--- Brennan: missed the last 3 completed days. Haddad: missed 1, explained.
+-- Brennan: missed the last 3 completed days. Haddad: missed 1.
 insert into public.daily_compliance (resident_id, compliance_date, required, presented, checkin_count, closed_at)
 select :'adult_id', public.site_today() - g, true, false, 0, now() from generate_series(1,3) g;
 insert into public.daily_compliance (resident_id, compliance_date, required, presented, checkin_count, closed_at)
@@ -518,41 +516,24 @@ values (:'other_id', public.site_today() - 1, true, false, 0, now());
 set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
-\echo '--- an annotation records a reason without changing the outcome'
-select compliance_date = public.site_today() - 1 as dated_yesterday
-from public.annotate_compliance_day(:'other_id', public.site_today() - 1, 'In hospital, ward confirmed') \gset ann_
-
-select pg_temp.expect('annotation is dated to the day it explains',
-  (:'ann_dated_yesterday')::boolean, true);
-
-select presented as still_not_presented from public.daily_compliance
- where resident_id = :'other_id' and compliance_date = public.site_today() - 1 \gset
-
-select pg_temp.expect('annotation does not flip presented',
-  (:'still_not_presented')::boolean, false);
-
 \echo '--- states and consecutive-miss ordering'
-select full_name, state, open_breaches, noted_breaches, consecutive_missed
+select full_name, state, open_breaches, consecutive_missed
 from public.attention_list() order by consecutive_missed desc, full_name;
 
-select state, open_breaches, noted_breaches, consecutive_missed
+select state, open_breaches, consecutive_missed
 from public.v_resident_compliance where id = :'adult_id' \gset brennan_
 
 select pg_temp.expect('Brennan: state = breach_open', (:'brennan_state')::text, 'breach_open');
 select pg_temp.expect('Brennan: open_breaches = 3', (:'brennan_open_breaches')::integer, 3);
 select pg_temp.expect('Brennan: consecutive_missed = 3', (:'brennan_consecutive_missed')::integer, 3);
 
-select state, open_breaches, noted_breaches, consecutive_missed
+select state, open_breaches, consecutive_missed
 from public.v_resident_compliance where id = :'other_id' \gset haddad_
 
-select pg_temp.expect('Haddad: state = breach_noted', (:'haddad_state')::text, 'breach_noted');
-select pg_temp.expect('Haddad: open_breaches = 0', (:'haddad_open_breaches')::integer, 0);
-select pg_temp.expect('Haddad: noted_breaches = 1', (:'haddad_noted_breaches')::integer, 1);
+select pg_temp.expect('Haddad: state = breach_open', (:'haddad_state')::text, 'breach_open');
+select pg_temp.expect('Haddad: open_breaches = 1', (:'haddad_open_breaches')::integer, 1);
 
-\echo '--- attention_list: explained breach is demoted below the unexplained one, never suppressed'
--- Other residents pick up a 'never' state here (their history was wiped
--- above), which legitimately outranks an explained breach per the case
--- ordering in attention_list() — so this asserts relative rank, not adjacency.
+\echo '--- attention_list: breaches rank ahead of never-seen residents, deeper streaks first'
 with ordered as (
   select id, row_number() over () as rn from public.attention_list()
 )
@@ -567,21 +548,19 @@ select
 -- rather than a clean assertion failure — "is not null" could never itself
 -- report false. Asserting the exact rank both proves presence (a NULL would
 -- error before the comparison ever ran) and proves the ordering.
-select pg_temp.expect('attention_list: Brennan (unexplained breach) ranks first',
+select pg_temp.expect('attention_list: Brennan (3-day streak) ranks first',
   (:'ordrank_brennan_rank')::integer, 1);
-select pg_temp.expect('attention_list: Haddad (explained breach) ranks last, behind every never-seen resident, but still present',
-  (:'ordrank_haddad_rank')::integer, 8);
+select pg_temp.expect('attention_list: Haddad (1-day streak) ranks second, ahead of every never-seen resident',
+  (:'ordrank_haddad_rank')::integer, 2);
 
-\echo '--- attention_list: the cap never drops a breach, open or annotated'
--- 'never' sorts above 'breach_noted' by deliberate product ranking (an
--- unknown outranks a human-triaged known), and there are 6 never-seen
--- residents in play here — more than enough to push Haddad's annotated
--- breach past a small max_results if the LIMIT were applied uniformly. The
--- product rule is "flag but never suppress": an annotation may demote a
--- breach in the guard's attention, but it must never make the row vanish.
+\echo '--- attention_list: the cap never drops a breach'
+-- There are 6 never-seen residents in play here (their history was wiped
+-- above) — more than enough to fill a small max_results if the LIMIT were
+-- applied uniformly across buckets. The product rule is "flag but never
+-- suppress": a breach row must never vanish under a cap.
 --
 -- Two cap values, deliberately either side of the breach count (2 breach
--- rows: Brennan open, Haddad noted):
+-- rows: Brennan and Haddad):
 --   cap=1 is SMALLER than the breach count, so if the two breach rows
 --   were not exempt from the cap at all, at most one of them could survive
 --   — this is the only value that actually exercises the exemption clause.
@@ -595,9 +574,9 @@ select count(*) filter (where id = :'adult_id') as brennan_present,
        count(*) as total_returned
 from public.attention_list(1) \gset cap1_
 
-select pg_temp.expect('attention_list(1): the open breach (Brennan) is never dropped by a cap smaller than the breach count',
+select pg_temp.expect('attention_list(1): Brennan''s breach is never dropped by a cap smaller than the breach count',
   (:'cap1_brennan_present')::integer, 1);
-select pg_temp.expect('attention_list(1): the annotated breach (Haddad) is never dropped by a cap smaller than the breach count',
+select pg_temp.expect('attention_list(1): Haddad''s breach is never dropped by a cap smaller than the breach count',
   (:'cap1_haddad_present')::integer, 1);
 select pg_temp.expect('attention_list(1): both breaches plus exactly 1 never-seen row (the cap) get through',
   (:'cap1_total_returned')::integer, 3);
@@ -607,9 +586,9 @@ select count(*) filter (where id = :'adult_id') as brennan_present,
        count(*) as total_returned
 from public.attention_list(2) \gset cap_
 
-select pg_temp.expect('attention_list(2): the open breach (Brennan) is never dropped by the cap',
+select pg_temp.expect('attention_list(2): Brennan''s breach is never dropped by the cap',
   (:'cap_brennan_present')::integer, 1);
-select pg_temp.expect('attention_list(2): the annotated breach (Haddad) is never dropped by the cap',
+select pg_temp.expect('attention_list(2): Haddad''s breach is never dropped by the cap',
   (:'cap_haddad_present')::integer, 1);
 select pg_temp.expect('attention_list(2): the cap still limits the less-critical never/due_today rows',
   (:'cap_total_returned')::integer, 4);
@@ -627,23 +606,6 @@ select pg_temp.expect('after check-in: state stays breach_open (past breach unre
   (:'after_checkin')::text, 'breach_open');
 select pg_temp.expect('after check-in: seen_today = true (today satisfied)',
   (:'seen_today')::boolean, true);
-
-\echo '--- annotations are append-only'
--- Printed (not \gset) so these land in run.sh's authorisation-summary grep
--- alongside every other privileged-operation probe. The positive assertion
--- below then proves the row genuinely survived, the same pattern used for
--- checkin_events / daily_compliance above, rather than string-matching the
--- try() report.
-select pg_temp.try('guard edits an annotation',
-                   'update public.compliance_annotations set note=''changed'' where true');
-select pg_temp.try('guard deletes an annotation',
-                   'delete from public.compliance_annotations where true');
-
-select note from public.compliance_annotations
- where resident_id = :'other_id' and compliance_date = public.site_today() - 1 \gset
-
-select pg_temp.expect('annotation survives guard UPDATE/DELETE attempts: note unchanged',
-  (:'note')::text, 'In hospital, ward confirmed');
 
 \echo '--- streak: a day that was not required is skipped, not a break'
 -- This is the highest-risk part of consecutive_missed: a not-required day
@@ -724,7 +686,6 @@ select public.export_resident_record(:'adult_id') ? 'daily_compliance' as export
 select public.erase_resident(:'adult_id', 'test') is not null as erased \gset
 reset role;
 select count(*) as register_rows_after_erasure from public.daily_compliance where resident_id = :'adult_id' \gset
-select count(*) as annotations_after_erasure  from public.compliance_annotations where resident_id = :'adult_id' \gset
 
 select pg_temp.expect('export_resident_record includes a daily_compliance key',
   (:'export_has_register')::boolean, true);
@@ -732,5 +693,3 @@ select pg_temp.expect('erase_resident returns a non-null result',
   (:'erased')::boolean, true);
 select pg_temp.expect('erase_resident cascades: no register rows remain for the erased resident',
   (:'register_rows_after_erasure')::integer, 0);
-select pg_temp.expect('erase_resident cascades: no annotations remain for the erased resident',
-  (:'annotations_after_erasure')::integer, 0);

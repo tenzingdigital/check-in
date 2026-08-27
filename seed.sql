@@ -6,17 +6,17 @@
 -- accuracy obligation (Art. 5(1)(d)) much harder to argue.
 -- ============================================================================
 
-insert into public.residents (first_name, last_name, date_of_birth, room_ref, note) values
-  ('Aoife',   'Brennan',   '1991-04-12', 'A-04',  null),
-  ('Marek',   'Nowak',     '1988-11-30', 'A-07',  'Works nights, usually signs in around 07:00'),
-  ('Grace',   'Okonkwo',   '2001-02-19', 'B-11',  null),
-  ('Daniel',  'Fitzgerald','1975-07-03', 'B-02',  null),
-  ('Leila',   'Haddad',    '1996-09-25', 'C-09',  null),
-  ('Tomás',   'Ó Súilleabháin', '1983-01-08', 'C-01', null),
-  ('Priya',   'Nair',      '1999-06-14', 'A-12',  null),
-  ('Jonas',   'Andersson', '1993-03-02', 'B-06',  null),
-  ('Sofia',   'Marchetti', '2009-05-21', 'A-04',  'Minor — exempt from the 24h rule, accompanied by A. Brennan'),
-  ('Kwame',   'Mensah',    '1979-12-17', 'C-14',  null)
+insert into public.residents (first_name, last_name, date_of_birth) values
+  ('Aoife',   'Brennan',   '1991-04-12'),
+  ('Marek',   'Nowak',     '1988-11-30'),
+  ('Grace',   'Okonkwo',   '2001-02-19'),
+  ('Daniel',  'Fitzgerald','1975-07-03'),
+  ('Leila',   'Haddad',    '1996-09-25'),
+  ('Tomás',   'Ó Súilleabháin', '1983-01-08'),
+  ('Priya',   'Nair',      '1999-06-14'),
+  ('Jonas',   'Andersson', '1993-03-02'),
+  ('Sofia',   'Marchetti', '2009-05-21'),   -- minor, exempt from the 24h rule
+  ('Kwame',   'Mensah',    '1979-12-17')
 on conflict do nothing;
 
 -- A spread of history so the compliance states are all visible in the UI:

@@ -45,7 +45,7 @@ set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 \echo '--- A1: guard-facing view (note: no date_of_birth column exists here)'
-select full_name, room_ref, age_years, is_adult, presence
+select full_name, age_years, is_adult, presence
 from public.v_resident_status order by last_name;
 
 \echo '--- A2: data minimisation — rows of residents.date_of_birth each role sees'
@@ -59,14 +59,13 @@ set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 \echo '     just without their dates of birth)'
 
 \echo ''
-\echo '--- A3: search (typo, reversed name order, accents, room number)'
+\echo '--- A3: search (typo, reversed name order, accents)'
 select 'okonkwo'              as query, full_name from public.search_residents('okonkwo')
 union all select 'brennan aoife',         full_name from public.search_residents('brennan aoife')
 union all select 'novak (typo→Nowak)',    full_name from public.search_residents('novak')
 union all select 'okonkow (typo)',        full_name from public.search_residents('okonkow')
 union all select 'suilleabhain (accents)',full_name from public.search_residents('suilleabhain')
 union all select 'fitz (prefix)',         full_name from public.search_residents('fitz')
-union all select 'B-11 (room)',           full_name from public.search_residents('B-11')
 union all select 'zzzz (no match)',       full_name from public.search_residents('zzzz');
 
 \echo ''

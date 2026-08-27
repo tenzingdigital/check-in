@@ -1,9 +1,9 @@
 -- ============================================================================
 -- Large demo data — OPTIONAL. Run only on a test project.
 --
--- Tops the residents table up to 200 invented people, each with a room, a
+-- Tops the residents table up to 200 invented people, each with a
 -- realistic age (a handful of minors, so the 18+ exemption is visible), a few
--- departed, occasional operational notes, and gate history spread so the gate
+-- departed, and gate history spread so the gate
 -- page shows every timing state: signed in recently, approaching the 24-hour
 -- mark, well past it, currently out, and never seen at all.
 --
@@ -50,13 +50,13 @@ shuffled as (
 -- the whole statement, which would make every resident share one dice roll.
 rolled as (
   select s.first_name, s.last_name,
-         random() as u_minor, random() as u_departed, random() as u_note
+         random() as u_minor, random() as u_departed
   from shuffled s
   where s.rn <= greatest(0, 200 - (select count(*) from public.residents))
 ),
 new_residents as (
   insert into public.residents
-    (first_name, last_name, date_of_birth, room_ref, status, departed_on, note)
+    (first_name, last_name, date_of_birth, status, departed_on)
   select
     s.first_name,
     s.last_name,
@@ -65,17 +65,8 @@ new_residents as (
       then current_date - (4745 + floor(random() * 1600)::int)
       else current_date - (7300 + floor(random() * 16500)::int)
     end,
-    -- Rooms A-01 .. D-24.
-    chr(65 + floor(random() * 4)::int) || '-' || lpad((1 + floor(random() * 24)::int)::text, 2, '0'),
     case when s.u_departed < 0.05 then 'departed' else 'active' end,
-    case when s.u_departed < 0.05 then current_date - (1 + floor(random() * 180)::int) end,
-    case when s.u_note < 0.07 then (array[
-      'Works nights, usually signs in around 07:00',
-      'Uses the side gate',
-      'Hard of hearing — knock loudly',
-      'Keyworker visits on Tuesdays',
-      'Usually accompanied by a family member'
-    ])[1 + floor(random() * 5)::int] end
+    case when s.u_departed < 0.05 then current_date - (1 + floor(random() * 180)::int) end
   from rolled s
   returning id, status
 ),

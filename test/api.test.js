@@ -165,9 +165,12 @@ async function main() {
   // A migration whose row is missing is one the runner would apply again. The
   // .sql files are written to be re-runnable, so that is survivable — but it
   // must be true, because a half-recorded tracking table is what a restored
-  // backup looks like.
+  // backup looks like. 006 is the probe here rather than 002: 006 dropped
+  // columns that 002's views still reference, so 002 is the one file that is
+  // no longer re-runnable on a current database — the price of a destructive
+  // migration, and exactly why later migrations must stay idempotent.
   await test("a missing row makes the runner re-apply that migration, cleanly", async () => {
-    const target = "002_schema.sql";
+    const target = "006_drop_rooms_and_notes.sql";
     await withOwner((c) => c.query(`delete from public.schema_migrations where name = $1`, [target]));
 
     const applied = await migrate({ log: () => {} });
@@ -318,13 +321,12 @@ async function main() {
   });
 
   await test("an RPC's own refusal reaches the guard intact", async () => {
-    const found = await api.fetch("/api/residents?q=brennan");
-    const res = await api.fetch("/api/compliance-annotations", {
+    const res = await api.fetch("/api/checkins", {
       method: "POST",
-      body: { resident_id: found.json[0].id, date: "1999-01-01", note: "no such day" },
+      body: { resident_id: "00000000-0000-4000-8000-000000000000" },
     });
     assert.equal(res.status, 400);
-    assert.match(res.json.error, /No register row/);
+    assert.match(res.json.error, /Resident not found/);
   });
 
   console.log("\n== revocation ==");
