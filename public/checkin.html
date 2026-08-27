@@ -98,7 +98,7 @@
 
     <!-- ---- check in ---- -->
     <section id="panelCheckin" role="tabpanel" aria-labelledby="tabCheckin">
-      <input id="q" class="field" type="search" placeholder="Search resident by name or room…"
+      <input id="q" class="field" type="search" placeholder="Filter residents by name or room…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before recording a check-in.</p>
       <div id="searchResults" class="list"></div>
@@ -283,25 +283,25 @@ async function runSearch(q) {
   const token = ++searchToken;
   const box = $("searchResults");
 
-  if (!q || q.trim().length < 2) {
-    box.innerHTML = "";
-    return;
-  }
+  q = (q || "").trim();
 
+  // An empty box is no longer an empty list: the whole register loads by
+  // default, and typing narrows it down.
+  //
   // search_residents() returns v_resident_status rows — typo-tolerant, but
   // without the compliance state a guard needs on the card. `compliance=1`
   // has the server merge the matching v_resident_compliance rows in the same
   // transaction, so the badge is accurate and consistent with the names, in
   // one round trip instead of the two this used to take.
   const rows = await guarded(
-    () => apiGet(`/api/residents?q=${encodeURIComponent(q.trim())}&limit=20&compliance=1`),
+    () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000&compliance=1`),
     (err) => showError("Search failed: " + err.message),
   );
   if (token !== searchToken) return;       // a newer keystroke already won
   if (!rows) return;
 
   showError("");
-  renderList(box, rows, `No resident matching “${q.trim()}”.`);
+  renderList(box, rows, q ? `No resident matching “${q}”.` : "No residents on the register.");
 }
 
 async function checkin(residentId) {
@@ -315,7 +315,7 @@ async function checkin(residentId) {
   if (!row) return;
   toast(`Check-in recorded — ${row.checkin_count > 1 ? "already seen today" : "day satisfied"}`, "ok");
   refreshSummary();
-  if ($("q").value.trim().length >= 2) runSearch($("q").value);
+  runSearch($("q").value);
   if (state.tab === "attention") loadAttention();
   if (state.selected && state.selected.id === residentId) refreshResident(residentId);
 }
@@ -426,6 +426,7 @@ async function enterApp() {
 
   selectTab("checkin");
   refreshSummary();
+  runSearch($("q").value);
 }
 
 function showLogin(message) {

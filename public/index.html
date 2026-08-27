@@ -64,7 +64,7 @@
 
     <!-- ---- search ---- -->
     <section id="panelSearch" role="tabpanel" aria-labelledby="tabSearch">
-      <input id="q" class="field" type="search" placeholder="Search resident by name or room…"
+      <input id="q" class="field" type="search" placeholder="Filter residents by name or room…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before signing them in.</p>
       <div id="searchResults" class="list"></div>
@@ -247,20 +247,19 @@ async function runSearch(q) {
   const token = ++searchToken;
   const box = $("searchResults");
 
-  if (!q || q.trim().length < 2) {
-    box.innerHTML = "";
-    return;
-  }
+  q = (q || "").trim();
 
+  // An empty box is no longer an empty list: the whole register loads by
+  // default, and typing narrows it down.
   const rows = await guarded(
-    () => apiGet(`/api/residents?q=${encodeURIComponent(q.trim())}&limit=20`),
+    () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000`),
     (err) => showError("Search failed: " + err.message),
   );
   if (token !== searchToken) return;       // a newer keystroke already won
   if (!rows) return;
 
   showError("");
-  renderList(box, rows, `No resident matching “${q.trim()}”.`);
+  renderList(box, rows, q ? `No resident matching “${q}”.` : "No residents on the register.");
 }
 
 async function record(residentId, direction) {
@@ -282,7 +281,7 @@ async function record(residentId, direction) {
   toast(`${row.full_name} signed ${direction.toUpperCase()}`, "ok");
   renderDetail(row);
   refreshSummary();
-  if ($("q").value.trim().length >= 2) runSearch($("q").value);
+  runSearch($("q").value);
 }
 
 // The day window is now computed server-side from app_settings.local_timezone
@@ -452,6 +451,7 @@ async function enterApp() {
 
   selectTab("search");
   refreshSummary();
+  runSearch($("q").value);
 }
 
 function showLogin(message) {

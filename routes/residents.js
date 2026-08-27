@@ -29,7 +29,7 @@ const STRIP_DAYS = 30;
 // round trips and a consistent read.
 router.get('/', wrap(async (req, res) => {
   const q = String(req.query.q || '').trim();
-  const limit = intParam(req.query.limit, 20, 100);
+  const limit = intParam(req.query.limit, 20, 1000);
   const wantCompliance = req.query.compliance === '1';
 
   const rows = await db.withIdentity(req.session.userId, async (client) => {
