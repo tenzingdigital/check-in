@@ -95,7 +95,7 @@ What holds the risk down, and what to preserve:
   indistinguishable from wrong passwords.
 
 If this ever feels like more than it is worth, Option 3 in `docs/TECH-STACK.md`
-(self-hosted Supabase) hands login back to GoTrue with `db/schema.sql`
+(self-hosted Supabase) hands login back to GoTrue with `db/migrations/002_schema.sql`
 unchanged.
 
 ### 13. The nightly schedule left the database
@@ -144,6 +144,21 @@ nothing else. The suites cover behaviour, but a typo in a rarely-taken error
 path — `err.staus` instead of `err.status` — would pass everything and fail at
 3am. Worth adding `tsc --checkJs` with JSDoc types, or at least a linter, if
 this grows beyond its current size.
+
+### 17. Migration drift warns rather than fails
+
+`server/migrate.js` checksums each applied migration and logs a warning at boot
+if a file has changed since — it cannot apply the change, because that would
+mean re-running a file, so the change simply is not in the database.
+
+A stricter runner would refuse to boot. That was rejected deliberately: the
+usual cause of a checksum change is an edited comment, and taking a security
+hut's register offline over a comment is worse than the thing it is protecting
+against. The trade is that the warning has to actually be read — it appears in
+the Render deploy log, and `db/tests/api.sh` asserts it fires, but nothing
+escalates it.
+
+If this system ever has more than one person changing the schema, make it fatal.
 
 ---
 

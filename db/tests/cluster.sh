@@ -77,9 +77,16 @@ start_cluster() {
   # the node client to reach the same cluster psql is using.
   export DATABASE_URL="postgresql://postgres@localhost/hut?host=$WORK"
 
-  echo "==> applying platform.sql (auth.users, auth.sessions, auth.uid, role grants)"
-  psql -q -v ON_ERROR_STOP=1 -d hut -f "$REPO/db/platform.sql"
+  # Both suites apply the schema through the real migration runner rather than
+  # piping the SQL files into psql themselves. That is deliberate: it means the
+  # runner — ordering, the transaction per file, the tracking table — is
+  # exercised on every test run, instead of being the one piece of the deploy
+  # path that nothing covers.
+  if [[ ! -d "$REPO/server/node_modules" ]]; then
+    echo "==> installing server dependencies"
+    (cd "$REPO/server" && { npm ci --omit=dev >/dev/null 2>&1 || npm install --omit=dev >/dev/null; })
+  fi
 
-  echo "==> applying schema.sql"
-  psql -q -v ON_ERROR_STOP=1 -d hut -f "$REPO/db/schema.sql"
+  echo "==> applying migrations"
+  DATABASE_URL="$DATABASE_URL" node "$REPO/server/migrate.js"
 }

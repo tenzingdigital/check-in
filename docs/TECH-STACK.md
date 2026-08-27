@@ -42,6 +42,7 @@ API, and a Render cron job. One vendor, one region, one bill.
 | | |
 |---|---|
 | Cost | ~$14/mo — `basic-256mb` Postgres (~$6) + `starter` web service (~$7) + cron |
+| Schema | numbered SQL migrations in `db/migrations`, applied at boot |
 | EU-hosted | Yes — Frankfurt |
 | EU-owned | No (US company) |
 | Ops burden | Low, with one new thing to own: authentication |
@@ -59,9 +60,9 @@ and every external host — and a schema that is now provably portable rather
 than portable in principle.
 
 **What did NOT change, and this is the important part.** The security model
-stayed in the database. `db/schema.sql` was not modified by the migration:
+stayed in the database. `db/migrations/002_schema.sql` was not modified by the migration:
 every RLS policy, every `SECURITY DEFINER` RPC, every `auth.uid()` call works
-as written, because `db/platform.sql` still provides `auth.users`,
+as written, because `db/migrations/001_platform.sql` still provides `auth.users`,
 `auth.uid()` and the `anon`/`authenticated` roles, and the API binds an
 identity per transaction with `SET LOCAL ROLE` + `SET LOCAL
 request.jwt.claim.sub`. The old acceptance suite passes unchanged.
@@ -101,7 +102,7 @@ used to be a public HTML file talking straight to the database.
 What it also gave, and what Option 1 had to rebuild: login, sessions, password
 storage, and an HTTP API generated from the schema.
 
-Going back is not free but it is bounded: `db/schema.sql` is unchanged, so it
+Going back is not free but it is bounded: `db/migrations/002_schema.sql` is unchanged, so it
 would be a data copy plus pointing the front ends at supabase-js again. The
 Supabase free tier pauses a project after ~7 days of inactivity — fine while
 building, not fine for a hut that is quiet over Christmas — so Pro (~$25/mo) is
@@ -214,11 +215,11 @@ exactly three Supabase-specific things — the `auth.users` table, the
 schema was portable in principle.
 
 The migration to Render tested that claim, and it held. Not one statement in
-`db/schema.sql` changed. The only edits were two comment blocks: the header,
+`db/migrations/002_schema.sql` changed. The only edits were two comment blocks: the header,
 which named Supabase as the target, and the trailing scheduling block, which
 used to give `cron.schedule` calls to paste into the Supabase dashboard and now
 points at `server/jobs.js`. The stub was promoted to
-`db/platform.sql`, given real password and session storage, and became
+`db/migrations/001_platform.sql`, given real password and session storage, and became
 production. The 84-assertion acceptance suite passed against it without a
 single test being changed.
 

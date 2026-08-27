@@ -63,13 +63,14 @@ server/                 the web service (Node 22, one dependency: pg)
   auth.js               passwords, sessions, cookies, login throttling
   routes.js             the endpoints — thin wrappers over the views and RPCs
   staff.js              account administration CLI (add / passwd / disable)
-  migrate.js            applies db/platform.sql then db/schema.sql
+  migrate.js            the migration runner, also called at boot by index.js
   jobs.js               nightly maintenance, run by the Render cron job
   test.js               the HTTP suite
 render.yaml             the blueprint: web service + Postgres + cron, all Frankfurt
 check.sh                one command: parse everything, then both suites
-db/platform.sql         auth.users, auth.sessions, auth.uid(), the request roles
-db/schema.sql           tables, views, RPCs, row-level security, GDPR functions
+db/migrations/          numbered SQL, applied in order, exactly once
+  001_platform.sql      auth.users, auth.sessions, auth.uid(), the request roles
+  002_schema.sql        tables, views, RPCs, row-level security, GDPR functions
 db/seed.sql             optional demo data (test databases only)
 db/tests/               throwaway-Postgres suites (authorisation, compliance, HTTP)
 docs/GDPR.md            what personal data is held, why, and for how long
@@ -200,12 +201,14 @@ part of a minute to wake, which at 3am reads as "the system is broken". The
 blueprint asks for `basic-256mb` and `starter`, about $14/month together. See
 `docs/TECH-STACK.md`.
 
-### 2. Apply the schema
+### 2. The schema applies itself
 
-The blueprint runs `node migrate.js` as a pre-deploy command, so the first
-deploy applies both SQL files for you. To do it by hand — from a machine that
-can reach the database, using the **external** connection string from the
-Render dashboard:
+`server/index.js` runs the migrations before it starts listening, so the first
+deploy builds the database and every later deploy applies whatever is new. You
+do not have to do anything for this step — it is here so you know what happened.
+
+To run it by hand, from a machine that can reach the database using the
+**external** connection string from the Render dashboard:
 
 ```bash
 cd server && npm install
@@ -218,14 +221,31 @@ not offer it, and forcing TLS there fails to connect. The service reads the
 mode from the connection string rather than guessing from the hostname, so
 whichever URL you paste, say what it needs.
 
-That applies `db/platform.sql` (the identity layer: `auth.users`,
-`auth.sessions`, `auth.uid()`, the `anon`/`authenticated` roles) and then
-`db/schema.sql` (the app: tables, views, RPCs, RLS). Order matters — the second
-references the first. Both are re-runnable.
+#### Changing the schema
+
+Migrations live in `db/migrations`, named `NNN_description.sql`, applied in
+filename order and recorded in `schema_migrations` with a checksum.
+
+**To change the schema, add a new numbered file.** Never edit one that has been
+applied — the runner will not re-run it, so the change would simply not exist
+in the database while looking as though it does. It checksums each applied file
+and warns loudly at boot if one has drifted; the HTTP suite asserts that
+warning fires.
+
+Two properties the runner guarantees, both worth keeping if you touch it:
+
+- Each migration runs in its own transaction, so a file that fails part-way
+  leaves nothing behind. That is why the SQL files carry no `begin`/`commit`.
+- The run holds a Postgres advisory lock, so two instances booting together on
+  a deploy cannot both apply the same migration.
+
+`001_platform.sql` is the identity layer (`auth.users`, `auth.sessions`,
+`auth.uid()`, the `anon`/`authenticated` roles) and `002_schema.sql` is the app
+(tables, views, RPCs, RLS). Order matters — the second references the first.
 
 One caveat carried over from before: `residents.search_key` is a generated
-column, so changing how names are normalised needs a migration rather than a
-re-run.
+column, so changing how names are normalised needs a real migration that
+rebuilds it, not a redefinition.
 
 ### 3. Create staff accounts
 
@@ -307,7 +327,7 @@ all three are gone.
 createdb hut
 cd server && npm install
 export DATABASE_URL="postgresql:///hut"
-node migrate.js
+node migrate.js                                # index.js would do this at boot too
 node staff.js add you@example.com "Your Name" admin
 HUT_ALLOW_INSECURE_COOKIE=1 node index.js      # http://localhost:3000
 ```
@@ -339,14 +359,15 @@ per email and IP, and 12-hour sessions.
 ./check.sh            # both, plus a parse of everything
 ```
 
-`run.sh` starts a throwaway PostgreSQL cluster, applies `db/platform.sql` and
-`db/schema.sql`, and runs two suites: `01_acceptance.sql` (the authorisation
-model) and `02_compliance.sql` (calendar-day semantics, close-out, retention,
-GDPR). Both exit non-zero if any assertion fails.
+`run.sh` starts a throwaway PostgreSQL cluster, builds it **with the real
+migration runner** — not by piping SQL into psql, so the deploy path is
+exercised on every test run — and runs two suites: `01_acceptance.sql` (the
+authorisation model) and `02_compliance.sql` (calendar-day semantics,
+close-out, retention, GDPR). Both exit non-zero if any assertion fails.
 
 Note what changed when the app left Supabase: the suite used to apply a
 thirty-line *stub* of the Supabase objects the schema depends on. That stub is
-now `db/platform.sql` — the real file, the one Render applies. The suite is no
+now `001_platform.sql` — the real file, the one Render applies. The suite is no
 longer testing an approximation of production, it is testing production.
 
 `api.sh` builds the same cluster, boots the service against it, and drives it
@@ -376,7 +397,7 @@ for a human to eyeball — that discipline caught five real defects during the
 build that a printed report would likely have let through unnoticed. Keep new
 tests written that way; do not add a test that just prints a result.
 
-`db/platform.sql` grants `anon` and `authenticated` **full table privileges on
+`001_platform.sql` grants `anon` and `authenticated` **full table privileges on
 the public schema**, which looks alarming and is deliberate: it is what a
 Supabase project does, and keeping it means row-level security is carrying the
 whole security model rather than a missing `GRANT` quietly doing the work. If

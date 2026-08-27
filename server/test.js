@@ -24,6 +24,7 @@
 import assert from "node:assert/strict";
 import { createApp } from "./index.js";
 import { closePool, withIdentity, withOwner } from "./db.js";
+import { runMigrations } from "./migrate.js";
 
 const PASSWORD = "correct-horse-battery";
 const EMAIL = "gina@hut.example";
@@ -94,6 +95,50 @@ async function main() {
   const server = createApp();
   await new Promise((resolve) => server.listen(0, resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
+
+  console.log("\n== migrations ==");
+
+  // The migration runner is on the deploy path — index.js calls it before it
+  // listens — so a bug in it is a failed deploy or, worse, a half-applied
+  // schema. The cluster this suite runs against was built by it, so it has
+  // already been proven to apply cleanly; what is left to prove is that it
+  // knows when to stop and when to complain.
+
+  await test("re-running applies nothing", async () => {
+    const { applied, drifted } = await runMigrations(() => {});
+    assert.deepEqual(applied, [], "a second run re-applied a migration");
+    assert.deepEqual(drifted, []);
+  });
+
+  await test("every migration is recorded with a checksum", async () => {
+    const { rows } = await withOwner((c) =>
+      c.query(`select filename, checksum from public.schema_migrations order by filename`));
+    assert.ok(rows.length >= 2, "expected the platform and schema migrations to be recorded");
+    assert.ok(rows.every((r) => /^\d{3}_/.test(r.filename)), "a migration is not numbered");
+    assert.ok(rows.every((r) => r.checksum && r.checksum.length === 16));
+  });
+
+  // Editing an applied migration is the classic way to convince yourself a
+  // schema change shipped when it did not. The runner cannot apply the change
+  // — that would mean re-running a file — but it must say so.
+  await test("an edited migration is reported as drifted, not silently ignored", async () => {
+    const target = "002_schema.sql";
+    const { rows: before } = await withOwner((c) =>
+      c.query(`select checksum from public.schema_migrations where filename = $1`, [target]));
+    assert.ok(before[0], `${target} is not in the tracking table`);
+
+    await withOwner((c) =>
+      c.query(`update public.schema_migrations set checksum = 'deadbeefdeadbeef' where filename = $1`, [target]));
+
+    const warnings = [];
+    const { applied, drifted } = await runMigrations((m) => warnings.push(m));
+    assert.deepEqual(applied, [], "drift caused a re-apply");
+    assert.deepEqual(drifted, [target]);
+    assert.ok(warnings.some((w) => w.includes("NOT in the database")), "no warning was logged");
+
+    await withOwner((c) =>
+      c.query(`update public.schema_migrations set checksum = $2 where filename = $1`, [target, before[0].checksum]));
+  });
 
   console.log("\n== identity binding ==");
 
@@ -283,11 +328,11 @@ async function main() {
 
   await test("only public/ is reachable", async () => {
     const escapes = [
-      "/../db/schema.sql",
-      "/../db/platform.sql",
+      "/../db/migrations/002_schema.sql",
+      "/../db/migrations/001_platform.sql",
       "/../docs/KNOWN-ISSUES.md",
       "/../server/auth.js",
-      "/%2e%2e/db/schema.sql",
+      "/%2e%2e/db/migrations/002_schema.sql",
       "/../../etc/passwd",
     ];
     for (const path of escapes) {

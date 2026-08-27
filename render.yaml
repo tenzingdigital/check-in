@@ -52,11 +52,11 @@ services:
     buildCommand: npm ci --omit=dev
     startCommand: node index.js
 
-    # Applies db/platform.sql then db/schema.sql before the new version goes
-    # live, so a deploy that adds a column cannot serve traffic against the old
-    # schema. Pre-deploy commands need a paid instance type; on `free` remove
-    # this line and run `node server/migrate.js` by hand after a schema change.
-    preDeployCommand: node migrate.js
+    # No preDeployCommand: index.js applies db/migrations/*.sql itself before it
+    # starts listening, so an instance never serves traffic against a schema it
+    # has not applied, and the runner's advisory lock means two instances
+    # coming up together during a deploy cannot race. This also works on every
+    # instance type — pre-deploy commands need a paid one.
 
     # /healthz runs `select 1` against Postgres rather than just returning 200,
     # so an instance that has lost the database is taken out of rotation

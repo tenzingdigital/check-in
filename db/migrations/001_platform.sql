@@ -1,11 +1,11 @@
 -- ---------------------------------------------------------------------------
--- db/platform.sql — the identity layer schema.sql sits on top of.
+-- db/migrations/001_platform.sql — the identity layer schema.sql sits on top of.
 -- ---------------------------------------------------------------------------
 --
 -- Apply this BEFORE schema.sql, on a fresh database:
 --
---   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/platform.sql
---   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_platform.sql
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/002_schema.sql
 --
 -- This file used to be `tests/00_supabase_stub.sql`, a thirty-line fake of the
 -- Supabase objects that schema.sql depends on, written so the acceptance suite

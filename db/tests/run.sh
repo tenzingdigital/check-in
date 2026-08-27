@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Spin up a throwaway PostgreSQL cluster, apply platform.sql and schema.sql,
-# and run the acceptance suite.
+# Spin up a throwaway PostgreSQL cluster, apply the migrations, and run the
+# acceptance suite.
 #
 # This exists because the security model of this app lives almost entirely in
 # row-level security policies, and RLS fails quietly: a policy that blocks too
@@ -13,10 +13,10 @@
 # Requires the postgresql server binaries (Debian/Ubuntu: postgresql-16).
 # Nothing here touches the deployed database.
 #
-# Note that the cluster this builds is now the production schema, not an
-# approximation of it: platform.sql is the same file Render applies. When this
-# suite says a guard cannot read a date of birth, it is saying it about the
-# real auth.uid() and the real role grants.
+# Note that the cluster this builds is the production schema, not an
+# approximation of it: the same migration runner Render boots with applies the
+# same numbered files. When this suite says a guard cannot read a date of
+# birth, it is saying it about the real auth.uid() and the real role grants.
 
 set -euo pipefail
 

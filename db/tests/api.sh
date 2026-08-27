@@ -18,11 +18,6 @@ REPO="$(cd "$HERE/../.." && pwd)"
 source "$HERE/cluster.sh"
 start_cluster
 
-if [[ ! -d "$REPO/server/node_modules" ]]; then
-  echo "==> installing server dependencies"
-  (cd "$REPO/server" && npm ci --omit=dev >/dev/null 2>&1 || npm install --omit=dev >/dev/null)
-fi
-
 echo "==> running HTTP suite"
 # The cookie is Secure in production, which a plain-http test client would
 # never send back. This is the one place that flag is turned off.

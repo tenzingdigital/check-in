@@ -2,12 +2,14 @@
 -- Hut Check-In — database schema
 -- Target: PostgreSQL 15+ (in use: Render Postgres 16)
 --
--- Apply db/platform.sql first — it provides auth.users, auth.uid() and the
+-- Apply db/migrations/001_platform.sql first — it provides auth.users, auth.uid() and the
 -- anon/authenticated roles that this file depends on. `node server/migrate.js`
 -- does both, in order.
 --
 -- It is written to be re-runnable: every object is created with
 -- "if not exists" / "or replace" and policies are dropped before creation.
+-- There is no `begin`/`commit` in here: server/migrate.js wraps each migration
+-- in a transaction, so a failure part-way through rolls the whole file back.
 --
 -- This file was written against Supabase and moved to plain Postgres without a
 -- statement changing, which is the property to preserve: no host-specific
@@ -27,7 +29,6 @@
 --    by a hand-written client.
 -- ============================================================================
 
-begin;
 
 -- Extensions live in their own schema, a Supabase convention kept because the
 -- search_path settings throughout this file depend on it. Creating it first
@@ -1233,7 +1234,6 @@ grant execute on function public.record_checkin(uuid, text)               to aut
 grant execute on function public.annotate_compliance_day(uuid, date, text) to authenticated;
 grant execute on function public.attention_list(integer)                   to authenticated;
 
-commit;
 
 
 -- ---------------------------------------------------------------------------

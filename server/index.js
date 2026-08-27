@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { COOKIE_NAME, clearedCookie, lockedOut, parseCookies, sessionCookie, sessionFromToken, signIn, signOut } from "./auth.js";
 import { HttpError, matchRoute, translateDbError } from "./routes.js";
 import { closePool, pool } from "./db.js";
+import { runMigrations } from "./migrate.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(HERE, "..", "public");
@@ -343,6 +344,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.error("DATABASE_URL is not set. See README, 'Setup'.");
     process.exit(1);
   }
+  // Migrate before listening, not after. An instance that answers requests
+  // against a schema it has not applied is the failure this ordering exists to
+  // prevent — and because the runner holds an advisory lock, two instances
+  // coming up together during a deploy cannot race each other.
+  //
+  // A failure here is fatal on purpose: serving a hut's register against a
+  // half-known schema is worse than being down and obviously down.
+  try {
+    await runMigrations();
+  } catch (err) {
+    console.error(`[migrate] ${err.message}`);
+    process.exit(1);
+  }
+
   const server = createApp();
   server.listen(PORT, () => console.log(`hut check-in listening on :${PORT}`));
 
