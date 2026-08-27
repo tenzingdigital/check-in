@@ -70,12 +70,28 @@ start_cluster() {
     exit 1
   fi
 
-  export PGHOST="$WORK" PGPORT="$port" PGUSER=postgres
-  psql -q -c "create database hut;"
+  export PGHOST="$WORK" PGPORT="$port"
+
+  # Everything below runs as a NON-SUPERUSER that owns the database, because
+  # that is what Render gives you and the difference is not cosmetic.
+  #
+  # A superuser may SET ROLE to any role and bypasses row-level security
+  # outright. Connecting as one made the suites pass against privileges
+  # production does not have — which is exactly how `SET LOCAL ROLE
+  # authenticated` in withIdentity() shipped broken: every authenticated
+  # request failed with "permission denied to set role" on Render while every
+  # test was green here. See migrations/003_request_role_membership.sql.
+  #
+  # CREATEROLE because 001_platform.sql creates the anon / authenticated /
+  # service_role request roles, the same way the app's role does on Render.
+  PGUSER=postgres psql -q -d postgres -c "create role hutapp login createrole;"
+  PGUSER=postgres psql -q -d postgres -c "create database hut owner hutapp;"
+
+  export PGUSER=hutapp
 
   # The socket directory is a path, so it has to go in the host parameter for
   # the node client to reach the same cluster psql is using.
-  export DATABASE_URL="postgresql://postgres@localhost/hut?host=$WORK"
+  export DATABASE_URL="postgresql://hutapp@localhost/hut?host=$WORK"
 
   # Both suites apply the schema through the real migration runner rather than
   # piping the SQL files into psql themselves. That is deliberate: it means the

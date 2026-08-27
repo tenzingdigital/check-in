@@ -150,7 +150,25 @@ a divergence there is exactly the sort of thing that bites when you move
 between the codebases. The property was worth having, so the fix is to add it
 to **both** apps, not to re-diverge this one.
 
-### 17. The first password passes through an environment variable
+### 17. The suites now run as a non-superuser — keep it that way
+
+`test/cluster.sh` connects as `hutapp`, an ordinary role that owns the database,
+because that is what Render gives you. It used to connect as `postgres`.
+
+That difference is not cosmetic and it cost a broken production deploy. A
+superuser may `SET ROLE` to any role and bypasses row-level security outright,
+so the suites were passing against privileges production does not have —
+`withIdentity()`'s `SET LOCAL ROLE authenticated` shipped failing with
+"permission denied to set role" while every test here was green. The fix is
+migrations/003_request_role_membership.sql; the reason it was reachable at all
+is this line in the test harness.
+
+**Do not change the suites back to a superuser connection**, and be suspicious
+of any future fix that amounts to granting the app role more power rather than
+making the test cluster look more like production. Verified the right way
+round: removing 003 makes the HTTP suite fail with the exact production error.
+
+### 18. The first password passes through an environment variable
 
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` create the first administrator on an empty
 database, because `node staff.js add` needs a shell and Render's Shell tab is a
@@ -165,7 +183,7 @@ deletion, and nothing forces a password change on first use.
 
 If this app ever holds more than one site, replace it with an invite flow.
 
-### 18. `lib/` and `routes/` have no linter and no type checking
+### 19. `lib/` and `routes/` have no linter and no type checking
 
 `check.sh` runs `node --check` on each file, which catches syntax errors and
 nothing else. The suites cover behaviour, but a typo in a rarely-taken error

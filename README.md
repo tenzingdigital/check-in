@@ -414,7 +414,13 @@ npm test              # everything — this is check.sh
 ./test/api.sh         # just the web tier in front of it
 ```
 
-`run.sh` starts a throwaway PostgreSQL cluster, builds it **with the real
+Both suites build their cluster as a **non-superuser role that owns the
+database**, which is what Render gives you. That is deliberate and load-bearing:
+a superuser can `SET ROLE` to anything and bypasses row-level security, so a
+suite running as one passes against privileges production does not have. See
+item 17 in `docs/KNOWN-ISSUES.md` for the deploy that cost.
+
+`sql.sh` starts a throwaway PostgreSQL cluster, builds it **with the real
 migration runner** — not by piping SQL into psql, so the deploy path is
 exercised on every test run — and runs two suites: `01_acceptance.sql` (the
 authorisation model) and `02_compliance.sql` (calendar-day semantics,
