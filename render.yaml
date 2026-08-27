@@ -50,6 +50,11 @@ services:
     plan: starter
     buildCommand: npm install
     startCommand: node server.js
+    # The brochure site deploys separately (checksteady-site below); an edit
+    # to marketing copy must not restart the app mid-shift.
+    buildFilter:
+      ignoredPaths:
+        - site/**
 
     # No preDeployCommand: server.js applies migrations/*.sql itself before it
     # starts listening, so an instance never serves traffic against a schema it
@@ -129,3 +134,19 @@ services:
           property: connectionString
       - key: NODE_VERSION
         value: "22"
+
+  # -------------------------------------------------------------------------
+  # The brochure site (checksteady.ie) — static, no build step, published
+  # straight from ./site. Same pattern as the scheduler repo's
+  # staffsorted-site.
+  # NOTE: current Render Blueprint spec (https://render.com/docs/blueprint-spec)
+  # uses `type: web` + `runtime: static` for a static site — `type: static` is
+  # not a valid value. Don't "fix" this.
+  - type: web
+    name: checksteady-site
+    runtime: static
+    staticPublishPath: ./site
+    buildFilter:
+      paths:
+        - site/**
+        - render.yaml
