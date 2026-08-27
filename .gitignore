@@ -6,6 +6,8 @@ node_modules/
 # database — unlike the Supabase anon key this file used to hold.
 .env
 .env.*
+# …but the example is documentation and belongs in the repo.
+!.env.example
 
 # Subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/

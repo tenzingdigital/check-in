@@ -1,11 +1,11 @@
 -- ---------------------------------------------------------------------------
--- db/migrations/001_platform.sql — the identity layer schema.sql sits on top of.
+-- migrations/001_platform.sql — the identity layer schema.sql sits on top of.
 -- ---------------------------------------------------------------------------
 --
 -- Apply this BEFORE schema.sql, on a fresh database:
 --
---   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_platform.sql
---   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/002_schema.sql
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_platform.sql
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_schema.sql
 --
 -- This file used to be `tests/00_supabase_stub.sql`, a thirty-line fake of the
 -- Supabase objects that schema.sql depends on, written so the acceptance suite
@@ -44,7 +44,7 @@ create extension if not exists pgcrypto with schema extensions;
 --
 -- There is no email confirmation flow, no password reset, no OAuth and no
 -- sign-up endpoint. Accounts are created by an administrator with
--- `node server/staff.js add`, which is the same posture the Supabase setup had
+-- `node staff.js add`, which is the same posture the Supabase setup had
 -- (its very first setup step was "disable public sign-up"): the only way to
 -- hold an account at this hut is for someone with database access to have
 -- made you one.
@@ -62,7 +62,7 @@ create table if not exists auth.users (
   -- hash no password can match, not an empty string: an empty string is not a
   -- bcrypt salt, and crypt() would raise on it at login instead of simply
   -- failing to match. Give such an account a password with
-  -- `node server/staff.js passwd <email>`.
+  -- `node staff.js passwd <email>`.
   encrypted_password text not null
     default extensions.crypt(gen_random_uuid()::text, extensions.gen_salt('bf', 12)),
   raw_user_meta_data jsonb not null default '{}'::jsonb,
@@ -199,7 +199,7 @@ revoke all on auth.sessions from anon, authenticated, service_role;
 -- ---------------------------------------------------------------------------
 -- Account management helpers
 -- ---------------------------------------------------------------------------
--- Used by server/staff.js. They live here rather than in JavaScript so that an
+-- Used by staff.js. They live here rather than in JavaScript so that an
 -- administrator with nothing but psql can still add a guard at 3am, and so the
 -- hashing parameters are stated in exactly one place.
 

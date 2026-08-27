@@ -151,8 +151,8 @@ Since the move to Render there are two independent barriers rather than one.
 The API refuses any request without a valid session before it opens a database
 transaction at all; and if that check were ever wrong, the request would still
 run as `anon`, where the policies deny everything. Both are asserted by the
-suites rather than assumed — `db/tests/run.sh` for the policies,
-`db/tests/api.sh` for the endpoints.
+suites rather than assumed — `test/sql.sh` for the policies,
+`test/api.sh` for the endpoints.
 
 The browser now holds no database credential of any kind. Under Supabase the
 page source carried a publishable key (harmless by design, but a credential

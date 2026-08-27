@@ -1,13 +1,11 @@
-"use strict";
-
+// jobs.js — the nightly maintenance that pg_cron used to run.
 /* ============================================================================
-   jobs.js — the nightly maintenance that pg_cron used to run.
 
    Supabase shipped pg_cron, so the four maintenance functions were scheduled
    inside the database itself. Render's managed Postgres does not offer
    pg_cron, so the schedule moves out to a Render Cron Job that runs this file:
 
-     node server/jobs.js
+     node jobs.js
 
    Same functions, same order, same idempotence — only the thing holding the
    clock has changed. Each function is safe to run twice and safe to miss and
@@ -21,7 +19,7 @@
    is the thing you are cutting.
    ========================================================================= */
 
-import { closePool, withOwner } from "./db.js";
+const { closePool, withOwner } = require('./database');
 
 // Order matters only in that close-out runs first: it writes the negative rows
 // for the day just ended, and the purges below must not race ahead of a day

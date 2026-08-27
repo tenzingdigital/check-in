@@ -1,9 +1,5 @@
-"use strict";
-
+// HTTP suite. Run:  ./test/api.sh   (it builds the throwaway cluster this needs)
 /* ============================================================================
-   test.js — the HTTP suite.
-
-   Run through db/tests/api.sh, which builds the throwaway cluster this needs.
 
    The SQL suite (db/tests/) proves the database refuses what it should refuse.
    This suite proves the new web tier does not hand anyone a way around it —
@@ -21,10 +17,9 @@
    reason there is no web framework.
    ========================================================================= */
 
-import assert from "node:assert/strict";
-import { createApp } from "./index.js";
-import { closePool, withIdentity, withOwner } from "./db.js";
-import { runMigrations } from "./migrate.js";
+const assert = require('assert/strict');
+const app = require('../server');
+const { closePool, withIdentity, withOwner, migrate } = require('../database');
 
 const PASSWORD = "correct-horse-battery";
 const EMAIL = "gina@hut.example";
@@ -78,8 +73,7 @@ async function seedStaff() {
     // Residents plus a little history, so search and the log have something to
     // return. Applied after the guard exists because seed.sql attributes its
     // gate events to the first profile.
-    const seed = await import("node:fs/promises").then((fs) =>
-      fs.readFile(new URL("../db/seed.sql", import.meta.url), "utf8"));
+    const seed = require("fs").readFileSync(require("path").join(__dirname, "..", "seed.sql"), "utf8");
     await c.query(seed);
     return rows[0].id;
   });
@@ -92,8 +86,8 @@ async function seedStaff() {
 async function main() {
   const guardId = await seedStaff();
 
-  const server = createApp();
-  await new Promise((resolve) => server.listen(0, resolve));
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
   console.log("\n== migrations ==");
@@ -105,39 +99,31 @@ async function main() {
   // knows when to stop and when to complain.
 
   await test("re-running applies nothing", async () => {
-    const { applied, drifted } = await runMigrations(() => {});
+    const applied = await migrate({ log: () => {} });
     assert.deepEqual(applied, [], "a second run re-applied a migration");
-    assert.deepEqual(drifted, []);
   });
 
-  await test("every migration is recorded with a checksum", async () => {
+  await test("every migration is recorded, and numbered", async () => {
     const { rows } = await withOwner((c) =>
-      c.query(`select filename, checksum from public.schema_migrations order by filename`));
+      c.query(`select name from public.schema_migrations order by name`));
     assert.ok(rows.length >= 2, "expected the platform and schema migrations to be recorded");
-    assert.ok(rows.every((r) => /^\d{3}_/.test(r.filename)), "a migration is not numbered");
-    assert.ok(rows.every((r) => r.checksum && r.checksum.length === 16));
+    assert.ok(rows.every((r) => /^\d{3}_.*\.sql$/.test(r.name)), "a migration is not numbered");
   });
 
-  // Editing an applied migration is the classic way to convince yourself a
-  // schema change shipped when it did not. The runner cannot apply the change
-  // — that would mean re-running a file — but it must say so.
-  await test("an edited migration is reported as drifted, not silently ignored", async () => {
+  // A migration whose row is missing is one the runner would apply again. The
+  // .sql files are written to be re-runnable, so that is survivable — but it
+  // must be true, because a half-recorded tracking table is what a restored
+  // backup looks like.
+  await test("a missing row makes the runner re-apply that migration, cleanly", async () => {
     const target = "002_schema.sql";
-    const { rows: before } = await withOwner((c) =>
-      c.query(`select checksum from public.schema_migrations where filename = $1`, [target]));
-    assert.ok(before[0], `${target} is not in the tracking table`);
+    await withOwner((c) => c.query(`delete from public.schema_migrations where name = $1`, [target]));
 
-    await withOwner((c) =>
-      c.query(`update public.schema_migrations set checksum = 'deadbeefdeadbeef' where filename = $1`, [target]));
+    const applied = await migrate({ log: () => {} });
+    assert.deepEqual(applied, [target]);
 
-    const warnings = [];
-    const { applied, drifted } = await runMigrations((m) => warnings.push(m));
-    assert.deepEqual(applied, [], "drift caused a re-apply");
-    assert.deepEqual(drifted, [target]);
-    assert.ok(warnings.some((w) => w.includes("NOT in the database")), "no warning was logged");
-
-    await withOwner((c) =>
-      c.query(`update public.schema_migrations set checksum = $2 where filename = $1`, [target, before[0].checksum]));
+    const { rows } = await withOwner((c) =>
+      c.query(`select name from public.schema_migrations where name = $1`, [target]));
+    assert.equal(rows.length, 1, "the re-applied migration was not recorded");
   });
 
   console.log("\n== identity binding ==");
@@ -328,11 +314,11 @@ async function main() {
 
   await test("only public/ is reachable", async () => {
     const escapes = [
-      "/../db/migrations/002_schema.sql",
-      "/../db/migrations/001_platform.sql",
+      "/../migrations/002_schema.sql",
+      "/../migrations/001_platform.sql",
       "/../docs/KNOWN-ISSUES.md",
-      "/../server/auth.js",
-      "/%2e%2e/db/migrations/002_schema.sql",
+      "/../lib/auth.js",
+      "/%2e%2e/migrations/002_schema.sql",
       "/../../etc/passwd",
     ];
     for (const path of escapes) {
@@ -361,7 +347,11 @@ async function main() {
     for (const [header, value] of Object.entries(want)) {
       assert.equal(res.headers.get(header), value, `${header} was "${res.headers.get(header)}"`);
     }
-    assert.match(res.headers.get("cache-control"), /must-revalidate/);
+    // `no-cache` does not mean "do not store" — the browser keeps the file and
+    // asks whether it changed, so an unchanged page still costs a 304 with no
+    // body. It is what stops a guard reloading after a deploy getting the old
+    // page from cache, and it is the spelling the scheduler uses too.
+    assert.equal(res.headers.get("cache-control"), "no-cache");
   });
 
   // The CSP is computed from the files on disk at boot. If someone edits an
@@ -376,7 +366,7 @@ async function main() {
     assert.ok(!/cdn\.jsdelivr\.net|supabase/.test(csp), "CSP still names a third-party origin");
     assert.match(csp, /frame-ancestors 'none'/);
 
-    const crypto = await import("node:crypto");
+      const crypto = require("crypto");
     for (const m of res.text.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
       const hash = crypto.createHash("sha256").update(m[1], "utf8").digest("base64");
       assert.ok(csp.includes(`'sha256-${hash}'`), "an inline script in index.html is not hashed into the CSP");

@@ -8,7 +8,7 @@
 # much returns zero rows rather than an error, and a policy that blocks too
 # little returns data nobody notices. Both are invisible in the browser.
 #
-#   ./db/tests/run.sh
+#   ./test/sql.sh
 #
 # Requires the postgresql server binaries (Debian/Ubuntu: postgresql-16).
 # Nothing here touches the deployed database.
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/../.." && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
 
 # shellcheck source=cluster.sh
 source "$HERE/cluster.sh"
@@ -29,12 +29,12 @@ start_cluster
 
 echo "==> running acceptance suite"
 psql -q -v ON_ERROR_STOP=1 \
-     -v seed_path="$REPO/db/seed.sql" \
-     -d hut -f "$HERE/01_acceptance.sql" | tee "$WORK/out.txt"
+     -v seed_path="$REPO/seed.sql" \
+     -d hut -f "$HERE/acceptance.sql" | tee "$WORK/out.txt"
 
 echo "==> running compliance suite"
 psql -q -v ON_ERROR_STOP=1 \
-     -d hut -f "$HERE/02_compliance.sql" | tee -a "$WORK/out.txt"
+     -d hut -f "$HERE/compliance.sql" | tee -a "$WORK/out.txt"
 
 echo
 echo "==> authorisation summary"

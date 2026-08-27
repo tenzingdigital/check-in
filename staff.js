@@ -1,18 +1,16 @@
-"use strict";
-
+// staff.js — account administration.
 /* ============================================================================
-   staff.js — account administration.
 
    This replaces the Supabase dashboard's Authentication → Users screen, which
    is where staff accounts used to be created. Run it from a machine that can
    reach the database (Render → your service → Shell, or locally with the
    external DATABASE_URL):
 
-     node server/staff.js list
-     node server/staff.js add gina@hut.example "Gina Guard" guard
-     node server/staff.js passwd gina@hut.example
-     node server/staff.js disable gina@hut.example
-     node server/staff.js enable  gina@hut.example
+     node staff.js list
+     node staff.js add gina@hut.example "Gina Guard" guard
+     node staff.js passwd gina@hut.example
+     node staff.js disable gina@hut.example
+     node staff.js enable  gina@hut.example
 
    `add` and `passwd` prompt for the password rather than taking it as an
    argument, so it never lands in shell history, in `ps` output, or in Render's
@@ -25,8 +23,8 @@
    because sessionFromToken() joins profiles.active on every call.
    ========================================================================= */
 
-import readline from "node:readline";
-import { closePool, withOwner } from "./db.js";
+const readline = require('readline');
+const { closePool, withOwner } = require('./database');
 
 function ask(question, { hidden = false } = {}) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
@@ -62,7 +60,7 @@ const COMMANDS = {
           order by p.active desc, p.role, p.full_name`,
       ),
     );
-    if (!rows.length) return console.log("No staff accounts yet. Add one with: node server/staff.js add …");
+    if (!rows.length) return console.log("No staff accounts yet. Add one with: node staff.js add …");
     for (const r of rows) {
       const seen = r.last_sign_in_at ? new Date(r.last_sign_in_at).toISOString().slice(0, 16).replace("T", " ") : "never";
       console.log(
@@ -117,7 +115,7 @@ async function main() {
   const [command, ...args] = process.argv.slice(2);
   const fn = COMMANDS[command];
   if (!fn) {
-    console.error(`usage: node server/staff.js <${Object.keys(COMMANDS).join("|")}> [args]`);
+    console.error(`usage: node staff.js <${Object.keys(COMMANDS).join("|")}> [args]`);
     process.exit(2);
   }
   try {

@@ -14,12 +14,17 @@ and it is deliberately the first thing in the file.
 | **Live URL** | _fill in_ |
 
 One vendor, one region, one bill. There is no Supabase project and no separate
-static host: the same Node service that serves the two HTML files also serves
-the API they call, which is why the session cookie is a first-party cookie and
-why there is no CORS configuration anywhere in this repo.
+static host: the same Express service that serves the two HTML files also
+serves the API they call, which is why the session cookie is a first-party
+cookie and why there is no CORS configuration anywhere in this repo.
+
+The stack and the file layout mirror `tenzingdigital/scheduler` — Express on
+Node 22, `pg`, numbered SQL migrations applied at boot, vanilla front end with
+no build step, Render in Frankfurt. Deliberately: the two are maintained by the
+same person, so they are shaped the same way.
 
 **Only `public/` is served.** This is now enforced in code — `resolveStatic()`
-in `server/index.js` refuses any path that escapes that directory — rather than
+in `server.js` refuses any path that escapes that directory — rather than
 by a host's publish-directory setting. `docs/KNOWN-ISSUES.md` (a list of every
 known weakness in this system), the schema and the RLS policies all sit outside
 it and are unreachable over HTTP. The HTTP suite asserts this.
@@ -48,31 +53,52 @@ requirement — see "Compliance is per calendar day" below.
 
 Every event, at either app, is timestamped and attributed to the guard who
 recorded it. Both apps share `app-common.css` and `app-common.js`, loaded as
-plain `<script>`/`<link>` tags — still no build step, no framework, and now no
-CDN either.
+plain `<script>`/`<link>` tags — still no build step, no front-end framework,
+and no CDN.
+
+The back end is Express on Node 22 with three dependencies (`express`, `pg`,
+`dotenv`), matching `tenzingdigital/scheduler`. Aligning the two was a
+deliberate choice over minimising this repo's dependency count on its own: one
+person maintains both, and the cost of two different designs is paid on every
+context switch.
 
 ```
+The layout deliberately mirrors `tenzingdigital/scheduler`, so that moving
+between the two repos means reading the same shapes twice rather than learning
+two designs.
+
+```
+server.js               Express app: middleware, route mounting, boot()
+database.js             pool, withTransaction, withIdentity, withOwner, migrate
+lib/
+  auth.js               passwords, sessions, cookies, throttling, middleware
+  api.js                HttpError and the parameter validators routes share
+  asyncRoute.js         wrap() — async handler rejections reach the error handler
+  security.js           the response headers and the CSP script hashes
+routes/
+  session.js            log in, log out, "who am I"
+  residents.js          search, one resident's compliance, the 30-day strip
+  gate.js               on-site summary, sign in/out, the day's movement log
+  checkins.js           the register: check in, attention list, annotations
+migrations/             numbered SQL, applied in order, exactly once
+  001_platform.sql      auth.users, auth.sessions, auth.uid(), the request roles
+  002_schema.sql        tables, views, RPCs, row-level security, GDPR functions
 public/                 the ONLY directory served publicly
   index.html            the gate app — Search and Log
   checkin.html          the check-in app — Check in and Attention
   app-common.css        styles shared by both front ends
   app-common.js         the API client and helpers shared by both
-server/                 the web service (Node 22, one dependency: pg)
-  index.js              http server: static files, /api routing, security headers
-  db.js                 the pool, and the transaction that binds a request to RLS
-  auth.js               passwords, sessions, cookies, login throttling
-  routes.js             the endpoints — thin wrappers over the views and RPCs
-  staff.js              account administration CLI (add / passwd / disable)
-  migrate.js            the migration runner, also called at boot by index.js
-  jobs.js               nightly maintenance, run by the Render cron job
-  test.js               the HTTP suite
+test/
+  api.test.js           the HTTP suite
+  acceptance.sql        the authorisation model
+  compliance.sql        calendar-day semantics, close-out, retention, GDPR
+  cluster.sh            shared throwaway-Postgres scaffolding
+  api.sh / sql.sh       the two runners
+staff.js                account administration CLI (add / passwd / disable)
+jobs.js                 nightly maintenance, run by the Render cron job
+seed.sql                optional demo data (test databases only)
 render.yaml             the blueprint: web service + Postgres + cron, all Frankfurt
 check.sh                one command: parse everything, then both suites
-db/migrations/          numbered SQL, applied in order, exactly once
-  001_platform.sql      auth.users, auth.sessions, auth.uid(), the request roles
-  002_schema.sql        tables, views, RPCs, row-level security, GDPR functions
-db/seed.sql             optional demo data (test databases only)
-db/tests/               throwaway-Postgres suites (authorisation, compliance, HTTP)
 docs/GDPR.md            what personal data is held, why, and for how long
 docs/TECH-STACK.md      stack options, costs, and why this one
 ```
@@ -203,7 +229,7 @@ blueprint asks for `basic-256mb` and `starter`, about $14/month together. See
 
 ### 2. The schema applies itself
 
-`server/index.js` runs the migrations before it starts listening, so the first
+`server.js` runs the migrations before it starts listening, so the first
 deploy builds the database and every later deploy applies whatever is new. You
 do not have to do anything for this step — it is here so you know what happened.
 
@@ -211,8 +237,8 @@ To run it by hand, from a machine that can reach the database using the
 **external** connection string from the Render dashboard:
 
 ```bash
-cd server && npm install
-DATABASE_URL="postgres://…render.com/hut?sslmode=require" node migrate.js
+npm install
+DATABASE_URL="postgres://…render.com/hut?sslmode=require" npm run migrate
 ```
 
 **`?sslmode=require` matters on the external URL** and must be absent on the
@@ -223,7 +249,7 @@ whichever URL you paste, say what it needs.
 
 #### Changing the schema
 
-Migrations live in `db/migrations`, named `NNN_description.sql`, applied in
+Migrations live in `migrations`, named `NNN_description.sql`, applied in
 filename order and recorded in `schema_migrations` with a checksum.
 
 **To change the schema, add a new numbered file.** Never edit one that has been
@@ -255,8 +281,8 @@ setup, "remember to disable public sign-up"; the endpoint that had to be
 disabled does not exist here.) Accounts are made by an administrator:
 
 ```bash
-node server/staff.js add gina@hut.example "Gina Guard" admin
-node server/staff.js list
+node staff.js add gina@hut.example "Gina Guard" admin
+node staff.js list
 ```
 
 Run it from Render → your service → **Shell**, where `DATABASE_URL` is already
@@ -271,14 +297,14 @@ the same trigger that fired on Supabase.
 To revoke access:
 
 ```bash
-node server/staff.js disable gina@hut.example
+node staff.js disable gina@hut.example
 ```
 
 That sets `profiles.active = false` **and** deletes their sessions, so access
 ends immediately rather than at the next login. Deleting the account outright
 is blocked by design: `gate_events.guard_id` and `checkin_events.guard_id` are
 `ON DELETE RESTRICT`, so the database refuses to erase the identity behind a
-historical audit trail. `node server/staff.js passwd <email>` changes a
+historical audit trail. `node staff.js passwd <email>` changes a
 password and, in the same transaction, ends every session that account has
 open.
 
@@ -286,7 +312,7 @@ open.
 
 Four maintenance functions used to be scheduled with `pg_cron` inside Supabase.
 Render's managed Postgres has no `pg_cron`, so the blueprint creates a cron
-job — `hut-nightly` — that runs `node server/jobs.js` at 00:30 UTC:
+job — `hut-nightly` — that runs `node jobs.js` at 00:30 UTC:
 
 - **`close-out-compliance-days`** — closes each day and writes the *negative*
   register rows for residents who were never seen. **This one is not
@@ -325,11 +351,11 @@ all three are gone.
 ```bash
 # a local Postgres, or point at anything you do not mind rewriting
 createdb hut
-cd server && npm install
-export DATABASE_URL="postgresql:///hut"
-node migrate.js                                # index.js would do this at boot too
+npm install
+cp .env.example .env             # then set DATABASE_URL in it
+npm run migrate                  # server.js would do this at boot too
 node staff.js add you@example.com "Your Name" admin
-HUT_ALLOW_INSECURE_COOKIE=1 node index.js      # http://localhost:3000
+HUT_ALLOW_INSECURE_COOKIE=1 npm start          # http://localhost:3000
 ```
 
 `HUT_ALLOW_INSECURE_COOKIE=1` is only for `http://localhost`. The session
@@ -354,9 +380,9 @@ per email and IP, and 12-hour sessions.
 ## Verifying the security model
 
 ```bash
-./db/tests/run.sh     # the database: authorisation and compliance
-./db/tests/api.sh     # the web tier in front of it
-./check.sh            # both, plus a parse of everything
+npm test              # everything — this is check.sh
+./test/sql.sh         # just the database: authorisation and compliance
+./test/api.sh         # just the web tier in front of it
 ```
 
 `run.sh` starts a throwaway PostgreSQL cluster, builds it **with the real
@@ -450,7 +476,7 @@ there is a single answer to "what is today" and it is the site's. Keep
 `local_timezone` matched to the site.
 
 **The web tier owns authentication; the database still owns authorisation.**
-Every request runs through `withIdentity()` in `server/db.js`, which opens a
+Every request runs through `withIdentity()` in `database.js`, which opens a
 transaction, drops to the `authenticated` role, and sets
 `request.jwt.claim.sub` — so `auth.uid()`, every policy and every `is_staff()`
 check behave exactly as they did under Supabase. Resist the temptation to
@@ -461,7 +487,7 @@ to serve resident data, and never use a bare `SET` where `SET LOCAL` is
 written, because a session-level setting outlives the transaction and would
 hand one guard's identity to the next request on that pooled connection.
 
-**Editing an inline `<script>` changes the CSP.** `server/index.js` hashes
+**Editing an inline `<script>` changes the CSP.** `server.js` hashes
 every inline block at boot and lists the hashes in `script-src`, which is what
 lets the policy drop `'unsafe-inline'` entirely. The hashes are computed from
 the files on disk at startup, so a deploy recomputes them — but a file edited

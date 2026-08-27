@@ -46,14 +46,14 @@ console.log('front ends parse and load nothing from a CDN');
 
 # node --check understands ESM from the file extension and the package type,
 # which vm.Script does not.
-for f in server/*.js; do
+for f in server.js database.js jobs.js staff.js lib/*.js routes/*.js test/*.test.js; do
   node --check "$f" || { echo "FAIL: $f does not parse"; fail=1; }
 done
-[ "$fail" -eq 0 ] && echo "server/*.js parse"
+[ "$fail" -eq 0 ] && echo "server, lib/, routes/ and test/ parse"
 
 if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/null 2>&1; then
   step "Database suite"
-  ./db/tests/run.sh >/tmp/hut-check-suite.log 2>&1
+  ./test/sql.sh >/tmp/hut-check-suite.log 2>&1
   if [ $? -eq 0 ]; then
     printf 'PASS — %s assertions\n' "$(grep -cE 'NOTICE:.* ok ' /tmp/hut-check-suite.log)"
     grep -E '^   ALLOWED' /tmp/hut-check-suite.log && { echo "FAIL: privilege escalation"; fail=1; }
@@ -64,7 +64,7 @@ if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/nu
   fi
 
   step "HTTP suite"
-  ./db/tests/api.sh >/tmp/hut-check-api.log 2>&1
+  ./test/api.sh >/tmp/hut-check-api.log 2>&1
   if [ $? -eq 0 ]; then
     tail -1 /tmp/hut-check-api.log
   else

@@ -2,13 +2,13 @@
 -- Hut Check-In — database schema
 -- Target: PostgreSQL 15+ (in use: Render Postgres 16)
 --
--- Apply db/migrations/001_platform.sql first — it provides auth.users, auth.uid() and the
--- anon/authenticated roles that this file depends on. `node server/migrate.js`
+-- Apply migrations/001_platform.sql first — it provides auth.users, auth.uid() and the
+-- anon/authenticated roles that this file depends on. `node database.js`
 -- does both, in order.
 --
 -- It is written to be re-runnable: every object is created with
 -- "if not exists" / "or replace" and policies are dropped before creation.
--- There is no `begin`/`commit` in here: server/migrate.js wraps each migration
+-- There is no `begin`/`commit` in here: database.js wraps each migration
 -- in a transaction, so a failure part-way through rolls the whole file back.
 --
 -- This file was written against Supabase and moved to plain Postgres without a
@@ -1243,12 +1243,12 @@ grant execute on function public.attention_list(integer)                   to au
 -- pg_cron from inside this file; Render's managed Postgres does not offer
 -- pg_cron, so the schedule now lives outside the database:
 --
---   server/jobs.js          runs all four (plus auth.purge_expired_sessions)
+--   jobs.js          runs all four (plus auth.purge_expired_sessions)
 --   render.yaml             schedules it as the `hut-nightly` cron job, 00:30 UTC
 --
 -- To run them by hand:
 --
---   DATABASE_URL="postgres://…" node server/jobs.js
+--   DATABASE_URL="postgres://…" node jobs.js
 --
 -- Or individually, from psql:
 --

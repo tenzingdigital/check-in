@@ -1,0 +1,22 @@
+{
+  "name": "hut-check-in",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hut Check-In — gate presence and the statutory daily register for a security hut.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "migrate": "node -e \"require('./database').migrate().then(()=>process.exit(0))\"",
+    "jobs": "node jobs.js",
+    "test": "./check.sh"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.21.0",
+    "pg": "^8.22.0"
+  }
+}

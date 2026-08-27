@@ -3,7 +3,7 @@
 # Shared scaffolding: bring up a throwaway PostgreSQL cluster with the real
 # schema applied, and tear it down on exit.
 #
-# Sourced by run.sh (the SQL acceptance suite) and by api.sh (the HTTP suite).
+# Sourced by sql.sh (the SQL acceptance suite) and by api.sh (the HTTP suite).
 # It exists so the two cannot drift about how the database under test is built
 # — they must be testing the same thing for either result to mean anything.
 #
@@ -82,11 +82,11 @@ start_cluster() {
   # runner — ordering, the transaction per file, the tracking table — is
   # exercised on every test run, instead of being the one piece of the deploy
   # path that nothing covers.
-  if [[ ! -d "$REPO/server/node_modules" ]]; then
-    echo "==> installing server dependencies"
-    (cd "$REPO/server" && { npm ci --omit=dev >/dev/null 2>&1 || npm install --omit=dev >/dev/null; })
+  if [[ ! -d "$REPO/node_modules" ]]; then
+    echo "==> installing dependencies"
+    (cd "$REPO" && { npm ci --omit=dev >/dev/null 2>&1 || npm install --omit=dev >/dev/null; })
   fi
 
   echo "==> applying migrations"
-  DATABASE_URL="$DATABASE_URL" node "$REPO/server/migrate.js"
+  DATABASE_URL="$DATABASE_URL" node -e "require('$REPO/database').migrate().then(()=>process.exit(0))"
 }

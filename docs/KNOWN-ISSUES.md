@@ -76,7 +76,7 @@ message.
 
 ### 12. Authentication is ours now
 
-`server/auth.js` is roughly two hundred lines standing where GoTrue used to be:
+`lib/auth.js` is roughly two hundred lines standing where GoTrue used to be:
 password verification, session issue and revocation, cookie flags, login
 throttling. Every one of those is a well-understood problem with a
 well-understood way to get it subtly wrong, and a subtle bug here is a breach
@@ -90,12 +90,12 @@ What holds the risk down, and what to preserve:
 - **Sessions are opaque and server-side.** No JWT, so revocation is a `DELETE`
   rather than a denylist. Deactivating an account or changing a password ends
   every session in the same transaction.
-- **`db/tests/api.sh` asserts the properties, not the implementation** —
+- **`test/api.sh` asserts the properties, not the implementation** —
   revocation is immediate, tokens do not survive logout, unknown emails are
   indistinguishable from wrong passwords.
 
 If this ever feels like more than it is worth, Option 3 in `docs/TECH-STACK.md`
-(self-hosted Supabase) hands login back to GoTrue with `db/migrations/002_schema.sql`
+(self-hosted Supabase) hands login back to GoTrue with `migrations/002_schema.sql`
 unchanged.
 
 ### 13. The nightly schedule left the database
@@ -116,7 +116,7 @@ requirement**, and it is on the go-live checklist in `docs/GDPR.md`.
 
 ### 14. Login throttling is per-instance and in memory
 
-The eight-attempts-per-email-and-IP lockout in `server/auth.js` lives in a `Map`.
+The eight-attempts-per-email-and-IP lockout in `lib/auth.js` lives in a `Map`.
 It resets when the service restarts or redeploys, and it would not be shared if
 the service were ever scaled to more than one instance.
 
@@ -137,34 +137,32 @@ This never bites in production (a deploy restarts the service) but it will bite
 in local development. `check.sh` asserts the served CSP matches the served HTML,
 so it cannot ship broken.
 
-### 16. `server/` has no linter and no type checking
+### 16. Nothing detects an edited migration
+
+`database.js` records each applied migration by filename only — matching
+`tenzingdigital/scheduler`, whose runner this one is deliberately shaped like.
+Edit an applied file and the runner will not re-run it, so the change is not in
+the database while the file looks as though it is.
+
+An earlier version of this repo recorded a checksum per migration and warned at
+boot on drift. It was removed to keep the two apps' tracking tables identical —
+a divergence there is exactly the sort of thing that bites when you move
+between the codebases. The property was worth having, so the fix is to add it
+to **both** apps, not to re-diverge this one.
+
+### 17. `lib/` and `routes/` have no linter and no type checking
 
 `check.sh` runs `node --check` on each file, which catches syntax errors and
 nothing else. The suites cover behaviour, but a typo in a rarely-taken error
 path — `err.staus` instead of `err.status` — would pass everything and fail at
-3am. Worth adding `tsc --checkJs` with JSDoc types, or at least a linter, if
-this grows beyond its current size.
-
-### 17. Migration drift warns rather than fails
-
-`server/migrate.js` checksums each applied migration and logs a warning at boot
-if a file has changed since — it cannot apply the change, because that would
-mean re-running a file, so the change simply is not in the database.
-
-A stricter runner would refuse to boot. That was rejected deliberately: the
-usual cause of a checksum change is an edited comment, and taking a security
-hut's register offline over a comment is worse than the thing it is protecting
-against. The trade is that the warning has to actually be read — it appears in
-the Render deploy log, and `db/tests/api.sh` asserts it fires, but nothing
-escalates it.
-
-If this system ever has more than one person changing the schema, make it fatal.
+3am. Worth adding `tsc --checkJs` with JSDoc types, or at least a linter,
+across both apps together.
 
 ---
 
 ## A note on the test suite
 
-Every expected value in `db/tests/` is asserted via `pg_temp.expect()`
+Every expected value in `test/` is asserted via `pg_temp.expect()`
 rather than printed. This is not ceremony — it caught six real defects during the
 build, including two where a test *looked* like it was checking something and
 could not fail:

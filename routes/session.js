@@ -1,0 +1,62 @@
+// Sign in, sign out, and "who am I".
+//
+// This is the only router mounted ahead of auth.requireSession, because it is
+// the one that creates a session. Everything it does that touches credentials
+// lives in lib/auth.js; this file is transport only.
+const express = require('express');
+const { wrap } = require('../lib/asyncRoute');
+const db = require('../database');
+const auth = require('../lib/auth');
+
+const router = express.Router();
+
+// POST /api/session — log in.
+router.post('/', wrap(async (req, res) => {
+  const { email, password } = req.body || {};
+  const ip = req.ip;
+
+  if (auth.lockedOut(email, ip)) {
+    return res.status(429).json({ error: 'Too many attempts. Wait five minutes and try again.' });
+  }
+
+  const result = await auth.signIn(email, password, { ip, userAgent: req.get('user-agent') });
+  if (!result) {
+    // One message for every failure mode — wrong password, unknown email,
+    // deactivated profile. Distinguishing them tells an attacker which
+    // addresses are guards, and tells a suspended guard exactly what happened
+    // when the intended channel for that is their supervisor.
+    return res.status(401).json({ error: 'Email or password not recognised.' });
+  }
+
+  res.setHeader('Set-Cookie', auth.sessionCookie(result.token, result.expiresAt));
+  res.json({ ok: true });
+}));
+
+// DELETE /api/session — log out.
+router.delete('/', wrap(async (req, res) => {
+  await auth.signOut(auth.parseCookies(req.headers.cookie)[auth.COOKIE_NAME]);
+  res.setHeader('Set-Cookie', auth.clearedCookie());
+  res.json({ ok: true });
+}));
+
+// GET /api/session — who am I, and what is this site called.
+//
+// Both front ends call this on boot. The browser holds no token of its own, so
+// this is also how a page decides whether to show the login form or the app.
+router.get('/', auth.requireSession, wrap(async (req, res) => {
+  const settings = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select site_name, local_timezone, adult_age_years, due_soon_after_hour,
+              event_retention_days, compliance_retention_days
+         from public.app_settings limit 1`,
+    );
+    return rows[0] || null;
+  });
+
+  res.json({
+    profile: { full_name: req.session.fullName, role: req.session.role },
+    settings,
+  });
+}));
+
+module.exports = router;

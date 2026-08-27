@@ -48,11 +48,10 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    rootDir: server
-    buildCommand: npm ci --omit=dev
-    startCommand: node index.js
+    buildCommand: npm install
+    startCommand: node server.js
 
-    # No preDeployCommand: index.js applies db/migrations/*.sql itself before it
+    # No preDeployCommand: server.js applies migrations/*.sql itself before it
     # starts listening, so an instance never serves traffic against a schema it
     # has not applied, and the runner's advisory lock means two instances
     # coming up together during a deploy cannot race. This also works on every
@@ -76,7 +75,7 @@ services:
       - key: HUT_SESSION_HOURS
         value: "12"
 
-    # Security headers are NOT set here. They live in server/index.js, next to
+    # Security headers are NOT set here. They live in lib/security.js, next to
     # the Content-Security-Policy hashes they are computed from — the CSP now
     # lists a SHA-256 for each inline <script> instead of allowing
     # 'unsafe-inline', and that can only be derived from the files themselves.
@@ -104,8 +103,7 @@ services:
     region: frankfurt
     plan: starter
     schedule: "30 0 * * *"
-    rootDir: server
-    buildCommand: npm ci --omit=dev
+    buildCommand: npm install
     startCommand: node jobs.js
     envVars:
       - key: DATABASE_URL

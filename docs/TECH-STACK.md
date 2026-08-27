@@ -42,7 +42,8 @@ API, and a Render cron job. One vendor, one region, one bill.
 | | |
 |---|---|
 | Cost | ~$14/mo — `basic-256mb` Postgres (~$6) + `starter` web service (~$7) + cron |
-| Schema | numbered SQL migrations in `db/migrations`, applied at boot |
+| Schema | numbered SQL migrations in `migrations/`, applied at boot |
+| Shape | mirrors `tenzingdigital/scheduler` — same layout, same conventions |
 | EU-hosted | Yes — Frankfurt |
 | EU-owned | No (US company) |
 | Ops burden | Low, with one new thing to own: authentication |
@@ -50,8 +51,8 @@ API, and a Render cron job. One vendor, one region, one bill.
 **What this costs that the Supabase version did not.** Supabase was not just a
 database, it was PostgREST (the HTTP API the browser called directly) and
 GoTrue (login, sessions, password hashing). Plain Postgres is only the first of
-those three. Replacing the other two is `server/` — about four hundred lines,
-one dependency, and the largest new risk in this system. `db/tests/api.sh`
+those three. Replacing the other two is `lib/` and `routes/` — about four hundred lines,
+three dependencies, and the largest new risk in this system. `test/api.sh`
 exists specifically to hold that risk down.
 
 **What it gains.** Cheaper, one vendor instead of two, no third-party origin in
@@ -60,9 +61,9 @@ and every external host — and a schema that is now provably portable rather
 than portable in principle.
 
 **What did NOT change, and this is the important part.** The security model
-stayed in the database. `db/migrations/002_schema.sql` was not modified by the migration:
+stayed in the database. `migrations/002_schema.sql` was not modified by the migration:
 every RLS policy, every `SECURITY DEFINER` RPC, every `auth.uid()` call works
-as written, because `db/migrations/001_platform.sql` still provides `auth.users`,
+as written, because `migrations/001_platform.sql` still provides `auth.users`,
 `auth.uid()` and the `anon`/`authenticated` roles, and the API binds an
 identity per transaction with `SET LOCAL ROLE` + `SET LOCAL
 request.jwt.claim.sub`. The old acceptance suite passes unchanged.
@@ -102,7 +103,7 @@ used to be a public HTML file talking straight to the database.
 What it also gave, and what Option 1 had to rebuild: login, sessions, password
 storage, and an HTTP API generated from the schema.
 
-Going back is not free but it is bounded: `db/migrations/002_schema.sql` is unchanged, so it
+Going back is not free but it is bounded: `migrations/002_schema.sql` is unchanged, so it
 would be a data copy plus pointing the front ends at supabase-js again. The
 Supabase free tier pauses a project after ~7 days of inactivity — fine while
 building, not fine for a hut that is quiet over Christmas — so Pro (~$25/mo) is
@@ -129,7 +130,7 @@ escape hatch. It is gone: the app is no longer a pile of static files, so
 | EU-owned | **Yes** — Hetzner is German |
 | Ops burden | Real: backups, upgrades, TLS, monitoring, incident response |
 
-Now also the option that would let you delete `server/auth.js`: a self-hosted
+Now also the option that would let you delete `lib/auth.js`: a self-hosted
 Supabase brings GoTrue back, so login stops being ours to maintain.
 
 The compliance story is the strongest available and the bill is the smallest.
@@ -170,7 +171,7 @@ model exists and is tested.
 Postgres-compatible or BaaS alternatives, all with EU regions.
 
 **Neon** (~$0–19/mo) is Postgres, so `schema.sql` ports — and now that
-`server/` exists and owns login, "it has no built-in auth" has stopped being a
+`lib/` and `routes/` exists and owns login, "it has no built-in auth" has stopped being a
 disqualifier. Neon is a straight swap for Render Postgres: change
 `DATABASE_URL`, keep everything else. Its EU regions and generous free tier
 make it the obvious fallback if Render's database pricing ever moves.
@@ -189,7 +190,7 @@ the security model rather than porting it.
 
 | Option | ~Monthly | EU-hosted | EU-owned | Who owns login | Migration from here |
 |---|---|---|---|---|---|
-| **1. Render, all of it** | **$14** | **Yes** | **No** | **us (`server/auth.js`)** | **— (in use)** |
+| **1. Render, all of it** | **$14** | **Yes** | **No** | **us (`lib/auth.js`)** | **— (in use)** |
 | 2. Supabase + Render | $25 | Yes | No | Supabase | Real — re-point the front ends |
 | 2b. Vercel | $20+ | Yes | No | — | Ruled out: no commercial use on Hobby |
 | 3. Self-hosted Supabase, Hetzner | €5–15 | Yes | Yes | GoTrue | Low — schema runs as-is |
@@ -200,9 +201,48 @@ the security model rather than porting it.
 resident data sits behind an API we control end to end. The price is the
 "who owns login" column: authentication is ours now, and it is the one part of
 this system where a subtle bug is a breach rather than a wrong number on a
-screen. Keep `server/auth.js` small, keep `db/tests/api.sh` green, and reach
+screen. Keep `lib/auth.js` small, keep `test/api.sh` green, and reach
 for Option 3 if EU *ownership* ever becomes a requirement — it is also the
 option that hands login back to somebody else.
+
+---
+
+## Aligned with the scheduler, on purpose
+
+This repo and `tenzingdigital/scheduler` are maintained by the same person, so
+they are deliberately the same shape:
+
+| | Both |
+|---|---|
+| Runtime | Node 22, Express 4, CommonJS |
+| Database | Postgres, `pg`, numbered SQL migrations applied at boot |
+| RLS | one transaction per request with `set_config(..., true)` — `withOrg()` there, `withIdentity()` here |
+| Layout | `server.js`, `database.js`, `lib/`, `routes/`, `migrations/`, `public/`, `test/` |
+| Async errors | `lib/asyncRoute.js` `wrap()` |
+| Front end | vanilla HTML/CSS/JS, no build step, no CDN |
+| Hosting | Render, Frankfurt |
+| Env | `dotenv` in a try/catch, `.env.example`, `.node-version` |
+
+The one that cost something: this app had no framework at all, and `node:http`
+plus a twenty-line router was genuinely fewer moving parts for eleven
+endpoints. Express was adopted anyway. The reasoning is that a dependency count
+is not the thing being optimised — the maintainer's context-switching cost is,
+and two designs for the same job is a tax paid on every switch. It is a
+judgement about people, not about code, and it should be revisited if the two
+apps ever stop sharing a maintainer.
+
+Two places where they still differ, both for reasons rather than drift:
+
+- **`schema_migrations` has no checksum column here**, matching the scheduler
+  exactly. An earlier version of this repo recorded one and warned at boot when
+  an applied migration had been edited. That is a good property and both apps
+  would benefit — but a divergent tracking table between two otherwise
+  identical runners is exactly the sort of thing that bites when you move
+  between them. Add it to both, or neither.
+- **No email/SMS/push adapters.** The scheduler has them; this app deliberately
+  does not, because on a statutory register a failed delivery is
+  indistinguishable from non-compliance. See "Not built, and why" in
+  `README.md`.
 
 ---
 
@@ -215,24 +255,24 @@ exactly three Supabase-specific things — the `auth.users` table, the
 schema was portable in principle.
 
 The migration to Render tested that claim, and it held. Not one statement in
-`db/migrations/002_schema.sql` changed. The only edits were two comment blocks: the header,
+`migrations/002_schema.sql` changed. The only edits were two comment blocks: the header,
 which named Supabase as the target, and the trailing scheduling block, which
 used to give `cron.schedule` calls to paste into the Supabase dashboard and now
-points at `server/jobs.js`. The stub was promoted to
-`db/migrations/001_platform.sql`, given real password and session storage, and became
+points at `jobs.js`. The stub was promoted to
+`migrations/001_platform.sql`, given real password and session storage, and became
 production. The 84-assertion acceptance suite passed against it without a
 single test being changed.
 
 What the claim did *not* cover, and what the migration actually cost, was
 everything Supabase provided **above** the database: PostgREST turned the
 schema into an HTTP API, and GoTrue handled login. Those had to be written —
-`server/`, about four hundred lines and one dependency. That is the honest
+`lib/` and `routes/`, about four hundred lines and three dependencies. That is the honest
 price of leaving a BaaS, and it is worth writing down for whoever considers the
 next move: **a portable schema makes the database portable, not the
 application.**
 
 Keep the property anyway. No Supabase-specific — and now no Render-specific —
-features in the schema; nothing in `server/` that assumes a particular host
+features in the schema; nothing in `lib/` and `routes/` that assumes a particular host
 beyond reading `DATABASE_URL` and `PORT`. That is what makes Option 5 a
 one-variable change.
 
