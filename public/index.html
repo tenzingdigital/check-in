@@ -157,7 +157,6 @@ function residentCard(r, { clickable = true } = {}) {
   const cls = ["card"].join(" ");
   const bits = [];
   if (r.room_ref) bits.push(esc(r.room_ref));
-  bits.push(`age ${r.age_years}`);
   bits.push(r.last_event_at ? `last movement ${ago(r.last_event_at)}` : "no movement on record");
 
   return `
@@ -189,7 +188,7 @@ function renderDetail(r) {
 
   el.innerHTML = `
     <h2>${esc(r.full_name)}</h2>
-    <div class="sub">${r.room_ref ? esc(r.room_ref) + " · " : ""}age ${r.age_years}${r.note ? " · " + esc(r.note) : ""}</div>
+    <div class="sub">${[r.room_ref ? esc(r.room_ref) : "", r.note ? esc(r.note) : ""].filter(Boolean).join(" · ")}</div>
 
     <div class="facts">
       <div class="fact"><span>Status</span><b>${isIn ? "On site" : "Off site"}</b></div>

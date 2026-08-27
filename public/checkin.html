@@ -187,7 +187,6 @@ function residentCard(r) {
 
   const bits = [];
   if (r.room_ref) bits.push(esc(r.room_ref));
-  bits.push(`age ${r.age_years}`);
   bits.push(`last seen ${esc(lastSeenText(r))}`);
 
   return `
@@ -222,7 +221,7 @@ function renderDetail(r) {
 
   el.innerHTML = `
     <h2>${esc(r.full_name)}</h2>
-    <div class="sub">${r.room_ref ? esc(r.room_ref) + " · " : ""}age ${r.age_years}</div>
+    <div class="sub">${r.room_ref ? esc(r.room_ref) : ""}</div>
 
     <div class="facts">
       <div class="fact"><span>Status</span><b class="badge ${esc(r.state)}">${esc(stateLabel(r.state))}</b></div>
