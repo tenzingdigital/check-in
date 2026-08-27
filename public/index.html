@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">
-<title>Hut Check-In</title>
+<title>Hut Check-In — Gate</title>
 
 <!--
   Hut Check-In — the gate app. No build step, no framework, no CDN.
@@ -26,7 +26,7 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>Hut Check-In</h1>
+  <h1>Hut Check-In — Gate</h1>
   <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -44,6 +44,10 @@
         <span id="siteName">Security Hut</span>
         <small id="guardName">&nbsp;</small>
       </div>
+      <nav class="viewswitch" aria-label="App view">
+        <span aria-current="page">Gate</span>
+        <a href="/checkin.html">Daily register</a>
+      </nav>
       <span class="clock" id="clock"></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>

@@ -60,7 +60,7 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>Hut Check-In</h1>
+  <h1>Hut Check-In — Daily Register</h1>
   <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -78,6 +78,10 @@
         <span id="siteName">Security Hut</span>
         <small id="guardName">&nbsp;</small>
       </div>
+      <nav class="viewswitch" aria-label="App view">
+        <a href="/index.html">Gate</a>
+        <span aria-current="page">Daily register</span>
+      </nav>
       <span class="clock" id="clock"></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
