@@ -45,7 +45,16 @@
   }
   .brand { font-weight: 650; letter-spacing: -0.01em; margin-right: auto; }
   .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
-  .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
+  /* ---- filter chips ---- */
+  .chips { display: flex; gap: 8px; margin-top: 10px; }
+  .chips button {
+    padding: 8px 14px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--line);
+    color: var(--muted); font-weight: 550; font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #041025; }
+  .chips button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Which app is this terminal showing — the gate or the daily register?
      Both apps share this header and used to look identical, so a guard (or an

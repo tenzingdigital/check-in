@@ -48,7 +48,6 @@
         <span aria-current="page">Gate</span>
         <a href="/checkin.html">Daily register</a>
       </nav>
-      <span class="clock" id="clock"></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
     <div class="stats">
@@ -70,6 +69,11 @@
     <section id="panelSearch" role="tabpanel" aria-labelledby="tabSearch">
       <input id="q" class="field" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <nav class="chips" id="presenceFilter" aria-label="Filter by presence">
+        <button type="button" data-presence="all" aria-pressed="true">All</button>
+        <button type="button" data-presence="in"  aria-pressed="false">On site</button>
+        <button type="button" data-presence="out" aria-pressed="false">Off site</button>
+      </nav>
       <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before signing them in.</p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
@@ -132,6 +136,9 @@ const state = {
   selected: null,   // resident status row shown in the detail panel
   tab:      "search",
   busy:     false,
+  presence: "all",  // the On site / Off site chip row
+  searchRows:  [],  // the last search response, refiltered client-side
+  searchQuery: "",
   // Every row we have rendered, by id. Tapping a card reads from here rather
   // than making a second round trip.
   rows:     new Map(),
@@ -260,7 +267,36 @@ async function runSearch(q) {
   if (!rows) return;
 
   showError("");
-  renderList(box, rows, q ? `No resident matching “${q}”.` : "No residents on the register.");
+  state.searchRows = rows;
+  state.searchQuery = q;
+  renderSearch();
+}
+
+// Re-renders the search list through the presence filter. Filtering is
+// client-side: the rows already carry `presence`, so switching chips never
+// costs a round trip, and the counts on the chips always describe the rows
+// the current query matched.
+function renderSearch() {
+  const rows = state.searchRows || [];
+  const inCount = rows.filter((r) => r.presence === "in").length;
+  const counts = { all: rows.length, in: inCount, out: rows.length - inCount };
+  const labels = { all: "All", in: "On site", out: "Off site" };
+
+  document.querySelectorAll("#presenceFilter button").forEach((b) => {
+    const p = b.dataset.presence;
+    b.textContent = `${labels[p]} (${counts[p]})`;
+    b.setAttribute("aria-pressed", String(p === state.presence));
+  });
+
+  const shown = state.presence === "all"
+    ? rows
+    : rows.filter((r) => r.presence === state.presence);
+  const empty = state.searchQuery
+    ? `No resident matching “${state.searchQuery}”.`
+    : state.presence === "in"  ? "Nobody is on site."
+    : state.presence === "out" ? "Nobody is off site."
+    : "No residents on the register.";
+  renderList($("searchResults"), shown, empty);
 }
 
 async function record(residentId, direction) {
@@ -503,6 +539,13 @@ document.addEventListener("click", (e) => {
   renderDetail(row);
 });
 
+$("presenceFilter").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-presence]");
+  if (!btn) return;
+  state.presence = btn.dataset.presence;
+  renderSearch();
+});
+
 $("tabSearch").addEventListener("click", () => selectTab("search"));
 $("tabLog").addEventListener("click",    () => selectTab("log"));
 $("tabStaff").addEventListener("click",  () => selectTab("staff"));
@@ -512,11 +555,8 @@ $("logToday").addEventListener("click", () => {
   loadLog(todayISODate());
 });
 
-// Clock in the header, plus a periodic summary refresh so a terminal left open
-// overnight does not show a stale on-site count.
-setInterval(() => {
-  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}, 1000);
+// Periodic summary refresh so a terminal left open overnight does not show a
+// stale on-site count.
 setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
 
 // Any request that comes back 401 — an expired session, or a supervisor

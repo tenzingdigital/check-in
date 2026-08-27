@@ -85,7 +85,6 @@
         <a href="/index.html">Gate</a>
         <span aria-current="page">Daily register</span>
       </nav>
-      <span class="clock" id="clock"></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
     <div class="stats">
@@ -493,11 +492,8 @@ $("tabCheckin").addEventListener("click",   () => selectTab("checkin"));
 $("tabAttention").addEventListener("click", () => selectTab("attention"));
 $("refreshAttention").addEventListener("click", loadAttention);
 
-// Clock in the header, plus a periodic summary refresh so a terminal left open
-// overnight does not show a stale attention count.
-setInterval(() => {
-  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}, 1000);
+// Periodic summary refresh so a terminal left open overnight does not show a
+// stale attention count.
 setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
 setInterval(() => { if (state.profile && state.tab === "attention") loadAttention(); }, 120000);
 
