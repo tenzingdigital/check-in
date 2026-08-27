@@ -19,6 +19,7 @@
 
 const assert = require('assert/strict');
 const app = require('../server');
+const auth = require('../lib/auth');
 const { closePool, withIdentity, withOwner, migrate } = require('../database');
 
 const PASSWORD = "correct-horse-battery";
@@ -83,7 +84,58 @@ async function seedStaff() {
    The suite
    ---------------------------------------------------------------------- */
 
+// The first-account bootstrap can only be tested on an empty database, so it
+// runs before any fixture exists — and cleans up after itself so seedStaff()
+// below still creates the first profile (seed.sql attributes its gate events to
+// whichever profile was created first).
+async function testBootstrap() {
+  console.log("\n== first account ==");
+
+  await test("refuses to create anything when ADMIN_* is unset", async () => {
+    delete process.env.ADMIN_EMAIL;
+    delete process.env.ADMIN_PASSWORD;
+    assert.equal(await auth.seedAdminIfEmpty(), null);
+    const { rows } = await withOwner((c) => c.query("select count(*)::int as n from public.profiles"));
+    assert.equal(rows[0].n, 0, "an account was created without credentials");
+  });
+
+  await test("refuses a password shorter than 12 characters", async () => {
+    process.env.ADMIN_EMAIL = "boss@hut.example";
+    process.env.ADMIN_PASSWORD = "short";
+    assert.equal(await auth.seedAdminIfEmpty(), null);
+    const { rows } = await withOwner((c) => c.query("select count(*)::int as n from public.profiles"));
+    assert.equal(rows[0].n, 0);
+  });
+
+  await test("creates one admin on an empty database, and it can log in", async () => {
+    process.env.ADMIN_EMAIL = "boss@hut.example";
+    process.env.ADMIN_PASSWORD = "a-long-enough-password";
+    const created = await auth.seedAdminIfEmpty();
+    assert.deepEqual(created, { email: "boss@hut.example" });
+
+    const { rows } = await withOwner((c) =>
+      c.query("select full_name, role, active from public.profiles"));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].role, "admin", "the first account must be an admin");
+    assert.equal(rows[0].active, true);
+
+    const session = await auth.signIn("boss@hut.example", "a-long-enough-password", { ip: "test" });
+    assert.ok(session, "the bootstrapped admin could not log in");
+  });
+
+  await test("never fires twice", async () => {
+    assert.equal(await auth.seedAdminIfEmpty(), null, "a second account was created");
+  });
+
+  // Remove it so the rest of the suite starts from an empty register. The
+  // account has no events attributed to it, so nothing blocks the delete.
+  await withOwner((c) => c.query("delete from auth.users where lower(email) = 'boss@hut.example'"));
+  delete process.env.ADMIN_EMAIL;
+  delete process.env.ADMIN_PASSWORD;
+}
+
 async function main() {
+  await testBootstrap();
   const guardId = await seedStaff();
 
   const server = app.listen(0);

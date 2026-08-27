@@ -273,26 +273,48 @@ One caveat carried over from before: `residents.search_key` is a generated
 column, so changing how names are normalised needs a real migration that
 rebuilds it, not a redefinition.
 
-### 3. Create staff accounts
+### 3. Create the first account
 
-There is no sign-up route, no invite email and no public registration form —
-by construction, not by configuration. (Under Supabase this was step 3 of
-setup, "remember to disable public sign-up"; the endpoint that had to be
-disabled does not exist here.) Accounts are made by an administrator:
+There is no sign-up route, no invite email and no public registration form — by
+construction, not by configuration. (Under Supabase this was step 3 of setup,
+"remember to disable public sign-up"; the endpoint that had to be disabled does
+not exist here.) So the first account is made for you, from the environment.
+
+**Set `ADMIN_EMAIL` and `ADMIN_PASSWORD`.** The blueprint declares both with
+`sync: false`, so Render prompts you for them when you create it. On an empty
+database — and only then — the first boot creates that account as an `admin`
+and logs the address it used. It never logs the password, and it never fires
+again once any staff account exists.
+
+Once you have logged in, **delete `ADMIN_PASSWORD` from the service's
+environment.** The account stays; nothing re-reads the variable.
+
+If you skip this, the deploy still succeeds and the log says plainly that
+nobody can log in.
+
+> **Why this exists rather than "just run the CLI":** `node staff.js add` needs
+> a shell on the running service, and **Render's Shell tab is only available on
+> paid instance types**. Without an environment-driven first account, a free
+> deploy would come up healthy and be permanently unreachable.
+
+### 4. Add the rest of the staff
+
+Once you can log in, further accounts are made with the CLI. Run it from Render
+→ your service → **Shell** if your plan has one, or from your own machine
+against the **external** `DATABASE_URL`:
 
 ```bash
-node staff.js add gina@hut.example "Gina Guard" admin
 node staff.js list
+node staff.js add gina@hut.example "Gina Guard" guard
 ```
 
-Run it from Render → your service → **Shell**, where `DATABASE_URL` is already
-set. It prompts for the password rather than taking it as an argument, so the
-password never lands in shell history or Render's command log. Minimum twelve
-characters; stored as bcrypt at cost 12.
+It prompts for the password rather than taking it as an argument, so the
+password never lands in shell history, in `ps` output, or in Render's command
+log. Minimum twelve characters; stored as bcrypt at cost 12.
 
-Valid roles are `guard`, `supervisor`, `admin`; omitting it gives `guard`.
-**Make at least one `admin`.** The `profiles` row is created automatically by
-the same trigger that fired on Supabase.
+Valid roles are `guard`, `supervisor`, `admin`; omitting it gives `guard`. The
+`profiles` row is created automatically by the same trigger that fired on
+Supabase.
 
 To revoke access:
 
@@ -301,14 +323,23 @@ node staff.js disable gina@hut.example
 ```
 
 That sets `profiles.active = false` **and** deletes their sessions, so access
-ends immediately rather than at the next login. Deleting the account outright
-is blocked by design: `gate_events.guard_id` and `checkin_events.guard_id` are
+ends immediately rather than at the next login. Deleting the account outright is
+blocked by design: `gate_events.guard_id` and `checkin_events.guard_id` are
 `ON DELETE RESTRICT`, so the database refuses to erase the identity behind a
-historical audit trail. `node staff.js passwd <email>` changes a
-password and, in the same transaction, ends every session that account has
-open.
+historical audit trail. `node staff.js passwd <email>` changes a password and,
+in the same transaction, ends every session that account has open.
 
-### 4. Check the nightly job is running
+No shell and no local Postgres client? Everything the CLI does is a one-line
+SQL call, so Render's database page → **Connect → PSQL command** also works:
+
+```sql
+select auth.create_user('gina@hut.example', 'a-long-password', 'Gina Guard', 'guard');
+select auth.set_password('gina@hut.example', 'a-new-long-password');
+update public.profiles set active = false where id =
+  (select id from auth.users where lower(email) = 'gina@hut.example');
+```
+
+### 5. Check the nightly job is running
 
 Four maintenance functions used to be scheduled with `pg_cron` inside Supabase.
 Render's managed Postgres has no `pg_cron`, so the blueprint creates a cron
@@ -340,21 +371,19 @@ introduced.** Inside Supabase the schedule lived in the database and survived
 everything; here it is a separate Render resource that somebody can delete
 while tidying up, and the register would degrade silently.
 
-### 5. Point the front ends at the API
+### 6. Point the front ends at the API
 
 Nothing to do. The apps call `/api` on their own origin, served by the same
 service. There is no URL to configure, no key to paste, and no `config.js` —
 all three are gone.
 
-### 6. Running it locally
+### 7. Running it locally
 
 ```bash
 # a local Postgres, or point at anything you do not mind rewriting
 createdb hut
 npm install
-cp .env.example .env             # then set DATABASE_URL in it
-npm run migrate                  # server.js would do this at boot too
-node staff.js add you@example.com "Your Name" admin
+cp .env.example .env             # set DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD
 HUT_ALLOW_INSECURE_COOKIE=1 npm start          # http://localhost:3000
 ```
 
@@ -369,7 +398,7 @@ edit the JavaScript inside `index.html` or `checkin.html` while the server is
 running, the browser refuses to run the page until you restart it. A blank page
 with a CSP error in the console is almost always this.
 
-### 7. Restrict who can reach it
+### 8. Restrict who can reach it
 
 The login page is on the public internet. Render supports IP allowlists on
 paid instance types; use one if the hut has a fixed address. Failing that, the

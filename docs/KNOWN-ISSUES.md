@@ -150,7 +150,22 @@ a divergence there is exactly the sort of thing that bites when you move
 between the codebases. The property was worth having, so the fix is to add it
 to **both** apps, not to re-diverge this one.
 
-### 17. `lib/` and `routes/` have no linter and no type checking
+### 17. The first password passes through an environment variable
+
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` create the first administrator on an empty
+database, because `node staff.js add` needs a shell and Render's Shell tab is a
+paid-plan feature — without this a free deploy comes up healthy and is
+permanently unreachable.
+
+The cost is that one password exists in the service's environment, visible to
+anyone with access to the Render dashboard. Mitigated rather than solved: it is
+never logged, it is only read when there are zero staff accounts, and the README
+tells you to delete the variable after first login. Nothing enforces that
+deletion, and nothing forces a password change on first use.
+
+If this app ever holds more than one site, replace it with an invite flow.
+
+### 18. `lib/` and `routes/` have no linter and no type checking
 
 `check.sh` runs `node --check` on each file, which catches syntax errors and
 nothing else. The suites cover behaviour, but a typo in a rarely-taken error

@@ -43,12 +43,22 @@ app.use(securityHeaders());
 // module load, so test/api.test.js can require this file and drive the app
 // without migrating or listening.
 //
+// Order:
+//   1. db.migrate()          — the schema must exist before anything queries it
+//   2. seedAdminIfEmpty()    — so a fresh deploy has somebody who can log in
+//
 // db.migrate() runs before app.listen below, not after: an instance that
 // answers requests against a schema it has not applied is the failure this
 // ordering exists to prevent. The runner holds an advisory lock, so two
 // instances coming up together during a deploy cannot race each other.
 async function boot() {
   await db.migrate();
+
+  const admin = await auth.seedAdminIfEmpty();
+  if (admin) {
+    console.log(`\n*** First administrator created — ${admin.email}`);
+    console.log('*** Log in, then remove ADMIN_PASSWORD from the environment.\n');
+  }
 }
 
 /* --------------------------------------------------------------------------

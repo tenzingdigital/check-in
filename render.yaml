@@ -75,6 +75,23 @@ services:
       - key: HUT_SESSION_HOURS
         value: "12"
 
+      # The first administrator, created on an empty database at first boot.
+      #
+      # Without these, a fresh deploy has no accounts and nobody can log in —
+      # and `node staff.js add` needs Render's Shell tab, which only exists on
+      # paid instance types. `sync: false` makes Render PROMPT for the value
+      # when you create the blueprint rather than storing one in this file.
+      #
+      # Once you have logged in, delete ADMIN_PASSWORD from the service's
+      # environment. The account stays; the bootstrap only ever fires when
+      # there are zero staff accounts, so it will not run again either way.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_NAME
+        sync: false
+
     # Security headers are NOT set here. They live in lib/security.js, next to
     # the Content-Security-Policy hashes they are computed from — the CSP now
     # lists a SHA-256 for each inline <script> instead of allowing
