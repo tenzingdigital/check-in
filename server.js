@@ -54,6 +54,13 @@ app.use(securityHeaders());
 async function boot() {
   await db.migrate();
 
+  // Demo databases only: SEED_TODAY_CHECKINS=1 gives every active resident a
+  // check-in today at a random time (see seed-today.js — idempotent, so a
+  // lingering flag re-runs as a no-op). Remove the env var once it has run.
+  if (process.env.SEED_TODAY_CHECKINS === '1') {
+    await require('./seed-today').run();
+  }
+
   const admin = await auth.seedAdminIfEmpty();
   if (admin) {
     console.log(`\n*** First administrator created — ${admin.email}`);
