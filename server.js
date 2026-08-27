@@ -114,6 +114,7 @@ app.use('/api/session', require('./routes/session'));
 
 app.use('/api', auth.requireSession);
 app.use('/api/residents', require('./routes/residents'));
+app.use('/api/staff', require('./routes/staff'));
 app.use('/api', require('./routes/gate'));
 app.use('/api', require('./routes/checkins'));
 

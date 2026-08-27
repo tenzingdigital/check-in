@@ -362,6 +362,126 @@ async function main() {
     assert.equal((await fresh.fetch("/api/summary")).status, 401);
   });
 
+  console.log("\n== staff management ==");
+
+  // The admin's Staff tab. Authorisation lives in the database — the create
+  // and reset functions re-check is_admin(), and deactivation/role changes go
+  // through the profiles_admin_all policy — so what this section proves is
+  // that the API neither adds a way around that nor loses the refusals.
+  const SUPER_EMAIL = "nadia@hut.example";
+  const SUPER_PASSWORD = "another-long-password";
+  const adminC = client(base);
+
+  await test("an admin can create an account that can then log in", async () => {
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, [
+      "head@hut.example", PASSWORD, "Head Manager", "admin",
+    ]));
+    const login = await adminC.fetch("/api/session", { method: "POST", body: { email: "head@hut.example", password: PASSWORD } });
+    assert.equal(login.status, 200);
+
+    const res = await adminC.fetch("/api/staff", {
+      method: "POST",
+      body: { email: SUPER_EMAIL, full_name: "Nadia Supervisor", role: "supervisor", password: SUPER_PASSWORD },
+    });
+    assert.equal(res.status, 201, res.text);
+    assert.ok(res.json.id);
+
+    const fresh = client(base);
+    const newLogin = await fresh.fetch("/api/session", { method: "POST", body: { email: SUPER_EMAIL, password: SUPER_PASSWORD } });
+    assert.equal(newLogin.status, 200, "the created account could not log in");
+    const who = await fresh.fetch("/api/session");
+    assert.equal(who.json.profile.role, "supervisor");
+  });
+
+  await test("a guard cannot create, promote or disable anyone", async () => {
+    const guardC = client(base);
+    await guardC.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
+
+    const create = await guardC.fetch("/api/staff", {
+      method: "POST",
+      body: { email: "sneaky@hut.example", full_name: "Sneaky", role: "admin", password: "a-long-enough-password" },
+    });
+    assert.equal(create.status, 400);
+    assert.match(create.json.error, /administrator/);
+
+    const list = await guardC.fetch("/api/staff");
+    assert.equal(list.status, 200); // profiles are staff-visible by design
+    const admin = list.json.find((s) => s.email === "head@hut.example");
+    const demote = await guardC.fetch(`/api/staff/${admin.id}/role`, { method: "POST", body: { role: "guard" } });
+    assert.equal(demote.status, 404, "a guard's role change did not fail closed");
+    const disable = await guardC.fetch(`/api/staff/${admin.id}/active`, { method: "POST", body: { active: false } });
+    assert.equal(disable.status, 404, "a guard's deactivation did not fail closed");
+  });
+
+  await test("a duplicate email and a short password are refused cleanly", async () => {
+    const dup = await adminC.fetch("/api/staff", {
+      method: "POST",
+      body: { email: SUPER_EMAIL, full_name: "Again", role: "guard", password: "a-long-enough-password" },
+    });
+    assert.equal(dup.status, 400);
+    assert.match(dup.json.error, /already exists/);
+
+    const short = await adminC.fetch("/api/staff", {
+      method: "POST",
+      body: { email: "short@hut.example", full_name: "Short", role: "guard", password: "short" },
+    });
+    assert.equal(short.status, 400);
+    assert.match(short.json.error, /12 characters/);
+  });
+
+  await test("disabling an account ends its session; enabling restores access", async () => {
+    const list = await adminC.fetch("/api/staff");
+    const target = list.json.find((s) => s.email === SUPER_EMAIL);
+
+    const superC = client(base);
+    await superC.fetch("/api/session", { method: "POST", body: { email: SUPER_EMAIL, password: SUPER_PASSWORD } });
+    assert.equal((await superC.fetch("/api/summary")).status, 200);
+
+    const off = await adminC.fetch(`/api/staff/${target.id}/active`, { method: "POST", body: { active: false } });
+    assert.equal(off.status, 200);
+    assert.equal((await superC.fetch("/api/summary")).status, 401, "a disabled account kept its session");
+
+    const on = await adminC.fetch(`/api/staff/${target.id}/active`, { method: "POST", body: { active: true } });
+    assert.equal(on.status, 200);
+    const relogin = client(base);
+    assert.equal((await relogin.fetch("/api/session", { method: "POST", body: { email: SUPER_EMAIL, password: SUPER_PASSWORD } })).status, 200);
+  });
+
+  await test("an admin password reset logs the account out everywhere", async () => {
+    const list = await adminC.fetch("/api/staff");
+    const target = list.json.find((s) => s.email === SUPER_EMAIL);
+
+    const superC = client(base);
+    await superC.fetch("/api/session", { method: "POST", body: { email: SUPER_EMAIL, password: SUPER_PASSWORD } });
+    assert.equal((await superC.fetch("/api/summary")).status, 200);
+
+    const res = await adminC.fetch(`/api/staff/${target.id}/password`, { method: "POST", body: { password: "a-brand-new-password" } });
+    assert.equal(res.status, 200);
+    assert.equal((await superC.fetch("/api/summary")).status, 401, "the old session survived the reset");
+
+    const relogin = client(base);
+    assert.equal((await relogin.fetch("/api/session", { method: "POST", body: { email: SUPER_EMAIL, password: "a-brand-new-password" } })).status, 200);
+  });
+
+  await test("an admin can change a role, but not their own", async () => {
+    const list = await adminC.fetch("/api/staff");
+    const target = list.json.find((s) => s.email === SUPER_EMAIL);
+    const self = list.json.find((s) => s.email === "head@hut.example");
+
+    const res = await adminC.fetch(`/api/staff/${target.id}/role`, { method: "POST", body: { role: "admin" } });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.role, "admin");
+    await adminC.fetch(`/api/staff/${target.id}/role`, { method: "POST", body: { role: "supervisor" } });
+
+    const own = await adminC.fetch(`/api/staff/${self.id}/role`, { method: "POST", body: { role: "guard" } });
+    assert.equal(own.status, 400);
+    assert.match(own.json.error, /own role/);
+
+    const lockout = await adminC.fetch(`/api/staff/${self.id}/active`, { method: "POST", body: { active: false } });
+    assert.equal(lockout.status, 400);
+    assert.match(lockout.json.error, /own account/);
+  });
+
   console.log("\n== the static tier ==");
 
   await test("only public/ is reachable", async () => {

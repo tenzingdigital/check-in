@@ -299,7 +299,16 @@ nobody can log in.
 
 ### 4. Add the rest of the staff
 
-Once you can log in, further accounts are made with the CLI. Run it from Render
+Once you can log in as an admin, the gate app grows a **Staff** tab (admins
+only). It lists every account and lets you add one (name, email, role, initial
+password), change a role, reset a password, and disable or re-enable access —
+no shell needed. Disabling and password resets end the account's open sessions
+immediately, the same as the CLI below. The tab is hidden from guards and
+supervisors, and the database refuses each of those operations for them
+regardless: creation and resets go through admin-gated `SECURITY DEFINER`
+functions, and profile updates through the admin-only row policy.
+
+The same operations are also available as a CLI. Run it from Render
 → your service → **Shell** if your plan has one, or from your own machine
 against the **external** `DATABASE_URL`:
 

@@ -59,6 +59,7 @@
     <nav class="tabs" role="tablist">
       <button role="tab" id="tabSearch" aria-selected="true"  aria-controls="panelSearch">Search</button>
       <button role="tab" id="tabLog"    aria-selected="false" aria-controls="panelLog">Log</button>
+      <button role="tab" id="tabStaff"  aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
     </nav>
 
     <!-- ---- search ---- -->
@@ -78,6 +79,35 @@
       </div>
       <p class="hint" style="margin:8px 2px 0" id="logCount"></p>
       <div id="logList" class="list"></div>
+    </section>
+
+    <!-- ---- staff (admins only; the tab stays hidden for everyone else, and
+         the database refuses every operation below for a non-admin) ---- -->
+    <section id="panelStaff" role="tabpanel" aria-labelledby="tabStaff" hidden>
+      <form id="staffForm" autocomplete="off">
+        <div class="row">
+          <input id="sfName" class="field" type="text" placeholder="Full name" required style="flex:2">
+          <select id="sfRole" class="field" style="flex:1">
+            <option value="guard">guard</option>
+            <option value="supervisor">supervisor</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <input id="sfEmail" class="field" type="email" placeholder="Email" required style="flex:1">
+          <input id="sfPassword" class="field" type="password" placeholder="Initial password (min 12)"
+                 minlength="12" required autocomplete="new-password" style="flex:1">
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="sfAdd" type="submit" style="flex:1;padding:14px 16px">Add account</button>
+        </div>
+        <p class="hint" style="margin:8px 2px 0">
+          Hand the initial password over in person and reset it if it is ever shared further.
+          <b>admin</b> manages staff and settings, <b>supervisor</b> manages residents,
+          <b>guard</b> signs residents in and out.
+        </p>
+      </form>
+      <div id="staffList" class="list"></div>
     </section>
   </main>
 </div>
@@ -270,17 +300,126 @@ async function loadLog(dateStr) {
 }
 
 /* ========================================================================
+   Staff management (admins only)
+   ====================================================================== */
+
+// The tab is hidden for non-admins, but that is presentation, not security:
+// every operation below is refused by the database for anyone else — the
+// create/reset functions re-check is_admin() themselves, and the
+// profiles_admin_all policy makes a non-admin's update match no rows.
+const staffRows = new Map();
+
+function staffCard(s) {
+  const meta = [
+    esc(s.email),
+    s.last_sign_in_at ? `last login ${ago(s.last_sign_in_at)}` : "never logged in",
+  ].join(" · ");
+  const roleOptions = ["guard", "supervisor", "admin"]
+    .map((r) => `<option value="${r}" ${r === s.role ? "selected" : ""}>${r}</option>`)
+    .join("");
+  return `
+    <div class="card">
+      <span class="who">
+        <span class="name">${esc(s.full_name)}</span>
+        <span class="meta">${meta}</span>
+      </span>
+      <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
+      <span class="row" style="gap:6px">
+        <select class="field sRole" data-sid="${esc(s.id)}" style="width:auto;padding:8px 10px" aria-label="Role for ${esc(s.full_name)}">${roleOptions}</select>
+        <button class="btn ghost sPw"  data-sid="${esc(s.id)}" type="button">Reset&nbsp;password</button>
+        <button class="btn ghost sTgl" data-sid="${esc(s.id)}" type="button">${s.active ? "Disable" : "Enable"}</button>
+      </span>
+    </div>`;
+}
+
+async function loadStaff() {
+  const rows = await guarded(
+    () => apiGet("/api/staff"),
+    (err) => showError("Could not load staff: " + err.message),
+  );
+  if (!rows) return;
+  showError("");
+  staffRows.clear();
+  rows.forEach((s) => staffRows.set(s.id, s));
+  $("staffList").innerHTML = rows.length
+    ? rows.map(staffCard).join("")
+    : `<p class="empty">No staff accounts.</p>`;
+}
+
+$("staffForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    full_name: $("sfName").value.trim(),
+    email:     $("sfEmail").value.trim(),
+    role:      $("sfRole").value,
+    password:  $("sfPassword").value,
+  };
+  $("sfAdd").disabled = true;
+  const out = await guarded(
+    () => apiPost("/api/staff", body),
+    (err) => toast("Not created: " + err.message, "err"),
+  );
+  $("sfAdd").disabled = false;
+  if (!out) return;
+  toast(`${body.full_name} added as ${body.role}`, "ok");
+  $("staffForm").reset();
+  loadStaff();
+});
+
+$("staffList").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-sid]");
+  if (!btn) return;
+  const s = staffRows.get(btn.dataset.sid);
+  if (!s) return;
+
+  if (btn.classList.contains("sTgl")) {
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/active`, { active: !s.active }),
+      (err) => toast(err.message, "err"),
+    );
+    if (out) {
+      toast(`${s.full_name} ${out.active ? "enabled" : "disabled"}`, "ok");
+      loadStaff();
+    }
+  } else if (btn.classList.contains("sPw")) {
+    const pw = prompt(`New password for ${s.full_name} (min 12 characters):`);
+    if (pw === null) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/password`, { password: pw }),
+      (err) => toast("Not changed: " + err.message, "err"),
+    );
+    if (out) toast(`Password changed — ${s.full_name} is logged out everywhere.`, "ok");
+  }
+});
+
+$("staffList").addEventListener("change", async (e) => {
+  const sel = e.target.closest("select[data-sid]");
+  if (!sel) return;
+  const s = staffRows.get(sel.dataset.sid);
+  if (!s) return;
+  const out = await guarded(
+    () => apiPost(`/api/staff/${s.id}/role`, { role: sel.value }),
+    (err) => { toast(err.message, "err"); sel.value = s.role; },
+  );
+  if (out) {
+    toast(`${s.full_name} is now ${out.role}`, "ok");
+    loadStaff();
+  }
+});
+
+/* ========================================================================
    Tabs
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["search", "log"]) {
+  for (const t of ["search", "log", "staff"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
   }
   if (name === "search") $("q").focus();
   if (name === "log")    loadLog($("logDate").value || todayISODate());
+  if (name === "staff")  loadStaff();
 }
 
 /* ========================================================================
@@ -305,6 +444,7 @@ async function enterApp() {
 
   $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
+  $("tabStaff").hidden = profile.role !== "admin";
 
   $("login").hidden = true;
   $("app").hidden = false;
@@ -365,6 +505,7 @@ document.addEventListener("click", (e) => {
 
 $("tabSearch").addEventListener("click", () => selectTab("search"));
 $("tabLog").addEventListener("click",    () => selectTab("log"));
+$("tabStaff").addEventListener("click",  () => selectTab("staff"));
 $("logDate").addEventListener("change", (e) => loadLog(e.target.value || todayISODate()));
 $("logToday").addEventListener("click", () => {
   $("logDate").value = todayISODate();
