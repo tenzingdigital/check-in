@@ -317,7 +317,10 @@ async function checkin(residentId) {
   refreshSummary();
   runSearch($("q").value);
   if (state.tab === "attention") loadAttention();
-  if (state.selected && state.selected.id === residentId) refreshResident(residentId);
+  // The panel's job is done once the check-in is recorded: close it so the
+  // guard is straight back at the list for the next person. The toast and the
+  // card's refreshed badge are the confirmation.
+  if (state.selected && state.selected.id === residentId) renderDetail(null);
 }
 
 async function loadAttention() {
@@ -341,14 +344,6 @@ async function loadStrip(residentId) {
   return (data || []).map(d =>
     `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(d.compliance_date)}"></i>`
   ).join("");
-}
-
-// Re-reads one resident's compliance row and, if it is still the one shown
-// in the detail panel, re-renders the panel (and reloads the strip) with it.
-async function refreshResident(residentId) {
-  const data = await guarded(() => apiGet(`/api/residents/${residentId}/compliance`), () => {});
-  if (!data) return;
-  if (state.selected && state.selected.id === residentId) renderDetail(data);
 }
 
 /* ========================================================================
