@@ -207,7 +207,6 @@ function renderDetail(r) {
   $("doIn").onclick  = () => record(r.id, "in");
   $("doOut").onclick = () => record(r.id, "out");
   $("closeDetail").onclick = () => { renderDetail(null); $("q").focus(); };
-  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function renderLog(rows) {
