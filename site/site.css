@@ -117,8 +117,28 @@ a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   padding: 9px 16px; border-radius: 8px; font-size: 15px; font-weight: 600; white-space: nowrap;
 }
 .nav-cta:hover { filter: brightness(1.08); }
+
+/* Sign in, in the sticky header. Quieter than the demo CTA on purpose: a
+   visitor is here to be sold to, a customer is here to get past the page.
+   A light pill with a real border, so the pair reads as primary/secondary
+   rather than a button next to a stray link. */
+.nav-signin {
+  color: var(--text); text-decoration: none; font-weight: 600;
+  font-size: 15px; margin-right: 4px; white-space: nowrap;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 8px 16px; border-radius: 999px;
+}
+.nav-signin:hover { border-color: var(--primary-500); color: var(--primary); }
+@media (max-width: 560px) { .nav-signin { display: none; } }
 @media (max-width: 700px) {
+  /* The section links go; the brand, sign in and the CTA stay. margin-left
+     goes on whichever of the pair comes first once nav is hidden, so the
+     two buttons stay together on the right. */
   .sitenav nav { display: none; }
+  .nav-signin { margin-left: auto; }
+  .nav-cta { margin-left: 0; }
+}
+@media (max-width: 560px) {
   .nav-cta { margin-left: auto; }
 }
 
@@ -224,6 +244,14 @@ a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .footcol h2 { margin: 0 0 2px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--foot-ink-2); }
 .footcol a { color: var(--foot-ink); text-decoration: none; font-size: 15px; border-bottom: 1px solid transparent; padding-bottom: 1px; }
 .footcol a:hover { border-bottom-color: var(--foot-ink); }
+.footsignin {
+  background: var(--primary); color: var(--primary-ink) !important;
+  padding: 10px 16px; border-radius: var(--radius);
+  font-weight: 600; font-size: 15px; border-bottom: 0 !important;
+}
+.footsignin:hover { background: var(--primary-700); }
+.footcol .footalt { font-size: 14px; color: var(--foot-ink-2); }
+.footcol .footalt:hover { border-bottom-color: var(--foot-ink-2); }
 .footcol-brand p { margin: 0; color: var(--foot-ink-2); font-size: 14px; line-height: 1.6; max-width: 34ch; }
 .footmark { font-family: var(--font-display); font-weight: 800; font-size: 20px; letter-spacing: -.02em; color: #fff; }
 .footdomain { color: var(--foot-ink-2); font-size: 13px; letter-spacing: .02em; }
