@@ -281,6 +281,75 @@ function mountLogin({ onReady } = {}) {
   });
 }
 
+// Swipe a resident card to act on it without opening the detail panel — one
+// gesture per person on a tablet at the door. Shared because both apps use it:
+// the register swipes right to record a check-in, the gate swipes right to
+// sign in and left to sign out.
+//
+// Touch and pen only: a mouse drag on a button is not a gesture anyone means.
+// The card slides under the finger and only commits past SWIPE_FIRE pixels,
+// arming visibly first, so a hesitant swipe does nothing. A capture-phase
+// click listener eats the click that follows any real horizontal movement, so
+// a swipe never also opens the panel behind it.
+//
+//   onRight / onLeft — called with the card's data-id. Omit one to disable
+//   that direction (the card then will not slide that way at all).
+function mountCardSwipe({ onRight, onLeft } = {}) {
+  const FIRE = 90, TAP_SLOP = 12, MAX = 140;
+  let swipe = null, swallow = false;
+
+  document.addEventListener("pointerdown", (e) => {
+    swallow = false;
+    if (e.pointerType === "mouse") return;
+    const card = e.target.closest("button.card");
+    if (!card) return;
+    swipe = { card, id: card.dataset.id, x0: e.clientX, y0: e.clientY, dx: 0, horizontal: null };
+  });
+
+  document.addEventListener("pointermove", (e) => {
+    if (!swipe) return;
+    const dx = e.clientX - swipe.x0, dy = e.clientY - swipe.y0;
+    // Decide once, on the first real movement, whether this is a horizontal
+    // gesture or a vertical scroll — after that the two never fight.
+    if (swipe.horizontal === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      swipe.horizontal = Math.abs(dx) > Math.abs(dy);
+    }
+    if (!swipe.horizontal) return;
+
+    // A direction with no handler does not move.
+    if ((dx > 0 && !onRight) || (dx < 0 && !onLeft)) { swipe.dx = 0; return; }
+
+    swipe.dx = dx;
+    const shown = Math.max(-MAX, Math.min(MAX, dx));
+    swipe.card.style.transform = `translateX(${shown}px)`;
+    swipe.card.classList.toggle("swipe-arm",     dx >=  FIRE);
+    swipe.card.classList.toggle("swipe-arm-out", dx <= -FIRE);
+  });
+
+  function end(fire) {
+    const s = swipe;
+    swipe = null;
+    if (!s) return;
+    s.card.style.transform = "";
+    s.card.classList.remove("swipe-arm", "swipe-arm-out");
+    if (Math.abs(s.dx) > TAP_SLOP) swallow = true;
+    if (!fire) return;
+    if (s.dx >=  FIRE && onRight) onRight(s.id);
+    if (s.dx <= -FIRE && onLeft)  onLeft(s.id);
+  }
+  document.addEventListener("pointerup",     () => end(true));
+  document.addEventListener("pointercancel", () => end(false));
+
+  // Capture phase, so it runs before the page's own card-click handler on
+  // document and can stop it reaching one.
+  document.addEventListener("click", (e) => {
+    if (!swallow) return;
+    swallow = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+}
+
 async function logout() {
   try { await apiDelete("/api/session"); } catch { /* the cookie is gone either way */ }
 }

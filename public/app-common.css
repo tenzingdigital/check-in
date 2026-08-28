@@ -152,6 +152,21 @@
   .badge.never    { color: var(--bad); }
   .badge.exempt   { color: var(--exempt); }
 
+  /* ---- swipe to act ---- */
+  /* pan-y keeps vertical scrolling native while horizontal drags reach the
+     pointer handlers in mountCardSwipe(). The armed state colours the card by
+     what releasing will do: green for the positive action (check in, sign in),
+     accent for signing out. */
+  button.card { touch-action: pan-y; will-change: transform; }
+  button.card.swipe-arm {
+    background: color-mix(in srgb, var(--ok) 18%, var(--surface));
+    border-color: var(--ok);
+  }
+  button.card.swipe-arm-out {
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    border-color: var(--accent);
+  }
+
   .card.overdue, .card.never { border-left: 4px solid var(--bad); }
   .card.due_soon { border-left: 4px solid var(--warn); }
 

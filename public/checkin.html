@@ -47,16 +47,6 @@
   .cell.ok  { background: var(--ok); }
   .cell.miss { background: var(--bad); cursor: pointer; }
   .cell.na  { background: var(--surface-2); }
-
-  /* ---- swipe to check in ---- */
-  /* pan-y keeps vertical scrolling native while horizontal drags reach the
-     pointer handlers below. The armed state turns the card green so the guard
-     knows releasing will record the check-in. */
-  button.card { touch-action: pan-y; will-change: transform; }
-  button.card.swipe-arm {
-    background: color-mix(in srgb, var(--ok) 18%, var(--surface));
-    border-color: var(--ok);
-  }
 </style>
 </head>
 <body>
@@ -437,7 +427,6 @@ $("q").addEventListener("keydown", (e) => {
 
 // Card clicks are delegated so re-rendering never orphans a listener.
 document.addEventListener("click", (e) => {
-  if (swallowClick) { swallowClick = false; return; }   // the tail of a swipe
   const card = e.target.closest("button.card");
   if (!card) return;
   const row = state.rows.get(card.dataset.id);
@@ -445,48 +434,7 @@ document.addEventListener("click", (e) => {
   renderDetail(row);
 });
 
-// Swipe a card to the right to record the check-in without opening the
-// detail panel — one gesture per resident on a tablet at the door. Touch and
-// pen only: a mouse drag on a button is not a gesture anyone means. The
-// gesture commits only past SWIPE_FIRE pixels (the card turns green via
-// .swipe-arm first), and any real horizontal movement swallows the click
-// that follows pointerup so a swipe never also opens the panel.
-const SWIPE_FIRE = 90, SWIPE_TAP_SLOP = 12;
-let swipe = null, swallowClick = false;
-
-document.addEventListener("pointerdown", (e) => {
-  swallowClick = false;
-  if (e.pointerType === "mouse") return;
-  const card = e.target.closest("button.card");
-  if (!card) return;
-  swipe = { card, id: card.dataset.id, x0: e.clientX, y0: e.clientY, dx: 0, horizontal: null };
-});
-
-document.addEventListener("pointermove", (e) => {
-  if (!swipe) return;
-  const dx = e.clientX - swipe.x0, dy = e.clientY - swipe.y0;
-  // Decide once, on the first real movement, whether this is a horizontal
-  // gesture or a vertical scroll — after that the two never fight.
-  if (swipe.horizontal === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
-    swipe.horizontal = Math.abs(dx) > Math.abs(dy);
-  }
-  if (!swipe.horizontal) return;
-  swipe.dx = Math.max(0, dx);
-  swipe.card.style.transform = `translateX(${Math.min(swipe.dx, 140)}px)`;
-  swipe.card.classList.toggle("swipe-arm", swipe.dx >= SWIPE_FIRE);
-});
-
-function endSwipe(fire) {
-  const s = swipe;
-  swipe = null;
-  if (!s) return;
-  s.card.style.transform = "";
-  s.card.classList.remove("swipe-arm");
-  if (s.dx > SWIPE_TAP_SLOP) swallowClick = true;
-  if (fire && s.dx >= SWIPE_FIRE) checkin(s.id);
-}
-document.addEventListener("pointerup",     () => endSwipe(true));
-document.addEventListener("pointercancel", () => endSwipe(false));
+mountCardSwipe({ onRight: (id) => checkin(id) });
 
 $("tabCheckin").addEventListener("click",   () => selectTab("checkin"));
 $("tabAttention").addEventListener("click", () => selectTab("attention"));

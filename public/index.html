@@ -74,7 +74,7 @@
         <button type="button" data-presence="in"  aria-pressed="false">On site</button>
         <button type="button" data-presence="out" aria-pressed="false">Off site</button>
       </nav>
-      <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before signing them in.</p>
+      <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register first. Tap a name for detail, or swipe it right to sign IN, left to sign OUT.</p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
     </section>
@@ -299,7 +299,7 @@ function renderSearch() {
   renderList($("searchResults"), shown, empty);
 }
 
-async function record(residentId, direction) {
+async function record(residentId, direction, { fromSwipe = false } = {}) {
   if (state.busy) return;
   state.busy = true;
   document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = true));
@@ -316,7 +316,7 @@ async function record(residentId, direction) {
   if (!row) return;
 
   toast(`${row.full_name} signed ${direction.toUpperCase()}`, "ok");
-  renderDetail(row);
+  if (!fromSwipe) renderDetail(row);
   refreshSummary();
   runSearch($("q").value);
 }
@@ -532,6 +532,16 @@ $("q").addEventListener("keydown", (e) => {
   e.preventDefault();
   const first = $("searchResults").querySelector("button.card");
   if (first) first.click();
+});
+
+// Swipe a card to record a movement without opening the panel. Direction is
+// the action: right signs IN, left signs OUT, which matches arriving and
+// leaving rather than making the guard remember a convention. Repeats in the
+// same direction inside a minute are collapsed by record_check() in the
+// database, so a double swipe is one event.
+mountCardSwipe({
+  onRight: (id) => record(id, "in",  { fromSwipe: true }),
+  onLeft:  (id) => record(id, "out", { fromSwipe: true }),
 });
 
 // Card clicks are delegated so re-rendering never orphans a listener.
