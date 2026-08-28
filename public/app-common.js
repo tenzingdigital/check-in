@@ -130,7 +130,133 @@ async function guarded(fn, onError) {
 // Wires the shared #loginForm markup (see the login section duplicated at
 // the top of both pages) against the API. onReady() is called after a
 // successful sign-in \u2014 each page passes its own "enter the app" function.
+// The forgot-password UI is built here rather than written into both HTML
+// files, so the two front ends cannot drift apart and there is one copy of the
+// wording. It is appended after the login form and starts hidden.
+//
+// Three states share this screen: the login form, "email me a link", and
+// "choose a new password" (entered by opening the emailed ?reset=… link).
+function mountResetUI() {
+  const form = $("loginForm");
+  if (!form || $("resetPanel")) return;
+
+  const holder = document.createElement("div");
+  holder.innerHTML = `
+    <p class="hint" style="margin:12px 2px 0;text-align:center">
+      <a href="#" id="forgotLink" style="color:var(--accent)">Forgot your password?</a>
+    </p>
+
+    <form id="resetPanel" hidden style="margin-top:14px">
+      <p class="hint" style="margin:0 2px 10px">
+        Enter the email address for your account and we will send a link to
+        choose a new password.
+      </p>
+      <input id="resetEmail" class="field" type="email" placeholder="Email"
+             autocomplete="username" required>
+      <button id="resetBtn" class="btn" type="submit">Email me a link</button>
+      <p class="hint" style="margin:10px 2px 0;text-align:center">
+        <a href="#" id="backToLogin" style="color:var(--accent)">Back to log in</a>
+      </p>
+    </form>
+
+    <form id="newPassPanel" hidden style="margin-top:14px">
+      <p class="hint" style="margin:0 2px 10px">
+        Choose a new password of at least 12 characters. This signs the account
+        out everywhere else.
+      </p>
+      <input id="newPass" class="field" type="password" placeholder="New password"
+             autocomplete="new-password" minlength="12" required>
+      <input id="newPass2" class="field" type="password" placeholder="Repeat new password"
+             autocomplete="new-password" minlength="12" required>
+      <button id="newPassBtn" class="btn" type="submit">Set password</button>
+    </form>`;
+  form.parentNode.insertBefore(holder, form.nextSibling);
+
+  const show = (which) => {
+    form.hidden           = which !== "login";
+    $("forgotLink").parentNode.hidden = which !== "login";
+    $("resetPanel").hidden   = which !== "request";
+    $("newPassPanel").hidden = which !== "choose";
+  };
+
+  const say = (msg, isError) => {
+    const box = $("loginError");
+    box.textContent = msg;
+    box.hidden = !msg;
+    box.style.borderColor = isError ? "" : "var(--ok)";
+    box.style.color = isError ? "" : "var(--ok)";
+  };
+
+  $("forgotLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    say("");
+    $("resetEmail").value = $("email").value.trim();
+    show("request");
+    $("resetEmail").focus();
+  });
+
+  $("backToLogin").addEventListener("click", (e) => {
+    e.preventDefault();
+    say("");
+    show("login");
+  });
+
+  // Always the same answer, whether or not the address has an account: the
+  // server will not say, and neither will this.
+  $("resetPanel").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("resetBtn");
+    btn.disabled = true;
+    btn.textContent = "Sending\u2026";
+    try {
+      await apiPost("/api/password-reset", { email: $("resetEmail").value.trim() });
+      say("If that address has an account, a link is on its way. It expires in an hour.", false);
+      show("login");
+    } catch (err) {
+      say(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Email me a link";
+    }
+  });
+
+  $("newPassPanel").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pw = $("newPass").value;
+    if (pw !== $("newPass2").value) return say("Those two passwords do not match.", true);
+    if (pw.length < 12) return say("Choose a password of at least 12 characters.", true);
+
+    const btn = $("newPassBtn");
+    btn.disabled = true;
+    btn.textContent = "Setting\u2026";
+    try {
+      await apiPost("/api/password-reset/confirm", { token: resetTokenFromUrl(), password: pw });
+      // Drop the spent token out of the address bar so a refresh, or the
+      // browser history, cannot replay it.
+      history.replaceState(null, "", location.pathname);
+      say("Password changed. Log in with it now.", false);
+      show("login");
+      $("password").value = "";
+      $("email").focus();
+    } catch (err) {
+      say(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Set password";
+    }
+  });
+
+  if (resetTokenFromUrl()) show("choose");
+}
+
+function resetTokenFromUrl() {
+  try { return new URLSearchParams(location.search).get("reset") || ""; }
+  catch (_) { return ""; }
+}
+
 function mountLogin({ onReady } = {}) {
+  mountResetUI();
+
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = $("loginBtn");

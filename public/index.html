@@ -466,6 +466,11 @@ function selectTab(name) {
 // issue a session for one, and revokes an existing session on the next
 // request — so there is no active-profile check left to do here.
 async function enterApp() {
+  // A reset link always lands on the login screen, even for a terminal that
+  // still holds a valid session: the person following it is trying to change
+  // a password, not to be shown somebody else's app.
+  if (resetTokenFromUrl()) return showLogin("");
+
   let session;
   try {
     session = await apiGet("/api/session");

@@ -119,6 +119,11 @@ app.use('/api', auth.attachSession);   // attach req.session (or null) from the 
 // creates a session; the GET inside it guards itself.
 app.use('/api/session', require('./routes/session'));
 
+// Password reset is unauthenticated by necessity: the whole point is that the
+// caller cannot log in. Mounted here, before requireSession, and carrying its
+// own no-enumeration and single-use rules.
+app.use('/api/password-reset', require('./routes/password-reset'));
+
 app.use('/api', auth.requireSession);
 app.use('/api/residents', require('./routes/residents'));
 app.use('/api/staff', require('./routes/staff'));

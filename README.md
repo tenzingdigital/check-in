@@ -297,6 +297,34 @@ nobody can log in.
 > paid instance types**. Without an environment-driven first account, a free
 > deploy would come up healthy and be permanently unreachable.
 
+### 3b. Forgotten passwords
+
+A staff member who is locked out can use **Forgot your password?** on the login
+screen. They get a one-time link that expires in an hour; following it lets
+them choose a new password and, in doing so, signs the account out everywhere
+else. The link is single-use and is invalidated the moment it is spent, so one
+left in an inbox or a browser history is not a spare key.
+
+The request form never says whether an address has an account. That is
+deliberate: a reset endpoint that distinguishes real staff from strangers is a
+staff directory for anyone who can reach the login page.
+
+**Email delivery needs two variables.** Set `RESEND_API_KEY` (a key from
+resend.com) and `MAIL_FROM` (a verified sender). Optionally set `PUBLIC_URL`
+so the link points at your own domain rather than the host Render answers on.
+
+> **With neither set the link is written to the service log instead**, with a
+> warning, rather than silently going nowhere. On a single-site deployment the
+> operator already has log access, and with it the database URL, so this grants
+> them nothing they did not have. It is still a fallback: anyone who can read
+> your logs can take an account during the hour a link is live. Configure mail
+> before you have staff who are not you.
+
+Two other routes exist and always have: an admin can reset anyone's password
+from the **Staff** tab, and `node staff.js passwd <email>` works from a shell.
+The reset link is the only one of the three that helps the *last remaining
+admin*, who has nobody above them to do it.
+
 ### 4. Add the rest of the staff
 
 Once you can log in as an admin, the gate app grows a **Staff** tab (admins

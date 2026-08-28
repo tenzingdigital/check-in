@@ -351,6 +351,98 @@ async function main() {
     assert.equal((await fresh.fetch("/api/summary")).status, 401);
   });
 
+  console.log("\n== password reset ==");
+
+  // The whole point of this endpoint is that it answers before it knows
+  // anything about you. If a stranger can tell a real staff address from a
+  // made-up one, the reset flow has become a staff directory.
+  await test("requesting a reset never reveals whether the address exists", async () => {
+    const real = await api.fetch("/api/password-reset", { method: "POST", body: { email: EMAIL } });
+    const fake = await api.fetch("/api/password-reset", {
+      method: "POST", body: { email: "nobody-at-all@example.invalid" },
+    });
+    assert.equal(real.status, 200);
+    assert.equal(fake.status, 200);
+    assert.deepEqual(real.json, fake.json, "the two answers differ, which enumerates staff");
+  });
+
+  await test("an unknown token is refused", async () => {
+    const res = await api.fetch("/api/password-reset/confirm", {
+      method: "POST", body: { token: "not-a-real-token", password: "abcdefghijkl1" },
+    });
+    assert.equal(res.status, 400);
+  });
+
+  await test("a short password is refused before the token is spent", async () => {
+    const token = await issueReset(EMAIL);
+    const short = await api.fetch("/api/password-reset/confirm", {
+      method: "POST", body: { token, password: "tooshort" },
+    });
+    assert.equal(short.status, 400);
+
+    // The link must survive a rejected password, or one typo burns it.
+    const good = await api.fetch("/api/password-reset/confirm", {
+      method: "POST", body: { token, password: PASSWORD },
+    });
+    assert.equal(good.status, 200, "the link was consumed by a failed attempt");
+  });
+
+  await test("a reset link works once, ends every session, and is then dead", async () => {
+    // A browser that is logged in with the old password.
+    const held = client(base);
+    await held.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
+    assert.equal((await held.fetch("/api/summary")).status, 200);
+
+    const token = await issueReset(EMAIL);
+    const NEWPW = "reset-me-please-1";
+
+    const first = await api.fetch("/api/password-reset/confirm", {
+      method: "POST", body: { token, password: NEWPW },
+    });
+    assert.equal(first.status, 200);
+
+    // Revocation: the reset logs out whoever was already in.
+    assert.equal((await held.fetch("/api/summary")).status, 401);
+
+    // The new password works, and no session was handed out by the reset
+    // itself — a stolen link must be a password change, not a login.
+    const after = client(base);
+    const login = await after.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: NEWPW } });
+    assert.equal(login.status, 200);
+
+    // Single use.
+    const replay = await api.fetch("/api/password-reset/confirm", {
+      method: "POST", body: { token, password: "another-password-1" },
+    });
+    assert.equal(replay.status, 400, "the link was replayable");
+
+    // Put the shared fixture password back for the tests that follow.
+    await withOwner((c) => c.query(`select auth.set_password($1, $2)`, [EMAIL, PASSWORD]));
+  });
+
+  await test("an expired link is refused", async () => {
+    const token = await issueReset(EMAIL);
+    await withOwner((c) => c.query(
+      `update auth.password_resets set expires_at = now() - interval '1 minute' where used_at is null`));
+
+    const res = await api.fetch("/api/password-reset/confirm", {
+      method: "POST", body: { token, password: "expired-link-pw-1" },
+    });
+    assert.equal(res.status, 400);
+  });
+
+  await test("a deactivated account cannot be reset into", async () => {
+    const token = await issueReset(EMAIL);
+    await withOwner((c) => c.query(`update public.profiles set active = false where id = $1`, [guardId]));
+
+    const res = await api.fetch("/api/password-reset/confirm", {
+      method: "POST", body: { token, password: "disabled-user-pw-1" },
+    });
+    assert.equal(res.status, 400, "a disabled account was resettable");
+
+    await withOwner((c) => c.query(`update public.profiles set active = true where id = $1`, [guardId]));
+  });
+
   await test("logging out invalidates the cookie server-side", async () => {
     const fresh = client(base);
     await fresh.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
@@ -569,3 +661,16 @@ main().catch(async (err) => {
   await closePool().catch(() => {});
   process.exit(1);
 });
+
+// The reset token only exists in the email, so tests mint one the same way
+// routes/password-reset.js does and hand the plaintext back.
+async function issueReset(email) {
+  const crypto = require("crypto");
+  const token = crypto.randomBytes(32).toString("base64url");
+  const hash = crypto.createHash("sha256").update(token).digest();
+  await withOwner((c) => c.query(`delete from auth.password_resets`));
+  const { rows } = await withOwner((c) =>
+    c.query(`select auth.create_password_reset($1, $2, 60) as full_name`, [email, hash]));
+  assert.ok(rows[0].full_name, `create_password_reset returned null for ${email}`);
+  return token;
+}
