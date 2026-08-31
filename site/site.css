@@ -129,17 +129,34 @@ a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   padding: 8px 16px; border-radius: 999px;
 }
 .nav-signin:hover { border-color: var(--primary-500); color: var(--primary); }
-@media (max-width: 560px) { .nav-signin { display: none; } }
+
 @media (max-width: 700px) {
   /* The section links go; the brand, sign in and the CTA stay. margin-left
-     goes on whichever of the pair comes first once nav is hidden, so the
-     two buttons stay together on the right. */
+     goes on the first of the pair once nav is hidden, so the two buttons sit
+     together on the right. */
   .sitenav nav { display: none; }
   .nav-signin { margin-left: auto; }
   .nav-cta { margin-left: 0; }
 }
+
+/* Sign in stays on a phone. StaffSteady hides it at this width, and copying
+   that here was wrong: this product is used ON a phone or a tablet at the
+   desk, so the door into the app is exactly what a mobile visitor needs. Both
+   buttons are tightened instead of one being dropped — brand, Sign in and
+   Book a demo fit inside 360px at these sizes. */
 @media (max-width: 560px) {
-  .nav-cta { margin-left: auto; }
+  .sitenav .wrap { gap: 10px; padding-left: 16px; padding-right: 16px; }
+  .brand { font-size: 17px; }
+  .nav-signin { padding: 7px 12px; font-size: 14px; margin-right: 0; }
+  .nav-cta    { padding: 8px 12px; font-size: 14px; }
+}
+
+/* Below this the two buttons cannot both keep their words. The demo CTA
+   shortens rather than disappears, because a visitor still needs it. */
+@media (max-width: 380px) {
+  .sitenav .wrap { gap: 8px; }
+  .brand { font-size: 16px; }
+  .nav-signin, .nav-cta { padding: 7px 10px; font-size: 13.5px; }
 }
 
 /* Hero billow — sky blues, placed low so the headline keeps a white ground. */
