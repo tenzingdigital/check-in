@@ -25,7 +25,8 @@ same person, so they are shaped the same way.
 
 **Only `public/` is served.** This is now enforced in code — `resolveStatic()`
 in `server.js` refuses any path that escapes that directory — rather than
-by a host's publish-directory setting. `docs/KNOWN-ISSUES.md` (a list of every
+by a host's publish-directory setting. `docs/TAO.md` (the rules this
+system is built on), `docs/KNOWN-ISSUES.md` (a list of every
 known weakness in this system), the schema and the RLS policies all sit outside
 it and are unreachable over HTTP. The HTTP suite asserts this.
 
