@@ -31,6 +31,7 @@ const JOBS = [
   ["purge-expired-compliance", "select public.purge_expired_compliance()"],
   ["purge-expired-sessions", "select auth.purge_expired_sessions()"],
   ["purge-expired-password-resets", "select auth.purge_expired_password_resets()"],
+  ["expire-lapsed-trials", "select public.expire_lapsed_trials()"],
 ];
 
 async function main() {

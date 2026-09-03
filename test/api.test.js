@@ -173,7 +173,7 @@ async function main() {
   // order", not "any subset can be replayed in any order". Re-point this at the
   // newest file whenever one is added.
   await test("a missing row makes the runner re-apply that migration, cleanly", async () => {
-    const target = "008_ipas_alignment.sql";
+    const target = "009_tenants.sql";
     await withOwner((c) => c.query(`delete from public.schema_migrations where name = $1`, [target]));
 
     const applied = await migrate({ log: () => {} });
@@ -352,6 +352,67 @@ async function main() {
 
     await withOwner((c) => c.query(`select auth.set_password($1, $2)`, [EMAIL, PASSWORD]));
     assert.equal((await fresh.fetch("/api/summary")).status, 401);
+  });
+
+  console.log("\n== tenants and trials ==");
+
+  await test("the existing deployment was adopted as the first tenant", async () => {
+    const { rows } = await withOwner((c) => c.query(
+      `select t.slug, t.status, count(u.id)::int as users
+         from public.tenants t
+         left join auth.users u on u.tenant_id = t.id
+        group by t.slug, t.status`));
+    assert.equal(rows.length, 1, "expected exactly one tenant after the backfill");
+    assert.equal(rows[0].status, "active", "the pre-existing site must not be put on a trial");
+    assert.ok(rows[0].users > 0, "existing logins were not attached to the tenant");
+  });
+
+  await test("no login is left without a tenant", async () => {
+    const { rows } = await withOwner((c) =>
+      c.query(`select count(*)::int as n from auth.users where tenant_id is null`));
+    assert.equal(rows[0].n, 0);
+  });
+
+  // The whole point of the read-only expiry: a lapsed trial must not cost a
+  // centre the evidence it already recorded.
+  await test("a lapsed trial stops writing and keeps reading", async () => {
+    const { rows: [t] } = await withOwner((c) => c.query(
+      `insert into public.tenants (name, slug, status, trial_ends_at)
+       values ('Trial Centre', 'trial-centre', 'trial', now() + interval '7 days')
+       returning id`));
+
+    const may = async () => (await withOwner((c) =>
+      c.query(`select public.tenant_may_write($1) as ok`, [t.id]))).rows[0].ok;
+
+    assert.equal(await may(), true, "a live trial cannot write");
+
+    await withOwner((c) => c.query(
+      `update public.tenants set trial_ends_at = now() - interval '1 minute' where id = $1`, [t.id]));
+    assert.equal(await may(), false, "a lapsed trial can still write");
+
+    // The row survives, which is what "read-only, not gone" means.
+    const { rows } = await withOwner((c) =>
+      c.query(`select status from public.tenants where id = $1`, [t.id]));
+    assert.equal(rows.length, 1, "the lapsed tenant was deleted rather than expired");
+
+    const { rows: [n] } = await withOwner((c) =>
+      c.query(`select public.expire_lapsed_trials() as n`));
+    assert.ok(n.n >= 1, "expire_lapsed_trials did not move the lapsed trial");
+
+    const { rows: [after] } = await withOwner((c) =>
+      c.query(`select status from public.tenants where id = $1`, [t.id]));
+    assert.equal(after.status, "expired");
+    assert.equal(await may(), false, "an expired tenant regained write access");
+
+    await withOwner((c) => c.query(`delete from public.tenants where id = $1`, [t.id]));
+  });
+
+  await test("a tenant cannot be closed without a date", async () => {
+    await assert.rejects(
+      withOwner((c) => c.query(
+        `insert into public.tenants (name, slug, status) values ('X', 'x-centre', 'closed')`)),
+      /tenant_closed_has_date/,
+      "a closed tenant with no closed_at was accepted");
   });
 
   console.log("\n== IPAS alignment ==");
