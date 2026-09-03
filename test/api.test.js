@@ -356,6 +356,97 @@ async function main() {
 
   console.log("\n== tenants and trials ==");
 
+  // The template is generated from the real schema (tools/gen-tenant-template.sh).
+  // These tests are what make that generation trustworthy: a provisioned schema
+  // is diffed against public, so a migration that changes a per-tenant object
+  // without the template being regenerated fails here rather than silently
+  // giving every future customer a different database.
+  await test("a provisioned tenant schema matches the reference schema exactly", async () => {
+    const tenancy = require("../lib/tenancy");
+    await withOwner(async (c) => {
+      await c.query(`drop schema if exists t_verify cascade`);
+      await tenancy.provisionSchema(c, "verify", { siteName: "Verify" });
+    });
+
+    // Columns: name, type and nullability, for every table.
+    const cols = (schema) => withOwner((c) => c.query(
+      `select table_name, column_name, data_type, is_nullable
+         from information_schema.columns
+        where table_schema = $1
+        order by table_name, column_name`, [schema]));
+
+    const shared = new Set(["tenants", "schema_migrations"]);
+    const ref = (await cols("public")).rows.filter((r) => !shared.has(r.table_name));
+    const tenant = (await cols("t_verify")).rows;
+
+    assert.deepEqual(
+      tenant.map((r) => `${r.table_name}.${r.column_name} ${r.data_type} ${r.is_nullable}`),
+      ref.map((r) => `${r.table_name}.${r.column_name} ${r.data_type} ${r.is_nullable}`),
+      "the provisioned schema differs from public — regenerate tenant/template.sql");
+  });
+
+  await test("every view, function, policy and index is provisioned too", async () => {
+    const count = (sql, schema) => withOwner((c) => c.query(sql, [schema]));
+    const shared = `('tenants','schema_migrations','immutable_unaccent','touch_updated_at','tenant_may_write','expire_lapsed_trials','handle_new_user')`;
+
+    const views = async (s) => (await count(
+      `select table_name from information_schema.views where table_schema=$1 order by 1`, s)).rows.map((r) => r.table_name);
+    assert.deepEqual(await views("t_verify"), await views("public"), "views differ");
+
+    const fns = async (s) => (await count(
+      `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname=$1 and p.proname not in ${shared} order by 1`, s)).rows.map((r) => r.proname);
+    assert.deepEqual(await fns("t_verify"), await fns("public"), "functions differ");
+
+    const pols = async (s) => (await count(
+      `select tablename||'.'||policyname as p from pg_policies where schemaname=$1 order by 1`, s)).rows.map((r) => r.p);
+    assert.deepEqual(await pols("t_verify"), await pols("public"), "row-level security policies differ");
+  });
+
+  // The point of the whole design: a tenant's data lives in its own schema, and
+  // a tenant's functions resolve names there and nowhere else.
+  await test("a tenant's rows land in its own schema and not in public", async () => {
+    await withOwner((c) => c.query(
+      `insert into t_verify.residents (first_name, last_name, date_of_birth)
+       values ('Only', 'InVerify', '1990-01-01')`));
+
+    const mine = await withOwner((c) =>
+      c.query(`select count(*)::int as n from t_verify.residents`));
+    assert.equal(mine.rows[0].n, 1, "the tenant's own row is not in its schema");
+
+    const leak = await withOwner((c) =>
+      c.query(`select count(*)::int as n from public.residents where last_name = 'InVerify'`));
+    assert.equal(leak.rows[0].n, 0, "a tenant insert reached the public schema");
+  });
+
+  // This is the mechanism the whole isolation argument rests on, so it is
+  // asserted directly rather than inferred. Each tenant's copy of each function
+  // pins its own schema at CREATE time via proconfig, so it resolves names in
+  // its own tenant whatever the caller's session search_path says. If a future
+  // migration drops the `set search_path` from a function, this fails.
+  await test("every tenant function pins its own schema, so it cannot be redirected", async () => {
+    const { rows } = await withOwner((c) => c.query(
+      `select p.proname, array_to_string(p.proconfig, ',') as cfg
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 't_verify'
+        order by p.proname`));
+
+    assert.ok(rows.length > 15, `expected the tenant's functions, found ${rows.length}`);
+    const unpinned = rows.filter((r) => !/search_path=t_verify\b/.test(r.cfg || ""));
+    assert.deepEqual(unpinned.map((r) => r.proname), [],
+      "these functions do not pin the tenant schema and could be redirected by search_path");
+  });
+
+  await test("an invalid slug can never become a schema name", async () => {
+    const tenancy = require("../lib/tenancy");
+    for (const bad of ["a", "Harbour", "har bour", "har;bour", "public", "t_x\"; drop schema public; --"]) {
+      assert.throws(() => tenancy.schemaForSlug(bad), /invalid slug/, `accepted ${bad}`);
+    }
+    assert.equal(tenancy.schemaForSlug("harbour-house"), "t_harbour_house");
+    assert.equal(tenancy.schemaForSlug("default"), "public", "the legacy tenant must map to public");
+  });
+
+
   await test("the existing deployment was adopted as the first tenant", async () => {
     const { rows } = await withOwner((c) => c.query(
       `select t.slug, t.status, count(u.id)::int as users
