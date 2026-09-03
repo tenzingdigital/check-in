@@ -6,17 +6,17 @@
 -- accuracy obligation (Art. 5(1)(d)) much harder to argue.
 -- ============================================================================
 
-insert into public.residents (first_name, last_name, date_of_birth) values
-  ('Aoife',   'Brennan',   '1991-04-12'),
-  ('Marek',   'Nowak',     '1988-11-30'),
-  ('Grace',   'Okonkwo',   '2001-02-19'),
-  ('Daniel',  'Fitzgerald','1975-07-03'),
-  ('Leila',   'Haddad',    '1996-09-25'),
-  ('Tomás',   'Ó Súilleabháin', '1983-01-08'),
-  ('Priya',   'Nair',      '1999-06-14'),
-  ('Jonas',   'Andersson', '1993-03-02'),
-  ('Sofia',   'Marchetti', '2009-05-21'),   -- minor, exempt from the 24h rule
-  ('Kwame',   'Mensah',    '1979-12-17')
+insert into public.residents (first_name, last_name, date_of_birth, id_type, id_number) values
+  ('Aoife',   'Brennan',   '1991-04-12', 'TRC', 'TRC0000001'),
+  ('Marek',   'Nowak',     '1988-11-30', 'TRC', 'TRC0000002'),
+  ('Grace',   'Okonkwo',   '2001-02-19', 'IRP', 'IRP0000003'),
+  ('Daniel',  'Fitzgerald','1975-07-03', 'TRC', 'TRC0000004'),
+  ('Leila',   'Haddad',    '1996-09-25', 'TRC', 'TRC0000005'),
+  ('Tomás',   'Ó Súilleabháin', '1983-01-08', 'IRP', 'IRP0000006'),
+  ('Priya',   'Nair',      '1999-06-14', 'TRC', 'TRC0000007'),
+  ('Jonas',   'Andersson', '1993-03-02', 'TRC', 'TRC0000008'),
+  ('Sofia',   'Marchetti', '2009-05-21', 'IRP', 'IRP0000009'),   -- minor, exempt from the 24h rule
+  ('Kwame',   'Mensah',    '1979-12-17', 'TRC', 'TRC0000010')
 on conflict do nothing;
 
 -- A spread of history so the compliance states are all visible in the UI:

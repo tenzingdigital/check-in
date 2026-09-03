@@ -162,15 +162,18 @@ async function main() {
     assert.ok(rows.every((r) => /^\d{3}_.*\.sql$/.test(r.name)), "a migration is not numbered");
   });
 
-  // A migration whose row is missing is one the runner would apply again. The
-  // .sql files are written to be re-runnable, so that is survivable — but it
-  // must be true, because a half-recorded tracking table is what a restored
-  // backup looks like. 006 is the probe here rather than 002: 006 dropped
-  // columns that 002's views still reference, so 002 is the one file that is
-  // no longer re-runnable on a current database — the price of a destructive
-  // migration, and exactly why later migrations must stay idempotent.
+  // A migration whose row is missing is one the runner would apply again, and a
+  // half-recorded tracking table is what a restored backup looks like — so
+  // re-application must at least be clean.
+  //
+  // The probe is always the NEWEST migration, and that is not arbitrary. These
+  // files use `create or replace` on shared views, so replaying an OLDER one on
+  // a newer schema rebuilds those views at the older shape and silently reverts
+  // every later migration. The runner's guarantee is "apply what is pending, in
+  // order", not "any subset can be replayed in any order". Re-point this at the
+  // newest file whenever one is added.
   await test("a missing row makes the runner re-apply that migration, cleanly", async () => {
-    const target = "006_drop_rooms_and_notes.sql";
+    const target = "008_ipas_alignment.sql";
     await withOwner((c) => c.query(`delete from public.schema_migrations where name = $1`, [target]));
 
     const applied = await migrate({ log: () => {} });
@@ -349,6 +352,85 @@ async function main() {
 
     await withOwner((c) => c.query(`select auth.set_password($1, $2)`, [EMAIL, PASSWORD]));
     assert.equal((await fresh.fetch("/api/summary")).status, 401);
+  });
+
+  console.log("\n== IPAS alignment ==");
+
+  // The revocation block above changed the password, which ends every session
+  // for the account — including this client's. Everything below needs one.
+  await api.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
+
+  await test("the register keeps sign-in records for 180 days, not seven years", async () => {
+    const { rows } = await withOwner((c) =>
+      c.query("select compliance_retention_days as d from public.app_settings"));
+    assert.ok(rows[0].d <= 180,
+      `register retention is ${rows[0].d} days; the verification policy allows 6 months`);
+  });
+
+  await test("a supervisor can record a TRC, and it becomes searchable", async () => {
+    const found = await api.fetch("/api/residents?q=brennan");
+    const id = found.json[0].id;
+
+    // The fixture account is a guard, so lift it for this test only.
+    await withOwner((c) => c.query(`update public.profiles set role='supervisor' where id=$1`, [guardId]));
+
+    const res = await api.fetch(`/api/residents/${id}`, {
+      method: "PATCH", body: { id_type: "trc", id_number: "TRC9998887" },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.id_type, "TRC", "the type was not normalised to upper case");
+
+    const byNumber = await api.fetch("/api/residents?q=TRC9998887");
+    assert.equal(byNumber.json.length, 1, "the ID number is not searchable");
+    assert.equal(byNumber.json[0].id, id);
+
+    await withOwner((c) => c.query(`update public.profiles set role='guard' where id=$1`, [guardId]));
+  });
+
+  await test("a guard cannot record an ID", async () => {
+    const found = await api.fetch("/api/residents?q=brennan");
+    const res = await api.fetch(`/api/residents/${found.json[0].id}`, {
+      method: "PATCH", body: { id_type: "TRC", id_number: "TRC0000000" },
+    });
+    assert.equal(res.status, 403, "a guard was able to write to the resident record");
+  });
+
+  await test("an unknown ID type is refused", async () => {
+    const found = await api.fetch("/api/residents?q=brennan");
+    const res = await api.fetch(`/api/residents/${found.json[0].id}`, {
+      method: "PATCH", body: { id_type: "PASSPORT", id_number: "X1234567" },
+    });
+    assert.equal(res.status, 400);
+  });
+
+  // The two House Rules numbers must be reported as counts. The view must not
+  // decide anything: reaching a threshold is the centre manager's call.
+  await test("the rolling window counts only completed days, and reports both thresholds", async () => {
+    const found = await api.fetch("/api/residents?q=brennan&compliance=1");
+    const id = found.json[0].id;
+
+    await withOwner(async (c) => {
+      await c.query(`delete from public.daily_compliance where resident_id = $1`, [id]);
+      // Three consecutive missed nights, all closed, inside the window.
+      await c.query(
+        `insert into public.daily_compliance
+           (resident_id, compliance_date, required, presented, checkin_count, closed_at)
+         select $1, public.site_today() - g, true, false, 0, now() from generate_series(1,3) g`, [id]);
+      // A missed day that is still open (today) must not be counted yet.
+      await c.query(
+        `insert into public.daily_compliance
+           (resident_id, compliance_date, required, presented, checkin_count, closed_at)
+         values ($1, public.site_today(), true, false, 0, null)
+         on conflict (resident_id, compliance_date) do nothing`, [id]);
+    });
+
+    const row = await api.fetch(`/api/residents/${id}/compliance`);
+    assert.equal(row.json.absent_in_window, 3, "the open day was counted, or a closed one was missed");
+    assert.equal(row.json.consecutive_missed, 3);
+    assert.equal(row.json.warn_after_consecutive_nights, 3);
+    assert.equal(row.json.absence_window_limit, 10);
+    assert.equal(row.json.absence_window_days, 28);
+    assert.ok(!("policy_verdict" in row.json), "the view is deciding something it should only report");
   });
 
   console.log("\n== password reset ==");

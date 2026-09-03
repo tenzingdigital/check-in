@@ -47,6 +47,26 @@
   .cell.ok  { background: var(--ok); }
   .cell.miss { background: var(--bad); cursor: pointer; }
   .cell.na  { background: var(--surface-2); }
+
+  /* ---- identity and policy notes (detail panel only) ---- */
+  .idline { margin-top: 6px; font-size: 14px; color: var(--muted); }
+  .idline b { color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  .linkish {
+    background: none; border: 0; padding: 0 0 0 8px;
+    color: var(--accent); font-size: 13px; font-weight: 600; text-decoration: underline;
+  }
+  .linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+  /* Facts with the rule named, never a verdict. Amber, not red: this is
+     something for the manager to weigh, not an alarm the app has raised. */
+  .policy {
+    margin: 14px 0 0; padding: 12px 14px;
+    background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+    border-radius: 10px;
+  }
+  .policy p { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--text); }
+  .policy p + p { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -206,6 +226,46 @@ function renderList(container, rows, emptyMsg) {
   container.innerHTML = rows.map((r) => residentCard(r)).join("");
 }
 
+// The card the resident presents at sign-in. Shown on the detail panel only,
+// never in a list: a number belongs on screen when somebody is checking it
+// against a card, and at no other time.
+function idLine(r) {
+  const can = state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
+  const shown = r.id_number
+    ? `<b>${esc(r.id_type)} ${esc(r.id_number)}</b>`
+    : `<span class="hint">No ID recorded</span>`;
+  const edit = can
+    ? ` <button class="linkish" id="editId" type="button">${r.id_number ? "Change" : "Add"}</button>`
+    : "";
+  return shown + edit;
+}
+
+// The two House Rules thresholds, stated as facts with the rule named. This
+// reports; it does not decide, label, or send anything. Reaching a threshold
+// is the centre manager's call to make, which is where the House Rules put it.
+function policyNotes(r) {
+  const notes = [];
+  const nights = r.consecutive_missed || 0;
+  const inWindow = r.absent_in_window || 0;
+  const nightLimit = r.warn_after_consecutive_nights || 3;
+  const windowLimit = r.absence_window_limit || 10;
+  const windowDays = r.absence_window_days || 28;
+
+  if (nights >= nightLimit) {
+    notes.push(`${nights} consecutive nights recorded. House Rules: an absence of
+      ${nightLimit} consecutive nights without explanation draws a warning letter.`);
+  }
+  if (inWindow >= windowLimit) {
+    notes.push(`${inWindow} days absent in the last ${windowDays}. House Rules:
+      ${windowLimit} days inside a ${windowDays}-day window is treated as absence
+      without authorisation.`);
+  } else if (inWindow >= windowLimit - 2 && inWindow > 0) {
+    notes.push(`${inWindow} of ${windowLimit} days in the last ${windowDays}.`);
+  }
+  if (!notes.length) return "";
+  return `<div class="policy">${notes.map((n) => `<p>${esc(n.replace(/\s+/g, " "))}</p>`).join("")}</div>`;
+}
+
 function renderDetail(r) {
   state.selected = r;
   if (r) state.rows.set(r.id, r);
@@ -215,12 +275,17 @@ function renderDetail(r) {
   el.innerHTML = `
     <h2>${esc(r.full_name)}</h2>
 
+    <div class="idline">${idLine(r)}</div>
+
     <div class="facts">
       <div class="fact"><span>Status</span><b class="badge ${esc(r.state)}">${esc(stateLabel(r.state))}</b></div>
       <div class="fact"><span>Today</span><b>${r.seen_today ? `Seen (${r.checkins_today}×)` : "Not yet"}</b></div>
       <div class="fact"><span>Last seen</span><b>${esc(lastSeenText(r))}</b></div>
-      <div class="fact"><span>Consecutive missed</span><b>${r.consecutive_missed || 0}</b></div>
+      <div class="fact"><span>Consecutive nights</span><b>${r.consecutive_missed || 0}</b></div>
+      <div class="fact"><span>Absent in ${r.absence_window_days || 28} days</span><b>${r.absent_in_window || 0}</b></div>
     </div>
+
+    ${policyNotes(r)}
 
     <div class="actions">
       <button class="btn primary-in wide" id="doCheckin" type="button">Record check-in</button>
@@ -233,6 +298,8 @@ function renderDetail(r) {
 
   $("doCheckin").onclick = () => checkin(r.id);
   $("closeDetail").onclick = () => renderDetail(null);
+  const editBtn = $("editId");
+  if (editBtn) editBtn.onclick = () => editIdentity(r);
 
   loadStrip(r.id).then((html) => {
     if (!state.selected || state.selected.id !== r.id) return; // a newer selection already won
@@ -311,6 +378,29 @@ async function checkin(residentId) {
   // guard is straight back at the list for the next person. The toast and the
   // card's refreshed badge are the confirmation.
   if (state.selected && state.selected.id === residentId) renderDetail(null);
+}
+
+// Recording the card a resident presented. Supervisors and admins only —
+// enforced by the row policy, so a guard who reaches this gets a 403 from the
+// database rather than a hidden button being the only thing stopping them.
+async function editIdentity(r) {
+  const type = prompt("ID type — TRC or IRP:", r.id_type || "TRC");
+  if (type === null) return;
+  const number = prompt(`${type.trim().toUpperCase()} number as printed on the card:`, r.id_number || "");
+  if (number === null) return;
+
+  const saved = await guarded(
+    () => apiPatch(`/api/residents/${r.id}`, {
+      id_type: type.trim().toUpperCase(),
+      id_number: number.trim(),
+    }),
+    (err) => toast("Not saved: " + err.message, "err"),
+  );
+  if (!saved) return;
+
+  toast("ID recorded", "ok");
+  const fresh = await guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {});
+  if (fresh && state.selected && state.selected.id === r.id) renderDetail(fresh);
 }
 
 async function loadAttention() {

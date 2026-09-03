@@ -41,7 +41,9 @@ router.get('/', wrap(async (req, res) => {
 
     const { rows: comp } = await client.query(
       `select id, state, required_today, seen_today, checkins_today,
-              open_breaches, consecutive_missed, last_seen_on
+              open_breaches, consecutive_missed, absent_in_window,
+              absence_window_days, absence_window_limit,
+              warn_after_consecutive_nights, last_seen_on
          from public.v_resident_compliance
         where id = any($1::uuid[])`,
       [found.map(r => r.id)],
@@ -57,9 +59,10 @@ router.get('/', wrap(async (req, res) => {
 router.get('/:id/compliance', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `select id, full_name, age_years, required_today, seen_today,
-              checkins_today, open_breaches, consecutive_missed,
-              last_seen_on, state
+      `select id, full_name, id_type, id_number, age_years, required_today,
+              seen_today, checkins_today, open_breaches, consecutive_missed,
+              absent_in_window, absence_window_days, absence_window_limit,
+              warn_after_consecutive_nights, last_seen_on, state
          from public.v_resident_compliance where id = $1`,
       [uuidParam(req.params.id, 'resident id')],
     );
@@ -88,6 +91,49 @@ router.get('/:id/days', wrap(async (req, res) => {
   });
 
   res.json(rows);
+}));
+
+// PATCH /api/residents/:id — record the TRC/IRP shown at sign-in.
+//
+// Authorisation is the row policy, not this handler: `residents_supervisor`
+// allows the write only for is_supervisor(), which covers supervisor and
+// admin. A guard's update matches no rows, so they get a 403 without this
+// file knowing anything about roles.
+router.patch('/:id', wrap(async (req, res) => {
+  const body = req.body || {};
+  const hasType = Object.prototype.hasOwnProperty.call(body, 'id_type');
+  const hasNumber = Object.prototype.hasOwnProperty.call(body, 'id_number');
+  if (!hasType && !hasNumber) throw new HttpError(400, 'Nothing to change');
+
+  const idType = body.id_type === null ? null : String(body.id_type || '').trim().toUpperCase();
+  const idNumber = body.id_number === null ? null : String(body.id_number || '').trim();
+
+  // Both or neither, matching the constraint. Clearing one clears both.
+  const clearing = !idType && !idNumber;
+  if (!clearing) {
+    if (idType !== 'TRC' && idType !== 'IRP') {
+      throw new HttpError(400, "ID type must be TRC or IRP");
+    }
+    if (!idNumber || idNumber.length > 40) {
+      throw new HttpError(400, 'Enter the number printed on the card');
+    }
+  }
+
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `update public.residents
+          set id_type = $2, id_number = $3
+        where id = $1
+        returning id`,
+      [uuidParam(req.params.id, 'resident id'),
+       clearing ? null : idType,
+       clearing ? null : idNumber],
+    );
+    return rows[0];
+  });
+
+  if (!row) throw new HttpError(403, 'Only a supervisor or admin can change resident details');
+  res.json({ ok: true, id_type: clearing ? null : idType, id_number: clearing ? null : idNumber });
 }));
 
 module.exports = router;

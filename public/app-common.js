@@ -103,6 +103,7 @@ async function api(path, { method = "GET", body } = {}) {
 const apiGet  = (path)        => api(path);
 const apiPost = (path, body)  => api(path, { method: "POST", body });
 const apiDelete = (path)      => api(path, { method: "DELETE" });
+const apiPatch  = (path, body)  => api(path, { method: "PATCH", body });
 
 // A 401 means the session expired or was revoked (a supervisor disabling the
 // account ends it on the next request). Both pages hand this the function that

@@ -14,8 +14,15 @@ automatically wrong, but it is automatically a conversation.
 **1. The record is evidence, not a convenience.**
 `gate_events`, `checkin_events` and `daily_compliance` have no `update` or
 `delete` policy for any role — not guard, not supervisor, not admin. There is
-no "fix that entry" button because there is no path to one. The only removal is
-a GDPR erasure, and it writes a row to `erasure_log` proving it happened.
+no "fix that entry" button because there is no path to one. Removal happens two
+ways only: a GDPR erasure, which writes a row to `erasure_log` proving it
+happened, and the scheduled retention purge.
+
+*Unalterable is not the same as permanent.* The IPAS verification policy
+requires sign-in records be held for six months and then destroyed, so
+`compliance_retention_days` is 180 and the nightly purge enforces it. Nobody
+can edit the register while it exists; the long-term record lives with the
+regulator, via the weekly return, not with the centre.
 
 **2. Never destroy proof that someone attended.**
 `close_out_compliance_days()` writes *only negative rows*. Positive rows are
