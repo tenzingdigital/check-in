@@ -200,6 +200,7 @@ CREATE TABLE __TENANT__.app_settings (
     idle_lock_minutes integer DEFAULT 20 NOT NULL,
     feature_buildings boolean DEFAULT false NOT NULL,
     feature_evacuation boolean DEFAULT false NOT NULL,
+    feature_households boolean DEFAULT false NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -250,6 +251,7 @@ CREATE TABLE __TENANT__.residents (
     search_key text GENERATED ALWAYS AS (lower(public.immutable_unaccent(((((((((btrim(first_name) || ' '::text) || btrim(last_name)) || ' '::text) || btrim(last_name)) || ' '::text) || btrim(first_name)) || ' '::text) || COALESCE(id_number, ''::text))))) STORED,
     room_id uuid,
     evac_need text DEFAULT 'none'::text NOT NULL,
+    household_id uuid,
     CONSTRAINT departed_on_matches_status CHECK (((status = 'departed'::text) = (departed_on IS NOT NULL))),
     CONSTRAINT residents_date_of_birth_check CHECK (((date_of_birth > '1900-01-01'::date) AND (date_of_birth <= CURRENT_DATE))),
     CONSTRAINT residents_evac_need_check CHECK ((evac_need = ANY (ARRAY['none'::text, 'mobility'::text, 'hearing'::text, 'sight'::text, 'carer'::text, 'other'::text]))),
@@ -734,6 +736,32 @@ $$;
 
 --
 
+-- Name: join_household(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_household uuid;
+begin
+  if not __TENANT__.is_supervisor() then raise exception 'Only a supervisor or admin can change households' using errcode = '42501'; end if;
+  if p_resident_id = p_with_resident_id then raise exception 'A resident cannot be their own household' using errcode = '22023'; end if;
+  select household_id into v_household from __TENANT__.residents where id = p_with_resident_id;
+  if not found then raise exception 'Resident not found' using errcode = 'P0002'; end if;
+  if v_household is null then
+    insert into __TENANT__.households default values returning id into v_household;
+    update __TENANT__.residents set household_id = v_household where id = p_with_resident_id;
+  end if;
+  update __TENANT__.residents set household_id = v_household where id = p_resident_id;
+  if not found then raise exception 'Resident not found' using errcode = 'P0002'; end if;
+  return v_household;
+end;
+$$;
+
+
+--
+
 -- Name: roll_call_marks; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -804,6 +832,27 @@ begin
   end if;
   insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, note)
   values (auth.uid(), 'residents', p_resident_id::text, 'export', btrim(p_reason));
+end;
+$$;
+
+
+--
+
+-- Name: prune_empty_households(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.prune_empty_households() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if tg_op in ('UPDATE', 'DELETE') and old.household_id is not null
+     and (tg_op = 'DELETE' or new.household_id is distinct from old.household_id) then
+    delete from __TENANT__.households h
+     where h.id = old.household_id
+       and not exists (select 1 from __TENANT__.residents r where r.household_id = h.id);
+  end if;
+  return null;
 end;
 $$;
 
@@ -1418,6 +1467,17 @@ ALTER TABLE __TENANT__.gate_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
 
 --
 
+-- Name: households; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.households (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+
 -- Name: job_runs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1520,10 +1580,17 @@ CREATE VIEW __TENANT__.v_resident_room AS
                 ELSE ''::text
             END) || ' · '::text) || rm.number)
         END AS room_label,
-    r.evac_need
-   FROM ((__TENANT__.residents r
+    r.evac_need,
+    r.household_id,
+    h.size AS household_size,
+    h.label AS household_label
+   FROM (((__TENANT__.residents r
      LEFT JOIN __TENANT__.rooms rm ON ((rm.id = r.room_id)))
      LEFT JOIN __TENANT__.buildings b ON ((b.id = rm.building_id)))
+     LEFT JOIN LATERAL ( SELECT (count(*))::integer AS size,
+            (((string_agg(DISTINCT btrim(m.last_name), ' / '::text ORDER BY (btrim(m.last_name))) || ' family ('::text) || count(*)) || ')'::text) AS label
+           FROM __TENANT__.residents m
+          WHERE ((m.household_id = r.household_id) AND (m.status = 'active'::text))) h ON ((r.household_id IS NOT NULL)))
   WHERE __TENANT__.is_staff();
 
 
@@ -1544,7 +1611,10 @@ CREATE VIEW __TENANT__.v_evacuation_list AS
     x.room,
     x.room_label,
     r.evac_need,
-    b.sort AS building_sort
+    b.sort AS building_sort,
+    x.household_id,
+    x.household_size,
+    x.household_label
    FROM (((__TENANT__.residents r
      JOIN __TENANT__.v_resident_status v ON ((v.id = r.id)))
      LEFT JOIN __TENANT__.v_resident_room x ON ((x.id = r.id)))
@@ -1569,7 +1639,7 @@ CREATE VIEW __TENANT__.v_room_occupancy AS
     rm.sort AS room_sort,
     (count(v.id))::integer AS occupants,
     (count(v.id) FILTER (WHERE (v.presence = 'in'::text)))::integer AS on_site,
-    COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'full_name', v.full_name, 'presence', v.presence, 'is_adult', v.is_adult, 'evac_need', r.evac_need) ORDER BY v.last_name, v.first_name) FILTER (WHERE (v.id IS NOT NULL)), '[]'::jsonb) AS residents
+    COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'full_name', v.full_name, 'presence', v.presence, 'is_adult', v.is_adult, 'evac_need', r.evac_need, 'household_id', r.household_id) ORDER BY r.household_id, v.last_name, v.first_name) FILTER (WHERE (v.id IS NOT NULL)), '[]'::jsonb) AS residents
    FROM (((__TENANT__.buildings b
      JOIN __TENANT__.rooms rm ON ((rm.building_id = b.id)))
      LEFT JOIN __TENANT__.residents r ON (((r.room_id = rm.id) AND (r.status = 'active'::text))))
@@ -1675,6 +1745,15 @@ ALTER TABLE ONLY __TENANT__.erasure_log
 
 ALTER TABLE ONLY __TENANT__.gate_events
     ADD CONSTRAINT gate_events_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: households households_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.households
+    ADD CONSTRAINT households_pkey PRIMARY KEY (id);
 
 
 --
@@ -1855,6 +1934,14 @@ CREATE INDEX job_runs_job_idx ON __TENANT__.job_runs USING btree (job, ran_at DE
 
 --
 
+-- Name: residents_household_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX residents_household_idx ON __TENANT__.residents USING btree (household_id) WHERE (household_id IS NOT NULL);
+
+
+--
+
 -- Name: residents_room_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1923,6 +2010,14 @@ CREATE TRIGGER profiles_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.pro
 --
 
 CREATE TRIGGER residents_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: residents residents_prune_households; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER residents_prune_households AFTER DELETE OR UPDATE OF household_id ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION __TENANT__.prune_empty_households();
 
 
 --
@@ -2011,6 +2106,15 @@ ALTER TABLE ONLY __TENANT__.gate_events
 
 ALTER TABLE ONLY __TENANT__.profiles
     ADD CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: residents residents_household_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.residents
+    ADD CONSTRAINT residents_household_id_fkey FOREIGN KEY (household_id) REFERENCES __TENANT__.households(id) ON DELETE SET NULL;
 
 
 --
@@ -2212,6 +2316,29 @@ CREATE POLICY gate_events_insert ON __TENANT__.gate_events FOR INSERT WITH CHECK
 --
 
 CREATE POLICY gate_events_read ON __TENANT__.gate_events FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: households; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.households ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: households households_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY households_read ON __TENANT__.households FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: households households_supervisor; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY households_supervisor ON __TENANT__.households USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
 
 
 --

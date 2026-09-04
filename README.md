@@ -363,8 +363,12 @@ out of the two working apps:
   first, a tap per person at the assembly point, working without a
   connection and syncing the ticks later. A printable evacuation list.
   Drills and incidents are kept as a record for as long as the register.
-- **Features for this site** (admins, under Settings): the two switches
-  above. Both are off until an administrator turns them on, so a centre
+- **Households** (only when the site's *Households* feature is on): link
+  family members from a resident's edit sheet. A family stays together on
+  the roll call, children marked, and reads as a family in a room. The
+  link is an id shared by the members and nothing else.
+- **Features for this site** (admins, under Settings): the three switches
+  above. All are off until an administrator turns them on, so a centre
   that never does sees exactly what it saw before.
 - **Settings** (admins only): site name, timezone, the adult age, the
   due-soon hour, the House Rules thresholds, retention, the offline

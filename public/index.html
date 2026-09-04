@@ -574,6 +574,17 @@ async function renderRoll() {
     groups.get(key).push(r);
   }
   const needRank = (r) => (r.evac_need && r.evac_need !== "none" ? 0 : 1);
+  const households = !!state.settings?.feature_households;
+  // Families stay together: sort by the household's best need rank, then
+  // by household, adults first inside it.
+  const hhRank = new Map();
+  if (households) for (const r of rows) if (r.household_id) hhRank.set(r.household_id, Math.min(hhRank.get(r.household_id) ?? 1, needRank(r)));
+  // Both keys start with the need rank and then a surname, so families and
+  // single residents interleave alphabetically; a family's members share the
+  // key up to the id, so they stay adjacent, adults first.
+  const key = (r) => households && r.household_id
+    ? `${hhRank.get(r.household_id)}|${(r.household_label || "").toLowerCase()}|${r.household_id}|${r.is_adult === false ? 1 : 0}`
+    : `${needRank(r)}|${String(r.last_name || r.full_name || "").toLowerCase()}|${r.id}|0`;
   const accounted = roll ? rows.filter((r) => roll.marks[r.id]).length : 0;
   const head = roll ? `
     <div class="rollhead">
@@ -583,7 +594,7 @@ async function renderRoll() {
     <div class="rollprog"><div id="rollProg"></div></div>` : `
     <div class="rollhead"><div><b>${rows.length}</b> <span class="hint">on site right now</span></div></div>`;
   const list = [...groups.entries()].map(([name, people]) => {
-    people.sort((a, b) => needRank(a) - needRank(b) || String(a.full_name).localeCompare(String(b.full_name)));
+    people.sort((a, b) => key(a).localeCompare(key(b)) || String(a.full_name).localeCompare(String(b.full_name)));
     const done = roll ? people.filter((r) => roll.marks[r.id]).length : 0;
     return `
     <div class="rollgroup">
@@ -592,7 +603,7 @@ async function renderRoll() {
       <div class="rollrow ${roll && roll.marks[r.id] ? "done" : ""}" data-id="${esc(r.id)}">
         <span class="who">
           <span class="name">${esc(r.full_name)}</span>
-          <span class="meta">${r.room_label && state.settings?.feature_buildings ? esc(r.room_label) + " · " : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : "no assistance needed"}</span>
+          <span class="meta">${r.room_label && state.settings?.feature_buildings ? esc(r.room_label) + " · " : ""}${households && r.household_label ? esc(r.household_label) + (r.is_adult === false ? " · child" : "") + " · " : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : "no assistance needed"}</span>
         </span>
         ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}">${roll.marks[r.id] ? "✓" : "Here"}</button>` : ""}
       </div>`).join("")}

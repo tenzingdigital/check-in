@@ -110,7 +110,8 @@ router.get('/', wrap(async (req, res) => {
     if (found.length === 0) return found;
     // The room, for every card (Stage 1 of docs/PRODUCT-ROADMAP.md).
     const { rows: rooms } = await client.query(
-      `select id, room_id, building_id, building, floor, room, room_label, evac_need
+      `select id, room_id, building_id, building, floor, room, room_label, evac_need,
+              household_id, household_size, household_label
          from public.v_resident_room where id = any($1::uuid[])`,
       [found.map(r => r.id)],
     );
@@ -121,6 +122,7 @@ router.get('/', wrap(async (req, res) => {
         room_id: rm.room_id || null, building_id: rm.building_id || null, building: rm.building || null,
         floor: rm.floor || null, room: rm.room || null, room_label: rm.room_label || null,
         evac_need: rm.evac_need || 'none',
+        household_id: rm.household_id || null, household_size: rm.household_size || null, household_label: rm.household_label || null,
       });
     }
     if (!wantCompliance) return found;
@@ -214,7 +216,7 @@ router.get('/:id/record', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select id, first_name, last_name, date_of_birth, id_type, id_number,
-              status, departed_on, registered_at, room_id, evac_need
+              status, departed_on, registered_at, room_id, evac_need, household_id
          from public.residents where id = $1`,
       [uuidParam(req.params.id, 'resident id')],
     );
@@ -222,6 +224,24 @@ router.get('/:id/record', wrap(async (req, res) => {
   });
   if (!row) throw new HttpError(404, 'No such resident, or not authorised');
   res.json(row);
+}));
+
+// GET /api/residents/:id/household — who shares this resident's household.
+router.get('/:id/household', wrap(async (req, res) => {
+  const rows = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select v.id, v.full_name, v.is_adult, v.presence, x.room_label
+         from public.v_resident_room me
+         join public.residents m on m.household_id = me.household_id and m.status = 'active'
+         join public.v_resident_status v on v.id = m.id
+         left join public.v_resident_room x on x.id = m.id
+        where me.id = $1 and me.household_id is not null
+        order by v.is_adult desc, v.last_name, v.first_name`,
+      [uuidParam(req.params.id, 'resident id')],
+    );
+    return rows;
+  });
+  res.json(rows);
 }));
 
 // PATCH /api/residents/:id — change a resident's details.
@@ -253,6 +273,14 @@ router.patch('/:id', wrap(async (req, res) => {
 
   if (Object.prototype.hasOwnProperty.call(body, 'room_id')) set('room_id', roomParam(body.room_id));
   if (Object.prototype.hasOwnProperty.call(body, 'evac_need')) set('evac_need', evacParam(body.evac_need) || 'none');
+  // household: null leaves the family; household_with joins another
+  // resident's (handled by join_household() below, after the other fields).
+  if (Object.prototype.hasOwnProperty.call(body, 'household_id')) {
+    if (body.household_id !== null && body.household_id !== '') throw new HttpError(400, 'household_id may only be cleared here; use household_with to join a family');
+    set('household_id', null);
+  }
+  const householdWith = body.household_with ? uuidParam(body.household_with, 'household_with') : null;
+  if (householdWith && !sets.length) sets.push('updated_at = now()');
 
   if (Object.prototype.hasOwnProperty.call(body, 'status')) {
     const status = String(body.status || '');
@@ -275,9 +303,13 @@ router.patch('/:id', wrap(async (req, res) => {
     const { rows } = await client.query(
       `update public.residents set ${sets.join(', ')}
         where id = $1
-        returning id, first_name, last_name, id_type, id_number, status, departed_on, room_id, evac_need`,
+        returning id, first_name, last_name, id_type, id_number, status, departed_on, room_id, evac_need, household_id`,
       args,
     );
+    if (rows[0] && householdWith) {
+      const { rows: h } = await client.query(`select public.join_household($1, $2) as household_id`, [rows[0].id, householdWith]);
+      rows[0].household_id = h[0].household_id;
+    }
     return rows[0];
   }).catch((err) => { throw roomError(supervisorOnly(err)); });
 

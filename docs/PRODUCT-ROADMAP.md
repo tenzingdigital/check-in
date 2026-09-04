@@ -16,7 +16,8 @@ if the answers do.
 
 **Per-site switches.** Each of these features is off by default and turned
 on per centre under Admin → Settings → *Features for this site*
-(`app_settings.feature_buildings`, `feature_evacuation`; migration 017). A
+(`app_settings.feature_buildings`, `feature_evacuation`, `feature_households`;
+migrations 017 and 018). A
 centre that never turns one on sees exactly what it saw before, and a trial
 centre can turn them on one at a time.
 
@@ -67,7 +68,8 @@ decision for a customer to make in writing, with a DPIA behind it.
 
 ## Stage 3 — Households
 
-**Status: next.**
+**Status: built 4 September 2026 (migration 018), behind the
+`feature_households` switch.**
 
 - Link residents into a household, so a child appears with a parent, a
   family evacuates as one row, and a room's occupants read as a family.
@@ -76,7 +78,7 @@ decision for a customer to make in writing, with a DPIA behind it.
 
 ## Stage 4 — Reports
 
-**Status: not started.**
+**Status: next.**
 
 - Occupancy by building and room, attendance for a date range, the daily
   register for a date range, the evacuation list, as CSV and as a printable

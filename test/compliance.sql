@@ -930,3 +930,53 @@ select public.erase_resident(:'late_id', 'test');
 reset role;
 select count(*) as n from public.roll_call_marks where resident_id = :'late_id' \gset gone_
 select pg_temp.expect('marks go with the resident', (:'gone_n')::integer, 0);
+
+\echo ''
+\echo '=========== I. HOUSEHOLDS (migration 018) ==========='
+reset role;
+-- Nair, Brennan and Nowak were erased by earlier sections; these three survive.
+select id as hh_a from public.residents where last_name = 'Fitzgerald' \gset
+select id as hh_b from public.residents where last_name = 'Mensah'     \gset
+select id as hh_c from public.residents where last_name = 'Haddad'     \gset
+select feature_households from public.app_settings \gset f_
+select pg_temp.expect('households default off', (:'f_feature_households')::boolean, false);
+
+\echo '--- a supervisor links two residents; a third joins; the label counts them'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.join_household(:'hh_a', :'hh_b') as hh \gset
+select public.join_household(:'hh_c', :'hh_b') as hh2 \gset
+select pg_temp.expect('the third joined the same household', :'hh2'::text, :'hh'::text);
+select household_size from public.v_resident_room where id = :'hh_a' \gset s_
+select pg_temp.expect('three in the household', (:'s_household_size')::integer, 3);
+select pg_temp.try('a resident joins their own household', 'select public.join_household(' || quote_literal(:'hh_a') || ', ' || quote_literal(:'hh_a') || ')');
+reset role;
+
+\echo '--- a guard sees the family on the list but cannot change it'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select household_label from public.v_evacuation_list where id = :'hh_a' \gset g_
+select pg_temp.expect('guard sees the family label', :'g_household_label'::text like '%family (3)', true);
+select pg_temp.try('guard links residents',   'select public.join_household(' || quote_literal(:'hh_a') || ', ' || quote_literal(:'hh_b') || ')');
+select pg_temp.try('guard creates a household', 'insert into public.households default values');
+reset role;
+
+\echo '--- leaving empties and prunes; erasure leaves the rest of the family intact'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+update public.residents set household_id = null where id = :'hh_c';
+reset role;
+select count(*) as n from public.households where id = :'hh' \gset still_
+select pg_temp.expect('a household with members remains', (:'still_n')::integer, 1);
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.erase_resident(:'hh_a', 'test');
+reset role;
+select household_id = :'hh' as same from public.residents where id = :'hh_b' \gset b_
+select pg_temp.expect('the remaining member keeps the household', (:'b_same')::boolean, true);
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+update public.residents set household_id = null where id = :'hh_b';
+reset role;
+select count(*) as n from public.households where id = :'hh' \gset gone_
+select pg_temp.expect('the empty household is pruned', (:'gone_n')::integer, 0);

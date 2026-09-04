@@ -27,6 +27,7 @@ const COLUMNS = {
   // Per-site switches for the buildings and evacuation features (017).
   feature_buildings:             { kind: 'bool' },
   feature_evacuation:            { kind: 'bool' },
+  feature_households:            { kind: 'bool' },
 };
 
 router.get('/', wrap(async (req, res) => {

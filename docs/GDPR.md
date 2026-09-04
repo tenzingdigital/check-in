@@ -44,6 +44,7 @@ residents is the centre's document, and the DPA says so.
 | Late-entry provenance | `late_entry`, `recorded_at`, `client_ref` on both event tables | Separates "recorded live" from "recorded on the terminal during an outage and sent later" | All staff; appears in the export |
 | Room | `residents.room_id` (migration 016, only where the centre turns buildings on) | Where the person sleeps; occupancy and the evacuation list | All staff |
 | Evacuation need | `residents.evac_need` (migration 017, only where the centre turns evacuation on) | One code from a fixed list: needs help to move, to hear the alarm, to find the way, has an infant or is a carer, other. The PEEP minimum | The roll call, the evacuation list and room occupancy only. Never on the gate or register cards, never searchable |
+| Household | `residents.household_id` (migration 018, only where the centre turns households on) | Which residents are one family, so a child appears with a parent on the roll call. An id and nothing else: no family name, no relationship, no free text | All staff |
 | Roll calls | `roll_calls`, `roll_call_marks` | Who was accounted for in a drill or an incident, by whom, when | All staff; kept as long as the register |
 
 Nothing else. There is no free-text note, no photograph, no biometric, and

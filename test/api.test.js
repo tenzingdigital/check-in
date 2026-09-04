@@ -1052,6 +1052,42 @@ async function main() {
     assert.ok(rc.ended_at);
   });
 
+  console.log("\n== households ==");
+
+  let kidId;
+  await test("a supervisor links a child to a parent; the family shows on the list", async () => {
+    const kid = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Tiny", last_name: "Newcomer", date_of_birth: "2020-01-01" } });
+    assert.equal(kid.status, 201, kid.text);
+    kidId = kid.json.id;
+    const asGuard = await api.fetch(`/api/residents/${kidId}`, { method: "PATCH", body: { household_with: newId } });
+    assert.equal(asGuard.status, 403);
+    const join = await supC.fetch(`/api/residents/${kidId}`, { method: "PATCH", body: { household_with: newId } });
+    assert.equal(join.status, 200, join.text);
+    assert.ok(join.json.household_id, "no household id came back");
+    const members = await supC.fetch(`/api/residents/${newId}/household`);
+    assert.equal(members.json.length, 2);
+    assert.equal(members.json[0].is_adult, true, "adults first");
+    const list = await api.fetch("/api/evacuation");
+    const row = list.json.find((r) => r.id === kidId);
+    assert.match(row.household_label, /Newcomer.* family \(2\)/);   // the parent was renamed Newcomer-Smith earlier
+    assert.equal(row.is_adult, false);
+    const self = await supC.fetch(`/api/residents/${kidId}`, { method: "PATCH", body: { household_with: kidId } });
+    assert.equal(self.status, 400);
+  });
+
+  await test("leaving the family prunes it once empty", async () => {
+    const leave = await supC.fetch(`/api/residents/${kidId}`, { method: "PATCH", body: { household_id: null } });
+    assert.equal(leave.status, 200, leave.text);
+    assert.equal(leave.json.household_id, null);
+    const left = await supC.fetch(`/api/residents/${newId}/household`);
+    assert.equal(left.json.length, 1, "the parent is still in a household of one until they leave too");
+    await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { household_id: null } });
+    const { rows } = await withOwner((c) => c.query(`select count(*)::int as n from public.households`));
+    assert.equal(rows[0].n, 0, "an empty household was not pruned");
+    const bad = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { household_id: "00000000-0000-4000-8000-000000000000" } });
+    assert.equal(bad.status, 400, "household_id can only be cleared through this route");
+  });
+
   console.log("\n== audit trail ==");
 
   await test("a supervisor's edit is on the record, with before and after", async () => {
