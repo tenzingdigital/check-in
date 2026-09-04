@@ -924,6 +924,68 @@ async function main() {
     assert.equal(gate2.status, 200, "reactivated resident cannot be signed in");
   });
 
+  console.log("\n== buildings and rooms ==");
+
+  let castleId, roomId;
+  await test("a guard cannot add a building; a supervisor can", async () => {
+    const asGuard = await api.fetch("/api/buildings", { method: "POST", body: { name: "Castle" } });
+    assert.equal(asGuard.status, 403);
+    const res = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Castle" } });
+    assert.equal(res.status, 201, res.text);
+    castleId = res.json.id;
+    const dup = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Castle" } });
+    assert.equal(dup.status, 409, "a duplicate building name must be refused");
+  });
+
+  await test("rooms are added in a batch, with a capacity", async () => {
+    const res = await supC.fetch(`/api/buildings/${castleId}/rooms`, {
+      method: "POST",
+      body: { rooms: [{ floor: "1F", number: "12", capacity: 2 }, { floor: "1F", number: "13" }, { floor: "", number: "G1", capacity: 3 }] },
+    });
+    assert.equal(res.status, 201, res.text);
+    assert.equal(res.json.length, 3);
+    roomId = res.json.find((r) => r.number === "12").id;
+    const bad = await supC.fetch(`/api/buildings/${castleId}/rooms`, { method: "POST", body: { rooms: [{ number: "X", capacity: 99 }] } });
+    assert.equal(bad.status, 400, "capacity outside 1..30 must be refused");
+  });
+
+  await test("a resident is moved into a room and every card says so", async () => {
+    const move = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { room_id: roomId } });
+    assert.equal(move.status, 200, move.text);
+    assert.equal(move.json.room_id, roomId);
+    const list = await api.fetch("/api/residents?q=Newcomer&limit=10");
+    const row = list.json.find((r) => r.id === newId);
+    assert.equal(row.room_label, "Castle · 1F · 12");
+    assert.equal(row.building, "Castle");
+    const nowhere = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { room_id: "00000000-0000-4000-8000-000000000000" } });
+    assert.equal(nowhere.status, 400, "a room that does not exist is a 400");
+    const record = await supC.fetch(`/api/residents/${newId}/record`);
+    assert.equal(record.json.room_id, roomId, "the edit sheet gets the room");
+  });
+
+  await test("occupancy lists the room, its occupants and who is on site", async () => {
+    const res = await api.fetch("/api/buildings");
+    assert.equal(res.status, 200);
+    const castle = res.json.find((b) => b.id === castleId);
+    const room = castle.rooms.find((r) => r.id === roomId);
+    assert.equal(room.occupants, 1);
+    assert.equal(room.residents[0].id, newId);
+    assert.ok(["in", "out"].includes(room.residents[0].presence));
+    const guardWrite = await api.fetch(`/api/rooms/${roomId}`, { method: "PATCH", body: { capacity: 4 } });
+    assert.equal(guardWrite.status, 403);
+  });
+
+  await test("an occupied room or building cannot be removed; an empty one can", async () => {
+    assert.equal((await supC.fetch(`/api/rooms/${roomId}`, { method: "DELETE" })).status, 409);
+    assert.equal((await supC.fetch(`/api/buildings/${castleId}`, { method: "DELETE" })).status, 409);
+    const clear = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { room_id: null } });
+    assert.equal(clear.status, 200);
+    assert.equal(clear.json.room_id, null);
+    assert.equal((await supC.fetch(`/api/rooms/${roomId}`, { method: "DELETE" })).status, 200);
+    const after = await api.fetch("/api/buildings");
+    assert.equal(after.json.find((b) => b.id === castleId).rooms.length, 2);
+  });
+
   console.log("\n== audit trail ==");
 
   await test("a supervisor's edit is on the record, with before and after", async () => {
@@ -1289,6 +1351,13 @@ async function main() {
       for (const m of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
         const hash = crypto.createHash("sha256").update(m[1], "utf8").digest("base64");
         assert.ok(csp.includes(`'sha256-${hash}'`), `an inline script in ${page} is not hashed into the CSP`);
+      }
+      // The page's own <style> block is admitted by hash too; without it the
+      // page renders unstyled and nothing reports an error.
+      const styleSrc = (csp.match(/style-src[^;]*/) || [""])[0];
+      for (const m of html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+        const hash = crypto.createHash("sha256").update(m[1], "utf8").digest("base64");
+        assert.ok(styleSrc.includes(`'sha256-${hash}'`), `the <style> block in ${page} is not hashed into style-src`);
       }
     }
   });

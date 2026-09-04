@@ -834,3 +834,46 @@ select pg_temp.try('anon syncs a late gate event',
 reset role;
 select count(*) as n from public.checkin_events where resident_id = :'late_id' \gset closed_
 select pg_temp.expect('no side door recorded anything', (:'closed_n')::integer, 2);
+
+\echo ''
+\echo '=========== G. BUILDINGS AND ROOMS (migration 016) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+insert into public.buildings (name) values ('Castle') returning id as castle_id \gset
+insert into public.rooms (building_id, floor, number, capacity) values (:'castle_id', '1F', '12', 2) returning id as room_id \gset
+update public.residents set room_id = :'room_id' where id = :'late_id';
+reset role;
+
+\echo '--- a guard reads the room on the card and the occupancy, but changes nothing'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select room_label from public.v_resident_room where id = :'late_id' \gset g_
+select pg_temp.expect('guard sees the room on the resident', :'g_room_label'::text, 'Castle · 1F · 12'::text);
+select occupants, on_site from public.v_room_occupancy where room_id = :'room_id' \gset o_
+select pg_temp.expect('occupancy counts the resident', (:'o_occupants')::integer, 1);
+select pg_temp.try('guard adds a building',   'insert into public.buildings (name) values (''Annex'')');
+select pg_temp.try('guard adds a room',       'insert into public.rooms (building_id, number) values (' || quote_literal(:'castle_id') || ', ''99'')');
+select pg_temp.try('guard moves a resident',  'update public.residents set room_id = null where id = ' || quote_literal(:'late_id'));
+select pg_temp.try('guard deletes a building','delete from public.buildings where id = ' || quote_literal(:'castle_id'));
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon reads occupancy',    'select * from public.v_room_occupancy');
+select pg_temp.try('anon reads rooms',        'select * from public.rooms');
+reset role;
+
+\echo '--- building and room changes are on the record'
+select count(*) as n from public.admin_audit where table_name in ('buildings', 'rooms') \gset a_
+select pg_temp.expect('building and room inserts are audited', (:'a_n')::integer, 2);
+select count(*) as n from public.admin_audit where table_name = 'residents' and row_id = :'late_id'::text and new_row->>'room_id' = :'room_id' \gset m_
+select pg_temp.expect('the move is audited on the resident', (:'m_n')::integer, 1);
+
+\echo '--- a departed resident no longer occupies the room'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+update public.residents set status = 'departed', departed_on = public.site_today() where id = :'late_id';
+select occupants from public.v_room_occupancy where room_id = :'room_id' \gset d_
+select pg_temp.expect('departed resident is not counted', (:'d_occupants')::integer, 0);
+update public.residents set status = 'active', departed_on = null where id = :'late_id';
+reset role;

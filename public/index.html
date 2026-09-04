@@ -145,6 +145,7 @@ function residentCard(r, { clickable = true } = {}) {
   const tag = clickable ? "button" : "div";
   const cls = ["card"].join(" ");
   const bits = [];
+  if (r.room_label) bits.push(esc(r.room_label));
   bits.push(r.last_event_at ? `last movement ${ago(r.last_event_at)}` : "no movement on record");
 
   const card = `

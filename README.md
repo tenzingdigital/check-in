@@ -353,6 +353,9 @@ out of the two working apps:
   re-enable. Nobody but the account's owner ever sees their password.
   With email unconfigured the link is shown to the admin to pass on.
   Disabling ends the account's open sessions immediately.
+- **Buildings** (supervisors and admins): the centre's buildings and the
+  rooms in each, with a capacity; a resident's room is set on their record
+  and shows on every card; occupancy per room with who is on site now.
 - **Settings** (admins only): site name, timezone, the adult age, the
   due-soon hour, the House Rules thresholds, retention, the offline
   sync window, and the idle lock (minutes without a touch before a

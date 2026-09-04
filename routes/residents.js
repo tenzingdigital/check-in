@@ -57,6 +57,17 @@ function idParams(body) {
 }
 
 // The row policy refuses a guard's write with 42501. Say so in words.
+// room_id: a room's uuid, or null / "" to clear it. The foreign key is what
+// refuses a room that does not exist; that becomes a 400 here.
+function roomParam(value) {
+  if (value === undefined || value === null || value === '') return null;
+  return uuidParam(value, 'room_id');
+}
+function roomError(err) {
+  if (err && err.code === '23503' && /room/.test(err.constraint || '')) return new HttpError(400, 'No such room');
+  return err;
+}
+
 function supervisorOnly(err) {
   if (err && err.code === '42501') return new HttpError(403, 'Only a supervisor or admin can manage residents');
   return err;
@@ -88,7 +99,20 @@ router.get('/', wrap(async (req, res) => {
       [q, includeDeparted, limit],
     );
     for (const r of found) { delete r.id_number; delete r.id_type; }
-    if (!wantCompliance || found.length === 0) return found;
+    if (found.length === 0) return found;
+    // The room, for every card (Stage 1 of docs/PRODUCT-ROADMAP.md).
+    const { rows: rooms } = await client.query(
+      `select id, room_id, building_id, building, floor, room, room_label
+         from public.v_resident_room where id = any($1::uuid[])`,
+      [found.map(r => r.id)],
+    );
+    const roomById = new Map(rooms.map(r => [r.id, r]));
+    for (const r of found) {
+      const rm = roomById.get(r.id);
+      Object.assign(r, rm ? { room_id: rm.room_id, building_id: rm.building_id, building: rm.building, floor: rm.floor, room: rm.room, room_label: rm.room_label }
+                         : { room_id: null, building_id: null, building: null, floor: null, room: null, room_label: null });
+    }
+    if (!wantCompliance) return found;
 
     const { rows: comp } = await client.query(
       `select id, state, required_today, seen_today, checkins_today,
@@ -155,16 +179,17 @@ router.post('/', wrap(async (req, res) => {
   const last = nameParam(body.last_name, 'Last name');
   const dob = dobParam(body.date_of_birth);
   const id = idParams(body) || { idType: null, idNumber: null };
+  const roomId = roomParam(body.room_id);
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `insert into public.residents (first_name, last_name, date_of_birth, id_type, id_number, registered_by)
-       values ($1, $2, $3, $4, $5, auth.uid())
+      `insert into public.residents (first_name, last_name, date_of_birth, id_type, id_number, room_id, registered_by)
+       values ($1, $2, $3, $4, $5, $6, auth.uid())
        returning id`,
-      [first, last, dob, id.idType, id.idNumber],
+      [first, last, dob, id.idType, id.idNumber, roomId],
     );
     return rows[0];
-  }).catch((err) => { throw supervisorOnly(err); });
+  }).catch((err) => { throw roomError(supervisorOnly(err)); });
 
   res.status(201).json({ id: row.id });
 }));
@@ -177,7 +202,7 @@ router.get('/:id/record', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select id, first_name, last_name, date_of_birth, id_type, id_number,
-              status, departed_on, registered_at
+              status, departed_on, registered_at, room_id
          from public.residents where id = $1`,
       [uuidParam(req.params.id, 'resident id')],
     );
@@ -214,6 +239,8 @@ router.patch('/:id', wrap(async (req, res) => {
   const id = idParams(body);
   if (id) { set('id_type', id.idType); set('id_number', id.idNumber); }
 
+  if (Object.prototype.hasOwnProperty.call(body, 'room_id')) set('room_id', roomParam(body.room_id));
+
   if (Object.prototype.hasOwnProperty.call(body, 'status')) {
     const status = String(body.status || '');
     if (status === 'departed') {
@@ -235,11 +262,11 @@ router.patch('/:id', wrap(async (req, res) => {
     const { rows } = await client.query(
       `update public.residents set ${sets.join(', ')}
         where id = $1
-        returning id, first_name, last_name, id_type, id_number, status, departed_on`,
+        returning id, first_name, last_name, id_type, id_number, status, departed_on, room_id`,
       args,
     );
     return rows[0];
-  }).catch((err) => { throw supervisorOnly(err); });
+  }).catch((err) => { throw roomError(supervisorOnly(err)); });
 
   if (!row) throw new HttpError(403, 'Only a supervisor or admin can change resident details');
   res.json({ ok: true, ...row });

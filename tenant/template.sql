@@ -246,6 +246,7 @@ CREATE TABLE __TENANT__.residents (
     id_type text,
     id_number text,
     search_key text GENERATED ALWAYS AS (lower(public.immutable_unaccent(((((((((btrim(first_name) || ' '::text) || btrim(last_name)) || ' '::text) || btrim(last_name)) || ' '::text) || btrim(first_name)) || ' '::text) || COALESCE(id_number, ''::text))))) STORED,
+    room_id uuid,
     CONSTRAINT departed_on_matches_status CHECK (((status = 'departed'::text) = (departed_on IS NOT NULL))),
     CONSTRAINT residents_date_of_birth_check CHECK (((date_of_birth > '1900-01-01'::date) AND (date_of_birth <= CURRENT_DATE))),
     CONSTRAINT residents_first_name_check CHECK ((length(btrim(first_name)) > 0)),
@@ -1204,6 +1205,20 @@ ALTER TABLE __TENANT__.admin_audit ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
 
 --
 
+-- Name: buildings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.buildings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT buildings_name_check CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)))
+);
+
+
+--
+
 -- Name: checkin_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1324,6 +1339,25 @@ CREATE TABLE __TENANT__.profiles (
 
 --
 
+-- Name: rooms; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.rooms (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    building_id uuid NOT NULL,
+    floor text DEFAULT ''::text NOT NULL,
+    number text NOT NULL,
+    capacity integer DEFAULT 1 NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT rooms_capacity_check CHECK (((capacity >= 1) AND (capacity <= 30))),
+    CONSTRAINT rooms_floor_check CHECK ((length(floor) <= 20)),
+    CONSTRAINT rooms_number_check CHECK (((length(btrim(number)) >= 1) AND (length(btrim(number)) <= 20)))
+);
+
+
+--
+
 -- Name: v_check_log; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -1341,6 +1375,54 @@ CREATE VIEW __TENANT__.v_check_log AS
      JOIN __TENANT__.residents r ON ((r.id = e.resident_id)))
      JOIN __TENANT__.profiles g ON ((g.id = e.guard_id)))
   WHERE __TENANT__.is_staff();
+
+
+--
+
+-- Name: v_resident_room; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW __TENANT__.v_resident_room AS
+ SELECT r.id,
+    r.room_id,
+    rm.building_id,
+    b.name AS building,
+    rm.floor,
+    rm.number AS room,
+    (((b.name ||
+        CASE
+            WHEN (rm.floor <> ''::text) THEN (' · '::text || rm.floor)
+            ELSE ''::text
+        END) || ' · '::text) || rm.number) AS room_label
+   FROM ((__TENANT__.residents r
+     JOIN __TENANT__.rooms rm ON ((rm.id = r.room_id)))
+     JOIN __TENANT__.buildings b ON ((b.id = rm.building_id)))
+  WHERE __TENANT__.is_staff();
+
+
+--
+
+-- Name: v_room_occupancy; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW __TENANT__.v_room_occupancy AS
+ SELECT b.id AS building_id,
+    b.name AS building,
+    b.sort AS building_sort,
+    rm.id AS room_id,
+    rm.floor,
+    rm.number AS room,
+    rm.capacity,
+    rm.sort AS room_sort,
+    (count(v.id))::integer AS occupants,
+    (count(v.id) FILTER (WHERE (v.presence = 'in'::text)))::integer AS on_site,
+    COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'full_name', v.full_name, 'presence', v.presence, 'is_adult', v.is_adult) ORDER BY v.last_name, v.first_name) FILTER (WHERE (v.id IS NOT NULL)), '[]'::jsonb) AS residents
+   FROM (((__TENANT__.buildings b
+     JOIN __TENANT__.rooms rm ON ((rm.building_id = b.id)))
+     LEFT JOIN __TENANT__.residents r ON (((r.room_id = rm.id) AND (r.status = 'active'::text))))
+     LEFT JOIN __TENANT__.v_resident_status v ON ((v.id = r.id)))
+  WHERE __TENANT__.is_staff()
+  GROUP BY b.id, b.name, b.sort, rm.id, rm.floor, rm.number, rm.capacity, rm.sort;
 
 
 --
@@ -1386,6 +1468,24 @@ ALTER TABLE ONLY __TENANT__.admin_audit
 
 ALTER TABLE ONLY __TENANT__.app_settings
     ADD CONSTRAINT app_settings_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: buildings buildings_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.buildings
+    ADD CONSTRAINT buildings_name_key UNIQUE (name);
+
+
+--
+
+-- Name: buildings buildings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.buildings
+    ADD CONSTRAINT buildings_pkey PRIMARY KEY (id);
 
 
 --
@@ -1449,6 +1549,24 @@ ALTER TABLE ONLY __TENANT__.profiles
 
 ALTER TABLE ONLY __TENANT__.residents
     ADD CONSTRAINT residents_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: rooms rooms_building_floor_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.rooms
+    ADD CONSTRAINT rooms_building_floor_number_key UNIQUE (building_id, floor, number);
+
+
+--
+
+-- Name: rooms rooms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.rooms
+    ADD CONSTRAINT rooms_pkey PRIMARY KEY (id);
 
 
 --
@@ -1557,6 +1675,14 @@ CREATE INDEX job_runs_job_idx ON __TENANT__.job_runs USING btree (job, ran_at DE
 
 --
 
+-- Name: residents_room_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX residents_room_idx ON __TENANT__.residents USING btree (room_id) WHERE (room_id IS NOT NULL);
+
+
+--
+
 -- Name: residents_search_key_trgm_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1573,10 +1699,26 @@ CREATE INDEX residents_status_idx ON __TENANT__.residents USING btree (status);
 
 --
 
+-- Name: rooms_building_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX rooms_building_idx ON __TENANT__.rooms USING btree (building_id, sort, floor, number);
+
+
+--
+
 -- Name: app_settings app_settings_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER app_settings_audit AFTER UPDATE ON __TENANT__.app_settings FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: buildings buildings_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER buildings_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.buildings FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
 
 
 --
@@ -1601,6 +1743,14 @@ CREATE TRIGGER residents_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.re
 --
 
 CREATE TRIGGER residents_touch_updated_at BEFORE UPDATE ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
+
+
+--
+
+-- Name: rooms rooms_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER rooms_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.rooms FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
 
 
 --
@@ -1686,6 +1836,24 @@ ALTER TABLE ONLY __TENANT__.residents
 
 --
 
+-- Name: residents residents_room_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.residents
+    ADD CONSTRAINT residents_room_id_fkey FOREIGN KEY (room_id) REFERENCES __TENANT__.rooms(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: rooms rooms_building_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.rooms
+    ADD CONSTRAINT rooms_building_id_fkey FOREIGN KEY (building_id) REFERENCES __TENANT__.buildings(id) ON DELETE CASCADE;
+
+
+--
+
 -- Name: admin_audit; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -1720,6 +1888,29 @@ CREATE POLICY app_settings_read ON __TENANT__.app_settings FOR SELECT USING (__T
 --
 
 CREATE POLICY app_settings_write ON __TENANT__.app_settings FOR UPDATE USING (__TENANT__.is_admin()) WITH CHECK (__TENANT__.is_admin());
+
+
+--
+
+-- Name: buildings; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.buildings ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: buildings buildings_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY buildings_read ON __TENANT__.buildings FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: buildings buildings_supervisor; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY buildings_supervisor ON __TENANT__.buildings USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
 
 
 --
@@ -1834,6 +2025,29 @@ CREATE POLICY residents_read ON __TENANT__.residents FOR SELECT USING (__TENANT_
 --
 
 CREATE POLICY residents_supervisor ON __TENANT__.residents USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
+
+
+--
+
+-- Name: rooms; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.rooms ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: rooms rooms_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rooms_read ON __TENANT__.rooms FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: rooms rooms_supervisor; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rooms_supervisor ON __TENANT__.rooms USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
 
 
 --

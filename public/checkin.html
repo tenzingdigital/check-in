@@ -54,11 +54,6 @@
   /* ---- identity and policy notes (detail panel only) ---- */
   .idline { margin-top: 6px; font-size: 14px; color: var(--muted); }
   .idline b { color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
-  .linkish {
-    background: none; border: 0; padding: 0 0 0 8px;
-    color: var(--accent); font-size: 13px; font-weight: 600; text-decoration: underline;
-  }
-  .linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
   /* Inline editor for the ID, replacing two browser prompt() dialogs: a
      phone offers to suppress those after a couple, after which every
@@ -223,6 +218,7 @@ function residentCard(r) {
   const cls = ["card", esc(r.state)];
 
   const bits = [];
+  if (r.room_label) bits.push(esc(r.room_label));
   bits.push(`last seen ${esc(lastSeenText(r))}`);
 
   // "3 missed days" says more than "Missed days"; the count is on the row.

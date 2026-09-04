@@ -27,6 +27,22 @@
   }
   .formcard h2 { margin: 0; font-size: 16px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .selfend { align-self: end; margin-top: 0; }
+  .grid3 { display: grid; grid-template-columns: 1fr 2fr 80px; gap: 8px; }
+  /* Buildings tab */
+  .bld { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .bldhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .bldhead b { font-size: 16px; }
+  .bldhead .linkish { margin-left: auto; font-weight: 500; }
+  .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .room { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .room.over { border-color: var(--warn); }
+  .roomhead { display: flex; align-items: baseline; gap: 6px; }
+  .roomhead b { font-size: 14px; white-space: nowrap; }
+  .roomhead .linkish { margin-left: auto; font-size: 12px; font-weight: 500; }
+  .occ { display: flex; flex-wrap: wrap; gap: 4px; }
+  .occ .pill { font-size: 11px; padding: 3px 8px; text-transform: none; letter-spacing: 0; }
+  .roomsForm .actions { margin-top: 0; }
   @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
   .seg { display: flex; gap: 6px; }
   .seg button {
@@ -99,6 +115,7 @@
 
     <nav class="tabs" role="tablist" id="adminTabs" hidden>
       <button role="tab" id="tabResidents" aria-selected="true"  aria-controls="panelResidents">Residents</button>
+      <button role="tab" id="tabBuildings" aria-selected="false" aria-controls="panelBuildings">Buildings</button>
       <button role="tab" id="tabStaff"     aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
       <button role="tab" id="tabSettings"  aria-selected="false" aria-controls="panelSettings" hidden>Settings</button>
     </nav>
@@ -135,6 +152,10 @@
           </div>
           <input id="afNumber" class="field upper mt8" type="text" placeholder="Number as printed on the card" maxlength="40" hidden>
         </div>
+        <div id="afRoomWrap" hidden>
+          <label class="lbl" for="afRoom">Room</label>
+          <select id="afRoom" class="field"></select>
+        </div>
         <div class="actions">
           <button class="btn primary-in" id="afSave" type="submit">Add to register</button>
           <button class="btn ghost" id="afCancel" type="button">Cancel</button>
@@ -142,6 +163,19 @@
       </form>
 
       <div id="residentList" class="list"></div>
+    </section>
+
+    <!-- ---- buildings and rooms (supervisors and admins) ---- -->
+    <section id="panelBuildings" role="tabpanel" aria-labelledby="tabBuildings" hidden>
+      <p class="hint flush">Describe the centre once: each building and the rooms in it. A resident's room is set on their record and shows on every card. Occupancy here is live from the gate.</p>
+      <form id="bldForm" class="formcard mt14" autocomplete="off">
+        <h2>Add a building</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="bfName">Building name</label><input id="bfName" class="field" type="text" required maxlength="60" placeholder="e.g. Castle"></div>
+          <div class="actions selfend"><button class="btn primary-in" id="bfSave" type="submit">Add building</button></div>
+        </div>
+      </form>
+      <div id="buildingList" class="list"></div>
     </section>
 
     <!-- ---- staff (admins only; the database refuses every operation below
@@ -237,6 +271,7 @@ const state = {
   rows:     new Map(),
   selected: null,
   addType:  "",
+  buildings: [],        // GET /api/buildings, for the room selectors and the Buildings tab
 };
 
 const canResidents = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
@@ -256,6 +291,7 @@ function todayISODate() {
 // shows age and the ID, and the date is fetched into the edit sheet only.
 function residentCard(r) {
   const bits = [`age ${r.age_years}`];
+  if (r.room_label) bits.push(esc(r.room_label));
   bits.push(r.has_id ? "ID recorded" : "no ID recorded");
   const departed = r.status === "departed";
   return `
@@ -321,6 +357,7 @@ $("addForm").addEventListener("submit", async (e) => {
     date_of_birth: $("afDob").value,
   };
   if (state.addType) { body.id_type = state.addType; body.id_number = $("afNumber").value.trim().toUpperCase(); }
+  if (state.buildings.length) body.room_id = $("afRoom").value || null;
   $("afSave").disabled = true;
   const out = await guarded(() => apiPost("/api/residents", body), (err) => toast("Not added: " + err.message, "err"));
   $("afSave").disabled = false;
@@ -369,6 +406,10 @@ function renderDetail(rec, summary) {
         </div>
         <input id="efNumber" class="field upper mt8" type="text" placeholder="Number as printed on the card" maxlength="40"
                value="${esc(rec.id_number || "")}" ${type ? "" : "hidden"}>
+      </div>
+      <div ${state.buildings.length ? "" : "hidden"}>
+        <label class="lbl" for="efRoom">Room</label>
+        <select id="efRoom" class="field">${roomOptions(rec.room_id)}</select>
       </div>
       <div class="actions">
         <button class="btn primary-in" id="efSave" type="submit">Save changes</button>
@@ -430,6 +471,7 @@ function renderDetail(rec, summary) {
       id_type: idType || null,
       id_number: idType ? $("efNumber").value.trim().toUpperCase() : null,
     };
+    if (state.buildings.length) body.room_id = $("efRoom").value || null;
     $("efSave").disabled = true;
     const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, body), (err) => toast("Not saved: " + err.message, "err"));
     $("efSave").disabled = false;
@@ -616,6 +658,120 @@ $("staffList").addEventListener("change", async (e) => {
 });
 
 /* ========================================================================
+   Buildings and rooms (supervisors and admins) — Stage 1 of the product roadmap
+   ====================================================================== */
+
+// "1-12" → 1..12; "G1, G2, 14" → those; each trimmed. Whatever the doors say.
+function expandRoomNumbers(text) {
+  const out = [];
+  for (const part of String(text || "").split(/[,\n]+/)) {
+    const p = part.trim();
+    if (!p) continue;
+    const m = p.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (m && Number(m[2]) >= Number(m[1]) && Number(m[2]) - Number(m[1]) < 200) {
+      for (let n = Number(m[1]); n <= Number(m[2]); n++) out.push(String(n));
+    } else out.push(p);
+  }
+  return out;
+}
+
+function roomOptions(selected) {
+  const opts = ['<option value="">No room</option>'];
+  for (const b of state.buildings) {
+    if (!b.rooms.length) continue;
+    opts.push(`<optgroup label="${esc(b.name)}">`);
+    for (const r of b.rooms) {
+      const label = `${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}${r.occupants ? ` (${r.occupants}/${r.capacity})` : ""}`;
+      opts.push(`<option value="${esc(r.id)}" ${r.id === selected ? "selected" : ""}>${label}</option>`);
+    }
+    opts.push("</optgroup>");
+  }
+  return opts.join("");
+}
+
+async function loadBuildings({ quiet = false } = {}) {
+  const rows = await guarded(() => apiGet("/api/buildings"), (err) => { if (!quiet) showError("Could not load buildings: " + err.message); });
+  if (!rows) return;
+  state.buildings = rows;
+  $("afRoomWrap").hidden = !rows.some((b) => b.rooms.length);
+  $("afRoom").innerHTML = roomOptions(null);
+  if (state.tab !== "buildings") return;
+  showError("");
+  const box = $("buildingList");
+  if (!rows.length) { box.innerHTML = '<p class="empty">No buildings yet. Add the first one above.</p>'; return; }
+  box.innerHTML = rows.map((b) => {
+    const occ = b.rooms.reduce((n, r) => n + r.occupants, 0);
+    const cap = b.rooms.reduce((n, r) => n + r.capacity, 0);
+    const onSite = b.rooms.reduce((n, r) => n + r.on_site, 0);
+    return `
+    <div class="bld" data-bid="${esc(b.id)}">
+      <div class="bldhead">
+        <div><b>${esc(b.name)}</b><span class="hint"> · ${b.rooms.length} room${b.rooms.length === 1 ? "" : "s"} · ${occ}/${cap} beds · ${onSite} on site</span></div>
+        <button class="linkish" type="button" data-del-building="${esc(b.id)}" aria-label="Remove ${esc(b.name)}">remove building</button>
+      </div>
+      ${b.rooms.length ? `<div class="rooms">${b.rooms.map((r) => `
+        <div class="room ${r.occupants > r.capacity ? "over" : ""}">
+          <div class="roomhead">
+            <b>${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}</b>
+            <span class="hint">${r.occupants}/${r.capacity}${r.occupants ? ` · ${r.on_site} on site` : ""}</span>
+            <button class="linkish" type="button" data-del-room="${esc(r.id)}" aria-label="Remove room ${esc(r.number)}">remove</button>
+          </div>
+          ${r.residents.length ? `<div class="occ">${r.residents.map((p) => `<span class="pill ${p.presence === "in" ? "in" : "out"}">${esc(p.full_name)}</span>`).join("")}</div>` : ""}
+        </div>`).join("")}</div>` : '<p class="hint flush">No rooms yet.</p>'}
+      <form class="roomsForm" data-bid="${esc(b.id)}" autocomplete="off">
+        <div class="grid3">
+          <input class="field rfFloor" type="text" maxlength="20" placeholder="Floor (optional)" aria-label="Floor">
+          <input class="field rfNumbers" type="text" required placeholder="Rooms: 1-12 or G1, G2" aria-label="Room numbers">
+          <input class="field rfCap" type="number" min="1" max="30" value="2" aria-label="Beds per room" title="Beds per room">
+        </div>
+        <div class="actions"><button class="btn sm" type="submit">Add rooms</button></div>
+      </form>
+    </div>`;
+  }).join("");
+}
+
+$("bldForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("bfName").value.trim();
+  $("bfSave").disabled = true;
+  const out = await guarded(() => apiPost("/api/buildings", { name }), (err) => toast("Not added: " + err.message, "err"));
+  $("bfSave").disabled = false;
+  if (!out) return;
+  $("bldForm").reset();
+  toast(`${name} added`, "ok");
+  loadBuildings();
+});
+
+$("buildingList").addEventListener("submit", async (e) => {
+  const form = e.target.closest("form.roomsForm");
+  if (!form) return;
+  e.preventDefault();
+  const numbers = expandRoomNumbers(form.querySelector(".rfNumbers").value);
+  if (!numbers.length) return toast("Give at least one room number", "err");
+  const floor = form.querySelector(".rfFloor").value.trim();
+  const capacity = Number(form.querySelector(".rfCap").value || 1);
+  const rooms = numbers.map((number) => ({ floor, number, capacity }));
+  const out = await guarded(() => apiPost(`/api/buildings/${form.dataset.bid}/rooms`, { rooms }), (err) => toast("Not added: " + err.message, "err"));
+  if (!out) return;
+  toast(`${out.length} room${out.length === 1 ? "" : "s"} added`, "ok");
+  loadBuildings();
+});
+
+$("buildingList").addEventListener("click", async (e) => {
+  const delRoom = e.target.closest("[data-del-room]");
+  const delBld  = e.target.closest("[data-del-building]");
+  if (delRoom) {
+    if (!confirm("Remove this room? Refused while anyone lives in it.")) return;
+    const out = await guarded(() => apiDelete(`/api/rooms/${delRoom.dataset.delRoom}`), (err) => toast("Not removed: " + err.message, "err"));
+    if (out) loadBuildings();
+  } else if (delBld) {
+    if (!confirm("Remove this building and all its rooms? Refused while anyone lives in it.")) return;
+    const out = await guarded(() => apiDelete(`/api/buildings/${delBld.dataset.delBuilding}`), (err) => toast("Not removed: " + err.message, "err"));
+    if (out) loadBuildings();
+  }
+});
+
+/* ========================================================================
    Settings (admins only)
    ====================================================================== */
 const SETTINGS_FIELDS = {
@@ -650,13 +806,14 @@ $("stReload").addEventListener("click", loadSettings);
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["residents", "staff", "settings"]) {
+  for (const t of ["residents", "buildings", "staff", "settings"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
   }
   renderDetail(null);
   if (name === "residents") loadResidents();
+  if (name === "buildings") loadBuildings();
   if (name === "staff") loadStaff();
   if (name === "settings") loadSettings();
 }
@@ -695,6 +852,7 @@ async function enterApp() {
   $("adminTabs").hidden = false;
   $("tabStaff").hidden = !canStaff();
   $("tabSettings").hidden = !canStaff();
+  loadBuildings({ quiet: true });
   selectTab("residents");
 }
 
@@ -742,6 +900,7 @@ $("residentList").addEventListener("click", (e) => {
   if (card) openResident(card.dataset.id);
 });
 $("tabResidents").addEventListener("click", () => selectTab("residents"));
+$("tabBuildings").addEventListener("click", () => selectTab("buildings"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));
 $("tabSettings").addEventListener("click", () => selectTab("settings"));
 
