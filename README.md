@@ -507,6 +507,11 @@ npm test              # everything — this is check.sh
 ./test/api.sh         # just the web tier in front of it
 ```
 
+GitHub Actions runs the same `check.sh`, `npm audit` and the browser suite
+on every push and pull request (`.github/workflows/check.yml`). Turn on branch
+protection for `main` requiring the `check` job, so nothing reaches Render —
+which deploys `main` — without passing it.
+
 Both suites build their cluster as a **non-superuser role that owns the
 database**, which is what Render gives you. That is deliberate and load-bearing:
 a superuser can `SET ROLE` to anything and bypasses row-level security, so a
@@ -567,6 +572,15 @@ Requires the PostgreSQL server binaries (`postgresql-16` on Debian/Ubuntu) and
 Node 22+. Neither suite touches the deployed database.
 
 ---
+
+## Procedures, backups, and the paperwork
+
+`docs/procedures/` holds the operational side: the paper fallback for a long
+outage, incident response, joiners and leavers with the quarterly access
+review, backup and restore with its rehearsal log, and the risk register.
+`tools/backup.sh` takes an encrypted off-provider `pg_dump` kept for 35 days;
+`tools/restore-rehearsal.sh` proves one restores. `docs/GDPR.md` says what is
+held and for how long, against the schema as it is.
 
 ## Notes for whoever maintains this
 

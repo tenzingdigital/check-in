@@ -49,11 +49,21 @@ Unusually strong for its size, and worth saying plainly:
 - `docs/KNOWN-ISSUES.md` items 12–19 already list the honest costs of owning
   authentication. Several items below simply turn those into work.
 
-What is missing falls into five themes: **the documents have drifted from the
+What was missing fell into five themes: **the documents have drifted from the
 code**, **administrators are not audited**, **stronger identity** (MFA, an idle
 lock, a persisted login log), **operational safety nets** (CI, monitoring,
 backups you have tested), and **the things the DPA promises that the app does
 not yet do**.
+
+**Status, 4 September 2026.** Everything in this file that is code is built,
+tested and deployed, except two items deliberately deferred: MFA (3.1) and
+the multi-tenancy binding (F11), both of which are decisions with a cost
+rather than gaps. The documents are written (`docs/GDPR.md`,
+`docs/procedures/`). What remains is the owner's: the database plan, Render
+notifications and PITR confirmation, branch protection, scheduling the
+off-provider backup, the provider DPAs and transfer impact assessment, and
+the blanks in the procedures. `docs/procedures/RISK-REGISTER.md` lists them
+by owner.
 
 ---
 
@@ -61,7 +71,7 @@ not yet do**.
 
 In rough order of how much they matter. Each reappears in a phase below.
 
-### F1. The GDPR notes contradict the schema — `docs/GDPR.md`
+### F1. The GDPR notes contradict the schema — `docs/GDPR.md` *(rewritten 4 September against migrations 001–014 and the DPA annexes)*
 
 This is the document that feeds the ROPA and the DPIA, and it describes a
 system that no longer exists. It says no ID document numbers are held;
@@ -140,7 +150,7 @@ An idle lock in the front end (blank the screen after N minutes without a
 touch, require the password to resume) is the ISO 7.7 clear-screen control, and
 it needs no server change if it simply calls `DELETE /api/session`.
 
-### F8. Nothing runs the tests but a person
+### F8. Nothing runs the tests but a person *(fixed 4 September: `.github/workflows/check.yml`; branch protection is the owner's switch)*
 
 `check.sh` is thorough and nothing invokes it. There is no `.github/`, no
 branch protection, no dependency audit. `npm audit` today reports three
@@ -202,7 +212,7 @@ notifications for the database and the service, and treat the memory graph
 as part of the monthly check in Phase 1.5. (ISO 8.6 capacity management,
 8.16)
 
-### F13. Backups are claimed, not tested
+### F13. Backups are claimed, not tested *(scripts and procedure written and rehearsed 4 September; the daily off-provider run and the PITR check are the owner's)*
 
 Annex II promises "managed daily backups with point-in-time recovery". Confirm
 on the Render dashboard that the `basic-256mb` plan actually has PITR enabled
@@ -212,10 +222,10 @@ promise in section 9 also needs a written procedure behind it.
 
 ### F14. Small things
 
-- `style-src 'unsafe-inline'` remains (`lib/security.js`). Move the handful of
-  `style=""` attributes into `app-common.css` and drop it.
-- The brochure site (`checksteady-site` in `render.yaml`) has no security
-  headers. It holds no data, but it is the same brand.
+- *Done 4 September:* `style-src` is `'self'`; every `style=""` attribute is a
+  class in `app-common.css`.
+- *Done 4 September:* the brochure site sends the same header set from
+  `render.yaml`.
 - `password-reset` has a per-account resend gap but no per-IP limit; a flood of
   unknown addresses costs a database call each. Bound it like login.
 - No linter or type check (`docs/KNOWN-ISSUES.md` item 19).
@@ -229,15 +239,15 @@ promise in section 9 also needs a written procedure behind it.
 
 | # | Item | Fixes | Where |
 |---|---|---|---|
-| 0.1 | Rewrite `docs/GDPR.md` from DPA Annex I and II: current fields, 180 days, two processors, Render cron. | F1 | `docs/GDPR.md` |
+| 0.1 | *Done.* Rewrite `docs/GDPR.md` from DPA Annex I and II: current fields, 180 days, two processors, Render cron. | F1 | `docs/GDPR.md` |
 | 0.2 | Fix the README migration paragraph, or restore checksums (0.7). | F9 | `README.md` |
-| 0.3 | GitHub Actions: `postgresql-16` plus Node 22, run `npm test` and `npm audit --omit=dev --audit-level=high` on every push and pull request. Branch protection on `main` requiring it. | F8 | `.github/workflows/check.yml` |
-| 0.4 | `npm audit fix` for the three moderate findings; commit the lockfile. | F8 | `package-lock.json` |
+| 0.3 | *Done (branch protection is yours).* GitHub Actions: `postgresql-16` plus Node 22, run `npm test` and `npm audit --omit=dev --audit-level=high` on every push and pull request. Branch protection on `main` requiring it. | F8 | `.github/workflows/check.yml` |
+| 0.4 | *Done (an override for `qs`).* `npm audit fix` for the three moderate findings; commit the lockfile. | F8 | `package-lock.json` |
 | 0.5 | *Done.* Strip `id_type` and `id_number` from the list endpoint. Add an HTTP assertion that `/api/residents` never carries `id_number`, the same shape as the existing date-of-birth test. | F12 | `routes/residents.js`, `test/api.test.js` |
 | 0.6 | Turn on Render failure notifications for `hut-nightly`. Dashboard setting, five minutes. | F10 | Render |
 | 0.7 | *Done.* Restore the per-migration checksum with a loud warning at boot, in this repo and the scheduler together. | F9 | `database.js` |
 | 0.8 | *Done.* Per-IP throttle on `POST /api/password-reset`, reusing the login lockout map. | F14 | `routes/password-reset.js` |
-| 0.9 | Move inline `style=""` attributes to the stylesheet, drop `'unsafe-inline'` from `style-src`, add the header set to the static site. | F14 | both HTML files, `lib/security.js`, `render.yaml` |
+| 0.9 | *Done.* Move inline `style=""` attributes to the stylesheet, drop `'unsafe-inline'` from `style-src`, add the header set to the static site. | F14 | both HTML files, `lib/security.js`, `render.yaml` |
 
 ---
 
@@ -353,10 +363,10 @@ dates. (ISO 5.18, 8.2)
 
 ## Phase 4 — Resilience: the unstable internet (two to three weeks, staged)
 
-**Status: stages A, B, C and E are built** (`public/sw.js`, `public/offline.js`,
+**Status: stages A, B, C, D and E are built** (`public/sw.js`, `public/offline.js`,
 `routes/sync.js`, `migrations/010_offline_sync.sql`; "Working offline" in
-`README.md` states the limits). Stage D, the paper procedure, is a document
-still to write. Stage F, the router, is a purchase. The late-entry function
+`README.md` states the limits; `docs/procedures/PAPER-FALLBACK.md` is stage
+D, still to be rehearsed at the centre). Stage F, the router, is a purchase. The late-entry function
 is open to any staff member for their own offline queue, bounded by the
 window; a supervisor-only paper-entry path with a stated reason can reuse it.
 
@@ -418,14 +428,15 @@ centre, not just this app. (ISO 8.14, 7.11)
 
 - **Confirm PITR** is actually enabled on `hut-db` in the Render dashboard, so
   Annex II stays true. (fixes F13)
-- **Off-provider copy.** A scheduled `pg_dump` to encrypted storage you
-  control, in the EU, retained 35 days to match DPA section 9, then deleted.
-  If the Render relationship ends, the register must not end with it.
-- **Restore rehearsal.** Restore last week's backup into a throwaway Render
-  database, point a test instance at it, run `npm test`. Record the date and
-  result. Quarterly. An untested backup is a hope. (ISO 8.13)
-- **Recovery targets.** Write down how long a centre can run on paper and how
-  much data loss is tolerable. Stage D is what makes a modest target honest.
+- **Off-provider copy.** *Script done:* `tools/backup.sh`, an `age`-encrypted
+  `pg_dump` kept 35 days. Scheduling it on a machine in the EU that you
+  control is yours; `docs/procedures/BACKUP-AND-RESTORE.md` says how.
+- **Restore rehearsal.** *Script done:* `tools/restore-rehearsal.sh` restores
+  into a throwaway cluster, counts what came back and boots the service
+  against it. Rehearsed 4 September against a seeded database; quarterly
+  against a live backup from here, recorded in the procedure. (ISO 8.13)
+- **Recovery targets.** *Written* in `BACKUP-AND-RESTORE.md`: up to a day of
+  events (filled from the paper sheet), about an hour to restore.
 - **Tenancy gate.** Before the second tenant: `withIdentity()` sets
   `search_path` per request, the Staff list and password reset are
   tenant-scoped, `handle_new_user()` routes to the tenant schema, and a
@@ -446,16 +457,16 @@ size most documents are one to three pages, and several already exist in
 | Information security policy, signed by the owner | 5.1 | One page: what is protected, who owns it, review cadence |
 | Scope statement | Clause 4.3 | "CheckSteady, hosted on Render Frankfurt, for customer centres" |
 | Asset and information inventory | 5.9 | DPA Annex I plus the accounts, the repo, the domains |
-| Risk assessment and register | Clause 6.1 | Fifteen to twenty rows. Each finding above is one risk and its treatment |
+| Risk assessment and register | Clause 6.1 | *Done:* `docs/procedures/RISK-REGISTER.md`, twenty rows with owners |
 | Statement of Applicability | Clause 6.1.3 | The 93 controls, each marked applicable or not with a reason. The mapping below is the draft |
 | Access control policy and roles | 5.15, 5.16 | The roles table in `README.md`, plus who may hold admin and why |
-| Joiner, mover, leaver procedure | 5.18, 6.5 | Who invites, who disables, within how many hours of a departure |
+| Joiner, mover, leaver procedure | 5.18, 6.5 | *Done:* `docs/procedures/ACCESS-JOINER-MOVER-LEAVER.md`, with the quarterly review table |
 | Quarterly access review | 5.18 | The Staff tab list, signed by the centre manager; the Render/GitHub/Resend list, signed by you |
 | Supplier register with signed DPAs | 5.19–5.22 | Render and Resend DPAs and SCCs on file, plus a transfer impact assessment. `docs/legal/README.md` already lists this as outstanding |
 | DPIA template for customers | 5.34, ISO 27701 | The DPA promises one. Draft it once from Annex I and II; every centre reuses it |
-| Incident response procedure | 5.24–5.28 | Who is called, how a breach is assessed, the 48-hour customer clock from the DPA and the 72-hour DPC clock behind it |
-| Business continuity and the paper fallback | 5.29, 5.30 | Phase 4 Stage D |
-| Operating procedures | 5.37 | Setup, restore rehearsal, the nightly-job check, tenant provisioning and deprovisioning |
+| Incident response procedure | 5.24–5.28 | *Done:* `docs/procedures/INCIDENT-RESPONSE.md`; the contact names are blank until you fill them |
+| Business continuity and the paper fallback | 5.29, 5.30 | *Done:* `docs/procedures/PAPER-FALLBACK.md`; rehearse it once at the centre |
+| Operating procedures | 5.37 | Setup and the nightly-job check are in `README.md`; restore in `docs/procedures/BACKUP-AND-RESTORE.md`; tenant provisioning in `docs/MULTI-TENANCY.md` |
 | Staff briefing for customers | 6.3 | A one-page handout: shared terminal rules, what to do offline, who to call |
 | Physical: terminal siting, screen lock | 7.7, 7.8, 8.1 | Kiosk mode on the terminal, OS auto-lock, screen angled away from the door |
 | Clock synchronisation | 8.17 | The server stamps every event; record that this is already satisfied |
