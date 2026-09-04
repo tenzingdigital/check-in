@@ -309,6 +309,42 @@ function mountIdleLock({ minutes, isActive, onLock }) {
   return { start, stop };
 }
 
+// The two apps record two different acts — a door movement, and the once-a-
+// day check-in — and a guard who has just logged in should choose which
+// before seeing a list. Shown once per session (sessionStorage), cleared at
+// logout so the next person on a shared terminal chooses again.
+const VIEW_SLOT = "viewChosen";
+function viewChosen() { try { return sessionStorage.getItem(VIEW_SLOT); } catch (_) { return "1"; } }
+function rememberView(v) { try { sessionStorage.setItem(VIEW_SLOT, v); } catch (_) { /* private mode */ } }
+function clearViewChoice() { try { sessionStorage.removeItem(VIEW_SLOT); } catch (_) { /* nothing */ } }
+
+function mountViewChooser({ current, canAdmin = false } = {}) {
+  if (viewChosen()) return;
+  const el = document.createElement("div");
+  el.id = "chooser"; el.className = "chooser"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
+  el.innerHTML = `
+    <h2>What are you recording?</h2>
+    <p class="hint">Two different things are recorded here. Pick the one for this terminal; you can switch at the top of the screen later.</p>
+    <a class="choice gate" href="/index.html" data-view="gate">
+      <b>Gate — in and out</b>
+      <span>People passing the door. Swipe right to sign IN, left to sign OUT. Keeps the door log and who is on site now.</span>
+    </a>
+    <a class="choice register" href="/checkin.html" data-view="register">
+      <b>Daily register — check-in</b>
+      <span>The once-a-day presentation the policy requires. Swipe right to record today's check-in. Nothing here signs anyone in or out.</span>
+    </a>
+    ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Admin</b><span>Residents, buildings, staff and settings.</span></a>` : ""}`;
+  el.addEventListener("click", (e) => {
+    const a = e.target.closest("[data-view]");
+    if (!a) return;
+    rememberView(a.dataset.view);
+    if (a.dataset.view === current) { e.preventDefault(); el.remove(); }
+  });
+  document.body.appendChild(el);
+  const first = el.querySelector(current === "register" ? ".choice.register" : ".choice.gate");
+  if (first) first.focus();
+}
+
 function mountLogin({ onReady } = {}) {
   mountResetUI();
 

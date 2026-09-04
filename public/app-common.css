@@ -109,6 +109,39 @@
   /* The current view is filled with the accent — readable across the hut at a
      glance — and the other view reads as a real button, not a stray link. */
   .viewswitch span[aria-current="page"] { background: var(--accent); color: var(--on-accent); }
+  /* The register is green, the gate is blue, everywhere the two are named:
+     the switch, the primary action, the swipe strip. A guard who has learnt
+     "green is the daily check-in" never signs someone in by mistake. */
+  body.app-register .viewswitch span[aria-current="page"] { background: var(--ok); color: var(--on-ok); }
+
+  /* The job line: one sentence under the search box saying which of the two
+     acts this screen records, and where the other one lives. */
+  .jobline { display: flex; gap: 8px; align-items: baseline; margin: 8px 2px 0; font-size: 13px; color: var(--muted); }
+  .jobline b { color: var(--text); white-space: nowrap; }
+  .jobline b.gate     { color: var(--accent); }
+  .jobline b.register { color: var(--ok); }
+
+  /* The chooser: shown once per session, before either list. */
+  .chooser {
+    position: fixed; inset: 0; z-index: 40; background: var(--bg);
+    display: flex; flex-direction: column; justify-content: center; padding: 24px 18px; gap: 12px;
+    overflow-y: auto;
+  }
+  .chooser h2 { margin: 0 0 4px; font-size: 22px; }
+  .chooser p.hint { margin: 0 0 10px; }
+  .choice {
+    display: flex; flex-direction: column; gap: 6px; text-align: left;
+    padding: 18px 18px; border-radius: var(--radius); border: 2px solid var(--line);
+    background: var(--surface); color: var(--text); font: inherit; cursor: pointer; text-decoration: none;
+  }
+  .choice b { font-size: 20px; }
+  .choice span { color: var(--muted); font-size: 14px; line-height: 1.4; }
+  .choice.gate     { border-color: var(--accent); }
+  .choice.register { border-color: var(--ok); }
+  .choice.gate b     { color: var(--accent); }
+  .choice.register b { color: var(--ok); }
+  .choice.admin { border-style: dashed; }
+  .choice:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   .viewswitch a { color: var(--text); background: var(--surface-2); border: 1px solid var(--line); }
   .viewswitch a:hover { border-color: var(--accent); }
   .viewswitch a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -284,6 +317,11 @@
   .btn:disabled { opacity: .5; cursor: not-allowed; }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn.primary-in  { background: var(--ok);  color: var(--on-ok); border-color: transparent; }
+  body.app-gate .btn.primary-in { background: var(--accent); color: var(--on-accent); }
+  body.app-gate .swipe-bg.right { background: color-mix(in srgb, var(--accent) 26%, var(--surface)); color: var(--accent); }
+  body.app-gate button.card.swipe-arm { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border-color: var(--accent); }
+  body.app-gate .swipe-bg.left  { background: color-mix(in srgb, var(--warn) 26%, var(--surface)); color: var(--warn-text); }
+  body.app-gate button.card.swipe-arm-out { background: color-mix(in srgb, var(--warn) 18%, var(--surface)); border-color: var(--warn); }
   .btn.primary-out { background: var(--warn); color: var(--on-warn); border-color: transparent; }
   .btn.wide { grid-column: 1 / -1; }
   .btn.ghost { background: transparent; color: var(--muted); padding: 13px; font-size: 15px; font-weight: 500; }

@@ -51,7 +51,7 @@
 
 <link rel="stylesheet" href="/app-common.css">
 </head>
-<body>
+<body class="app-gate">
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
@@ -106,7 +106,8 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="hint tight">Verify the person first. Tap a name for detail; swipe right to sign IN, left to sign OUT.</p>
+      <p class="jobline"><b class="gate">Gate:</b><span>door movements only — swipe right to sign IN, left to sign OUT. Today's check-in is recorded on the Daily register.</span></p>
+      <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
     </section>
@@ -710,6 +711,7 @@ async function enterApp() {
   $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
   $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
+  mountViewChooser({ current: "gate", canAdmin: profile.role === "admin" || profile.role === "supervisor" });
   $("tabRoll").hidden = !settings?.feature_evacuation;
   loadRoll();
   syncRoll();
@@ -728,6 +730,7 @@ async function enterApp() {
 
 function showLogin(message) {
   idleLock.stop();
+  const chooser = $("chooser"); if (chooser) chooser.remove();
   state.profile = null;
   state.userId = null;
   state.loaded = false;
@@ -761,6 +764,7 @@ trackHeaderHeight();
 // encrypted on this terminal until the same guard logs in again; the copy of
 // the register is cleared either way.
 async function endSession(message) {
+  clearViewChoice();            // the next person on this terminal chooses again
   await Offline.syncNow();
   const pending = await Offline.onLogout();
   await logout();

@@ -27,6 +27,7 @@ async function launch() {
 (async () => {
   const browser = await launch();
   const ctx = await browser.newContext();
+  await ctx.addInitScript(() => { try { sessionStorage.setItem("viewChosen", "1"); } catch (_) {} });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => { console.error("PAGE ERROR:", e.message); process.exitCode = 1; });
   page.on("console", (m) => { if (m.type() === "error") console.error("console.error:", m.text()); });
@@ -131,6 +132,9 @@ async function launch() {
     await sup.waitForSelector("#login:not([hidden])");
     await sup.fill("#email", "sam@hut.example");
     await sup.fill("#password", "correct-horse-battery");
+    // Logging out cleared the view choice; a real supervisor would pick a
+    // view on the chooser here. The test skips it.
+    await sup.evaluate(() => { try { sessionStorage.setItem("viewChosen", "1"); } catch (_) {} });
     await sup.click("#loginBtn");
     await sup.waitForSelector("#app:not([hidden])");
     await sup.waitForFunction(() => document.querySelectorAll("button.card").length > 0);

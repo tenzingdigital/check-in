@@ -84,7 +84,7 @@
   .policy p + p { margin-top: 8px; }
 </style>
 </head>
-<body>
+<body class="app-register">
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
@@ -136,7 +136,8 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="hint tight">Verify the person first. Tap a name for detail; swipe right to record the check-in.</p>
+      <p class="jobline"><b class="register">Daily register:</b><span>the once-a-day check-in — swipe right to record it. Door movements are on the Gate.</span></p>
+      <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
     </section>
 
@@ -734,6 +735,7 @@ async function enterApp() {
   $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
   $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
+  mountViewChooser({ current: "register", canAdmin: profile.role === "admin" || profile.role === "supervisor" });
 
   $("login").hidden = true;
   $("app").hidden = false;
@@ -748,6 +750,7 @@ async function enterApp() {
 
 function showLogin(message) {
   idleLock.stop();
+  const chooser = $("chooser"); if (chooser) chooser.remove();
   state.profile = null;
   state.userId = null;
   $("app").hidden = true;
@@ -779,6 +782,7 @@ trackHeaderHeight();
 // encrypted on this terminal until the same guard logs in again; the copy of
 // the register is cleared either way.
 async function endSession(message) {
+  clearViewChoice();            // the next person on this terminal chooses again
   await Offline.syncNow();
   const pending = await Offline.onLogout();
   await logout();

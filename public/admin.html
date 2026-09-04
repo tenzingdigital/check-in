@@ -881,6 +881,7 @@ async function enterApp() {
 
   $("login").hidden = true;
   $("app").hidden = false;
+  rememberView("admin");
   idleLock.start();
 
   if (!canResidents()) {
@@ -915,6 +916,7 @@ function showLogin(message) {
 const idleLock = mountIdleLock({
   minutes: () => state.settings?.idle_lock_minutes,
   onLock: async () => {
+    clearViewChoice();
     await Offline.onLogout();
     await logout();
     showLogin(`Locked after ${state.settings?.idle_lock_minutes || 20} minutes without activity. Log in again.`);
@@ -924,6 +926,7 @@ const idleLock = mountIdleLock({
 mountLogin({ onReady: enterApp });
 
 $("logoutBtn").addEventListener("click", async () => {
+  clearViewChoice();
   await Offline.onLogout();
   await logout();
   showLogin("");

@@ -152,6 +152,17 @@ Cheap, and it turns a scroll into a jump.
 
 ### P1.5 The tabs and the switch look alike — *done 4 September: underline tabs*
 
+*Later the same evening, on the owner's concern that "Sign IN" and "Check
+in" read as the same act:* every session now opens on a chooser — "What are
+you recording?" — with the gate (blue: in and out at the door) and the daily
+register (green: the once-a-day check-in) described in a sentence each. The
+choice is remembered for the session and cleared at logout, so the next
+person on a shared terminal chooses again. After that the two apps stay
+visibly different: the gate's switch pill, Sign IN button and swipe strip
+are blue and its Sign OUT amber; the register's are green; and a job line
+under each search box says which act this screen records and where the
+other one lives.
+
 The Gate / Daily register switch and the Search / Log / Staff tabs are the
 same visual component two rows apart. A new guard cannot tell which is
 "which app am I in" and which is "which view of it". Make the app switch
