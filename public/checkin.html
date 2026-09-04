@@ -101,8 +101,8 @@
     <!-- The three tiles are the questions a manager asks; tapping one shows
          exactly those residents in the Check in list. Tap again for all. -->
     <div class="stats">
-      <button class="stat bad" type="button" data-filter="not_seen" aria-pressed="false"><b id="statNotSeen">–</b><span>Not seen today</span></button>
-      <button class="stat bad" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Open breaches</span></button>
+      <button class="stat bad" type="button" data-filter="not_seen" aria-pressed="false"><b id="statNotSeen">–</b><span>Not seen</span></button>
+      <button class="stat bad" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Breaches</span></button>
       <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false"><b id="statCheckins">–</b><span>Seen today</span></button>
     </div>
   </header>
@@ -126,7 +126,7 @@
         <button type="button" data-filter="breach"   aria-pressed="false">Breach</button>
         <button type="button" data-filter="seen"     aria-pressed="false">Seen</button>
       </nav>
-      <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register first. Tap a name for detail, or swipe it to the right to record the check-in.</p>
+      <p class="hint" style="margin:8px 2px 0">Verify the person first. Tap a name for detail; swipe right to record the check-in.</p>
       <div id="searchResults" class="list"></div>
     </section>
 
@@ -221,8 +221,7 @@ function residentCard(r) {
     <button class="${cls.join(" ")}" data-id="${esc(r.id)}" type="button">
       <span class="who">
         <span class="name">${esc(r.full_name)}</span>
-        <span class="meta">${bits.join(" · ")}</span>
-        <span class="meta badge ${esc(r.state)}">${esc(stateLabel(r.state))}</span>
+        <span class="meta">${bits.join(" · ")} · <span class="badge ${esc(r.state)}">${esc(stateLabel(r.state))}</span></span>
       </span>
       ${r.queued
         ? `<span class="pill queued">Queued</span>`
