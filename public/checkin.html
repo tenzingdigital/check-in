@@ -121,8 +121,8 @@
          exactly those residents in the Check in list. Tap again for all. -->
   </header>
     <div class="stats">
-      <button class="stat bad" type="button" data-filter="not_seen" aria-pressed="false"><b id="statNotSeen">–</b><span>Not seen</span></button>
-      <button class="stat bad" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Breaches</span></button>
+      <button class="stat" type="button" data-filter="not_seen" aria-pressed="false"><b id="statNotSeen">–</b><span>Not seen</span></button>
+      <button class="stat" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Breaches</span></button>
       <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false"><b id="statCheckins">–</b><span>Seen today</span></button>
     </div>
 
@@ -164,10 +164,11 @@ const state = {
   settings:  null,   // app_settings row
   selected:  null,   // resident row shown in the detail panel
   busy:      false,
-  attention: [],      // last attention_list() result, for the Breaches tile
   filter:    "all",   // which tile is pressed: all | not_seen | breach | seen
   searchRows:  [],    // the last list response, refiltered client-side
   searchQuery: "",
+  loaded:    false,   // false until the first list has arrived — before that, every count is unknown, not zero
+  allRows:   [],      // the last full (unfiltered by name) list, for the tile counts
   // Every row we have rendered, by id. Tapping a card reads from here rather
   // than making a second round trip.
   rows:      new Map(),
@@ -355,22 +356,41 @@ function renderDetail(r) {
    Data access
    ====================================================================== */
 
-// Header stats: "Open breaches" comes from attention_list() (it is the one
-// source guaranteed never to drop a breach under a cap). "Not seen today" and
-// "Seen today" are queried straight from v_resident_compliance instead of
-// being derived from attention_list() — attention_list() only ever admits
-// states breach_open | never | due_today, so a resident who is
-// required today but not yet past due_soon_after_hour sits in "expected" and
-// would silently fall out of a count derived from that list, understating how
-// many residents are actually still outstanding.
-async function refreshSummary() {
-  const summary = await guarded(() => apiGet("/api/checkin-summary"), (err) => Offline.noteFailure(err));
-  if (!summary) return;
+// Header tiles are counted from the list itself. The list endpoint already
+// returns every resident with state, open_breaches, required_today and
+// seen_today, and the three tiles are exactly the three filters applied to
+// those rows — so the numbers on the tiles and the list under a pressed tile
+// cannot disagree, and a page load costs the database ONE evaluation of
+// v_resident_compliance rather than four (the list, attention_list(), and
+// two counts). On the smallest Postgres plan that view took seven seconds a
+// go on 4 Sep 2026; four of them per phone per minute is what pushed the
+// instance over its memory limit. /api/checkin-summary still exists for
+// anything that wants a server-side count.
+function refreshSummary() {
+  if (!state.loaded) return;
+  const rows = state.searchQuery ? state.allRows : state.searchRows;   // counts describe the whole register, not a name filter
+  const all = rows || [];
+  const breaches = all.filter(FILTERS.breach).length;
+  const notSeen  = all.filter(FILTERS.not_seen).length;
+  const seen     = all.filter(FILTERS.seen).length;
+  $("statOpenBreach").textContent = breaches;
+  $("statNotSeen").textContent  = notSeen;
+  $("statCheckins").textContent = seen;
 
-  state.attention = summary.attention || [];
-  $("statOpenBreach").textContent = state.attention.filter((r) => r.open_breaches > 0).length;
-  $("statNotSeen").textContent  = summary.not_seen ?? "–";
-  $("statCheckins").textContent = summary.seen_today ?? "–";
+  // Colour follows the number, not the tile. Zero breaches is calm, not an
+  // alarm. "Not seen" is neutral while the day is young, amber once the
+  // due-soon hour has passed and people are still missing.
+  const pastCutoff = state.settings && Number.isFinite(state.settings.due_soon_after_hour)
+    ? new Date().getHours() >= state.settings.due_soon_after_hour
+    : false;
+  tone($("statOpenBreach").parentElement, breaches > 0 ? "bad" : "ok");
+  tone($("statNotSeen").parentElement, notSeen === 0 ? "ok" : pastCutoff ? "warn" : "neutral");
+}
+
+function tone(tile, t) {
+  if (!tile) return;
+  tile.classList.remove("bad", "warn", "ok");
+  if (t !== "neutral") tile.classList.add(t);
 }
 
 let searchToken = 0;
@@ -415,7 +435,10 @@ async function runSearch(q) {
   showError("");
   state.searchRows = await Offline.overlay("checkin", rows);
   state.searchQuery = q;
+  if (!q) state.allRows = state.searchRows;
+  state.loaded = true;
   renderSearch();
+  refreshSummary();
 }
 
 // The three header tiles and the chip row are one filter, applied here to
@@ -459,6 +482,17 @@ function renderSearch() {
 
   const shown = orderFor(state.filter, rows.filter(FILTERS[state.filter]));
   const line = $("filterLine");
+
+  // Nothing has arrived yet: say so. A filter applied to an empty list is
+  // not "0 with open breaches", it is "not loaded", and the tile beside it
+  // already shows the server's count.
+  if (!state.loaded) {
+    if (state.filter === "all") { line.hidden = true; line.innerHTML = ""; }
+    else { line.innerHTML = `Loading ${FILTER_LABEL[state.filter]}…`; line.hidden = false; }
+    $("searchResults").innerHTML = '<p class="empty">Loading the register…</p>';
+    return;
+  }
+
   if (state.filter === "all") {
     line.hidden = true;
     line.innerHTML = "";
@@ -705,7 +739,7 @@ document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
 
 // Periodic refresh so a terminal left open overnight does not show stale
 // counts or a stale list.
-setInterval(() => { if (state.profile) { refreshSummary(); runSearch($("q").value); } }, 60000);
+setInterval(() => { if (state.profile) runSearch($("q").value); }, 60000);
 
 // Any request that comes back 401 — an expired session, or a supervisor
 // deactivating the account mid-shift — returns the terminal to the login

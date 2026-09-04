@@ -226,6 +226,22 @@ and carried item 3 above (the unbounded `tally` and `streak` scans in
 `v_resident_compliance`) is the code-side change that would lower the
 per-query cost if the plan cannot change.
 
+### 19d. `v_resident_compliance` costs seconds on the live database
+
+Measured on 4 September 2026, healthy database, 200 residents: the list
+query the register page makes on every load took **7.3 seconds** in the
+database log. The identical query on a laptop against the same shape of
+data takes 6 milliseconds. The difference is the `basic-256mb` plan — a
+fraction of a CPU and half the memory in shared buffers — and it is why the
+loading state on the register matters and why the plan is the fix.
+
+Two mitigations are in the page: the tiles are now counted from the list
+rows rather than by three further evaluations of the view, so a load is one
+heavy query, not four; and the list, once shown, stays on screen while the
+next one is fetched. The code-side change that would cut the query itself is
+carried item 3 above — bounding the `tally`, `streak` and `window_tally`
+scans to the retention window.
+
 ### 19b. New logins had no tenant until migration 011
 
 009 backfilled every existing login into the default tenant and nothing

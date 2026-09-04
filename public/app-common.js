@@ -17,13 +17,25 @@ function esc(v) {
   ));
 }
 
+// Successes fade; errors stay until tapped. A guard who looked up at the
+// person and back down again must still be able to read why the tap did
+// not record. Tapping the toast dismisses it either way.
 function toast(msg, kind = "ok") {
   const el = $("toast");
   el.textContent = msg;
   el.className = "show " + kind;
   clearTimeout(toast._t);
+  if (kind === "err") {
+    el.setAttribute("role", "alert");
+    return;
+  }
+  el.setAttribute("role", "status");
   toast._t = setTimeout(() => { el.className = ""; }, 3200);
 }
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("#toast");
+  if (el) { el.className = ""; clearTimeout(toast._t); }
+});
 
 // elId defaults to "appError" (the gate app's error banner) so checkin.html
 // can pass its own element id and reuse the same function.
