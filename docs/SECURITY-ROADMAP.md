@@ -124,7 +124,15 @@ Authentication is now this codebase's own, so this is real work, but TOTP
 Node's `crypto`. The forgot-password machinery already provides the shape for
 recovery codes.
 
-### F7. A 12-hour session on a shared terminal has no idle lock
+### F7. A 12-hour session on a shared terminal has no idle lock — *fixed 4 September*
+
+*Fixed:* `mountIdleLock()` in `public/app-common.js` ends the session
+(`DELETE /api/session`, so the terminal holds no live session) after
+`app_settings.idle_lock_minutes` without a touch, key or scroll (default 20,
+editable under Settings, migration 014). The gate and register never lock
+while the connection is down, because a guard could not log back in until it
+returned and would lose the offline copy of the register. The admin page
+locks unconditionally.
 
 `HUT_SESSION_HOURS=12` is a shift, per Tao 11, and correct as an upper bound.
 But a guard who walks away leaves the register open for the rest of the shift.

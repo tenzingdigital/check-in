@@ -197,6 +197,7 @@ CREATE TABLE __TENANT__.app_settings (
     absence_window_limit integer DEFAULT 10 NOT NULL,
     warn_after_consecutive_nights integer DEFAULT 3 NOT NULL,
     late_entry_window_hours integer DEFAULT 48 NOT NULL,
+    idle_lock_minutes integer DEFAULT 20 NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -204,6 +205,7 @@ CREATE TABLE __TENANT__.app_settings (
     CONSTRAINT app_settings_due_soon_after_hour_check CHECK (((due_soon_after_hour >= 0) AND (due_soon_after_hour <= 23))),
     CONSTRAINT app_settings_event_retention_days_check CHECK (((event_retention_days >= 1) AND (event_retention_days <= 3650))),
     CONSTRAINT app_settings_id_check CHECK (id),
+    CONSTRAINT app_settings_idle_lock_minutes_check CHECK (((idle_lock_minutes >= 1) AND (idle_lock_minutes <= 720))),
     CONSTRAINT app_settings_late_entry_window_hours_check CHECK (((late_entry_window_hours >= 1) AND (late_entry_window_hours <= 168))),
     CONSTRAINT app_settings_warn_after_consecutive_nights_check CHECK (((warn_after_consecutive_nights >= 1) AND (warn_after_consecutive_nights <= 90)))
 );

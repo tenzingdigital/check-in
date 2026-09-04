@@ -1,16 +1,52 @@
+  /* Two palettes, one set of names. Dark is the default — a night terminal
+     in a hut — and the device's own preference switches to light, which is
+     the one a phone in daylight at a gate can actually read. Every colour
+     below is a token; the light set keeps the same meanings at a contrast
+     that passes on white. */
   :root {
     --bg:        #0e1116;
     --surface:   #161b23;
     --surface-2: #1e2530;
     --line:      #2b3441;
+    --line-hover:#3b4757;
     --text:      #e8edf4;
     --muted:     #8d9bb0;
     --accent:    #4c8dff;
+    --on-accent: #041025;
     --ok:        #35c88a;
+    --on-ok:     #06231a;
     --warn:      #f0b429;
+    --on-warn:   #2b1d00;
+    --warn-text: #ffe9b3;
     --bad:       #f2604e;
+    --bad-text:  #ffd9d3;
     --exempt:    #7b8798;
     --radius:    14px;
+    --shadow:    rgba(0, 0, 0, .5);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:        #f3f5f8;
+      --surface:   #ffffff;
+      --surface-2: #eaeef3;
+      --line:      #d2d9e3;
+      --line-hover:#aeb9c8;
+      --text:      #101828;
+      --muted:     #4f5d73;
+      --accent:    #1d4ed8;
+      --on-accent: #ffffff;
+      --ok:        #15803d;
+      --on-ok:     #ffffff;
+      --warn:      #b45309;
+      --on-warn:   #ffffff;
+      --warn-text: #5a2d00;
+      --bad:       #c2410c;
+      --bad-text:  #6b1a05;
+      --exempt:    #6b7280;
+      --shadow:    rgba(16, 24, 40, .18);
+      color-scheme: light;
+    }
   }
 
   * { box-sizing: border-box; }
@@ -53,7 +89,7 @@
     color: var(--muted); font-weight: 550; font-size: 14px;
     font-variant-numeric: tabular-nums;
   }
-  .chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #041025; }
+  .chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .chips button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Which app is this terminal showing — the gate or the daily register?
@@ -72,7 +108,7 @@
   }
   /* The current view is filled with the accent — readable across the hut at a
      glance — and the other view reads as a real button, not a stray link. */
-  .viewswitch span[aria-current="page"] { background: var(--accent); color: #041025; }
+  .viewswitch span[aria-current="page"] { background: var(--accent); color: var(--on-accent); }
   .viewswitch a { color: var(--text); background: var(--surface-2); border: 1px solid var(--line); }
   .viewswitch a:hover { border-color: var(--accent); }
   .viewswitch a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -102,19 +138,22 @@
   button.stat[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 
   /* ---- tabs ---- */
+  /* Views within an app are underlined text, deliberately unlike the
+     filled pill of the app switch above them: two levels of navigation, two
+     shapes, so a new guard can tell "which app" from "which view". */
   nav.tabs {
-    display: flex; gap: 6px; margin: 16px 0;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: 12px; padding: 5px;
+    display: flex; gap: 4px; margin: 14px 0 12px;
+    border-bottom: 1px solid var(--line);
   }
   nav.tabs button {
-    flex: 1; padding: 11px 8px; border: 0; border-radius: 8px;
-    background: transparent; color: var(--muted); font-weight: 550;
+    flex: 1; padding: 11px 8px 10px; border: 0; border-bottom: 3px solid transparent;
+    margin-bottom: -1px; background: transparent; color: var(--muted); font-weight: 600;
   }
-  nav.tabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); }
+  nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  nav.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
   nav.tabs .pip {
     display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 5px;
-    border-radius: 999px; background: var(--bad); color: #fff;
+    border-radius: 999px; background: var(--bad); color: #fff;   /* white on the bad red passes in both themes */
     font-size: 12px; font-weight: 700; vertical-align: 1px;
   }
 
@@ -129,6 +168,21 @@
 
   /* ---- resident cards ---- */
   .list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  /* Letter separators in the full register: a landmark every few cards, so
+     a scroll through two hundred names is a jump rather than a hunt. */
+  .list .letter {
+    font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); padding: 10px 4px 0; margin-bottom: -4px;
+  }
+  /* A one-time nudge: the first card slides right and back, once per
+     browser, to show that cards can be swiped. */
+  @keyframes nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(28px); } 60% { transform: translateX(0); } 80% { transform: translateX(14px); } }
+  button.card.nudge { animation: nudge 1.4s ease-in-out 0.6s 1; }
+  /* The action that matches the current state stays tappable (a repeat
+     sign-in is a legitimate correction) but reads as the secondary one. */
+  .actions .btn.current { opacity: .55; }
+
+  @media (prefers-reduced-motion: reduce) { button.card.nudge { animation: none; } }
 
   .card {
     width: 100%; text-align: left;
@@ -136,7 +190,7 @@
     border-radius: var(--radius); padding: 14px 16px;
     display: flex; align-items: center; gap: 12px;
   }
-  button.card:hover { border-color: #3b4757; }
+  button.card:hover { border-color: var(--line-hover); }
   button.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* The three lines are spans in the markup, so they need explicit block
@@ -191,7 +245,7 @@
     background: var(--surface); border: 1px solid var(--line); border-bottom: 0;
     border-radius: var(--radius) var(--radius) 0 0;
     padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
-    box-shadow: 0 -14px 44px rgba(0, 0, 0, .5);
+    box-shadow: 0 -14px 44px var(--shadow);
   }
   .detail h2 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
   .detail .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
@@ -208,8 +262,8 @@
   }
   .btn:disabled { opacity: .5; cursor: not-allowed; }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .btn.primary-in  { background: var(--ok);  color: #06231a; border-color: transparent; }
-  .btn.primary-out { background: var(--warn); color: #2b1d00; border-color: transparent; }
+  .btn.primary-in  { background: var(--ok);  color: var(--on-ok); border-color: transparent; }
+  .btn.primary-out { background: var(--warn); color: var(--on-warn); border-color: transparent; }
   .btn.wide { grid-column: 1 / -1; }
   .btn.ghost { background: transparent; color: var(--muted); padding: 13px; font-size: 15px; font-weight: 500; }
 
@@ -237,7 +291,7 @@
     padding: 6px 10px; border-radius: 999px;
     background: var(--surface); border: 1px solid var(--line); color: var(--muted);
   }
-  .net.off     { background: var(--warn); border-color: transparent; color: #2b1d00; }
+  .net.off     { background: var(--warn); border-color: transparent; color: var(--on-warn); }
   .net.syncing { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .pill.queued {
     background: color-mix(in srgb, var(--warn) 18%, transparent);
@@ -246,7 +300,7 @@
   .alert.warn {
     background: color-mix(in srgb, var(--warn) 14%, transparent);
     border-color: color-mix(in srgb, var(--warn) 40%, transparent);
-    color: #ffe9b3;
+    color: var(--warn-text);
   }
   .synclist { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
   .synclist .row { justify-content: space-between; align-items: flex-start; font-size: 13px; color: var(--text); }
@@ -259,12 +313,12 @@
   .login h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
   .login p  { color: var(--muted); margin: 0 0 22px; font-size: 14px; }
   .login .field { margin-bottom: 10px; }
-  .login .btn { width: 100%; background: var(--accent); color: #041025; border-color: transparent; }
+  .login .btn { width: 100%; background: var(--accent); color: var(--on-accent); border-color: transparent; }
 
   .alert {
     background: color-mix(in srgb, var(--bad) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
-    color: #ffd9d3; border-radius: 10px; padding: 11px 13px; font-size: 14px; margin-bottom: 12px;
+    color: var(--bad-text); border-radius: 10px; padding: 11px 13px; font-size: 14px; margin-bottom: 12px;
   }
 
   /* ---- toast ---- */
@@ -272,7 +326,7 @@
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120%);
     background: var(--surface-2); border: 1px solid var(--line);
     padding: 13px 18px; border-radius: 12px; font-weight: 600;
-    box-shadow: 0 10px 34px rgb(0 0 0 / .5);
+    box-shadow: 0 10px 34px var(--shadow);
     transition: transform .22s ease; z-index: 60; max-width: calc(100vw - 32px);
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
@@ -330,6 +384,14 @@
     .chips button { flex: none; padding: 7px 12px; font-size: 13px; }
 
     .list { gap: 8px; margin-top: 12px; }
+    /* The search box stays put under the pinned bar while the list scrolls;
+       --header-h is set by app-common.js from the bar's real height. */
+    #q.pinned {
+      position: sticky; top: calc(var(--header-h, 0px) + 6px); z-index: 15;
+      /* A solid band of page background around the box, so the cards that
+         scroll under it never show through the gap below the header. */
+      box-shadow: 0 0 0 8px var(--bg), 0 -6px 0 8px var(--bg), 0 10px 16px -6px var(--shadow);
+    }
     .card { padding: 11px 13px; gap: 10px; }
     .card .name { font-size: 16px; }
     .card .meta { font-size: 12px; margin-top: 1px; }

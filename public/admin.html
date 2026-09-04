@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <title>Hut Check-In — Admin</title>
 
 <!--
@@ -199,7 +199,10 @@
           <div><label class="lbl" for="stEventDays">Movement log (days)</label><input id="stEventDays" class="field" type="number" min="1" max="3650" required></div>
           <div><label class="lbl" for="stCompDays">Daily register (days)</label><input id="stCompDays" class="field" type="number" min="1" max="36500" required></div>
         </div>
-        <div><label class="lbl" for="stLate">Offline sync window (hours)</label><input id="stLate" class="field" type="number" min="1" max="168" required></div>
+        <div class="grid2">
+          <div><label class="lbl" for="stLate">Offline sync window (hours)</label><input id="stLate" class="field" type="number" min="1" max="168" required></div>
+          <div><label class="lbl" for="stIdle">Lock screen after (minutes idle)</label><input id="stIdle" class="field" type="number" min="1" max="720" required></div>
+        </div>
         <p class="hint" style="margin:0">The IPAS verification policy says sign-in sheets are held six months (180 days). Shortening retention deletes records at the next nightly run.</p>
 
         <div class="actions">
@@ -615,6 +618,7 @@ const SETTINGS_FIELDS = {
   site_name: "stSite", local_timezone: "stTz", adult_age_years: "stAdult", due_soon_after_hour: "stDue",
   warn_after_consecutive_nights: "stWarn", absence_window_limit: "stWinLimit", absence_window_days: "stWinDays",
   event_retention_days: "stEventDays", compliance_retention_days: "stCompDays", late_entry_window_hours: "stLate",
+  idle_lock_minutes: "stIdle",
 };
 
 async function loadSettings() {
@@ -674,6 +678,7 @@ async function enterApp() {
 
   $("login").hidden = true;
   $("app").hidden = false;
+  idleLock.start();
 
   if (!canResidents()) {
     $("notForYou").hidden = false;
@@ -690,6 +695,7 @@ async function enterApp() {
 }
 
 function showLogin(message) {
+  idleLock.stop();
   state.profile = null;
   state.userId = null;
   $("app").hidden = true;
@@ -698,6 +704,17 @@ function showLogin(message) {
   if (message) $("loginError").textContent = message;
   $("email").focus();
 }
+
+// The admin page holds the most sensitive screens, so it locks itself after
+// the idle minutes set under Settings (default 20).
+const idleLock = mountIdleLock({
+  minutes: () => state.settings?.idle_lock_minutes,
+  onLock: async () => {
+    await Offline.onLogout();
+    await logout();
+    showLogin(`Locked after ${state.settings?.idle_lock_minutes || 20} minutes without activity. Log in again.`);
+  },
+});
 
 mountLogin({ onReady: enterApp });
 

@@ -354,8 +354,9 @@ out of the two working apps:
   With email unconfigured the link is shown to the admin to pass on.
   Disabling ends the account's open sessions immediately.
 - **Settings** (admins only): site name, timezone, the adult age, the
-  due-soon hour, the House Rules thresholds, retention, and the offline
-  sync window. Every change is audited.
+  due-soon hour, the House Rules thresholds, retention, the offline
+  sync window, and the idle lock (minutes without a touch before a
+  terminal logs itself out; default 20). Every change is audited.
 - **Export and erase** (admins only), on a resident's edit sheet: the
   Art. 15 / 20 export downloads as JSON with the reason recorded, and the
   Art. 17 erasure needs the full name typed back.

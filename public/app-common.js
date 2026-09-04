@@ -267,6 +267,48 @@ function resetTokenFromUrl() {
   catch (_) { return ""; }
 }
 
+// Publish the sticky header's height as a CSS variable so the search box can
+// pin itself just below it on phones (see #q.pinned in app-common.css).
+function trackHeaderHeight() {
+  const header = document.querySelector("header");
+  if (!header) return;
+  const set = () => document.documentElement.style.setProperty("--header-h", header.offsetHeight + "px");
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(header);
+  else window.addEventListener("resize", set);
+}
+
+// Idle lock: a shared tablet at the door stays logged in for a whole shift,
+// so after `minutes` with no touch, key or scroll we end the session and show
+// the login screen. `isActive` lets a page veto the lock (e.g. while offline
+// with queued events that a logout would strand); `onLock` does the logout.
+function mountIdleLock({ minutes, isActive, onLock }) {
+  // `minutes` may be a function: the setting arrives with the session, after
+  // this is mounted, so it is read each time the lock starts.
+  let ms = 20 * 60 * 1000;
+  let last = Date.now();
+  let timer = null;
+  const touch = () => { last = Date.now(); };
+  for (const ev of ["pointerdown", "keydown", "scroll", "touchstart"]) {
+    document.addEventListener(ev, touch, { passive: true, capture: true });
+  }
+  const tick = () => {
+    if (isActive && !isActive()) { last = Date.now(); return; }
+    if (Date.now() - last >= ms) { stop(); onLock(); }
+  };
+  const start = () => {
+    stop();
+    const m = typeof minutes === "function" ? minutes() : minutes;
+    ms = Math.max(1, Number(m) || 20) * 60 * 1000;
+    last = Date.now();
+    timer = setInterval(tick, 15 * 1000);
+  };
+  const stop  = () => { if (timer) clearInterval(timer); timer = null; };
+  // A backgrounded tab's timers are throttled; re-check the moment it returns.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && timer) tick(); });
+  return { start, stop };
+}
+
 function mountLogin({ onReady } = {}) {
   mountResetUI();
 

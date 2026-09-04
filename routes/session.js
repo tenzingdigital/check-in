@@ -48,7 +48,8 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
   const settings = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select site_name, local_timezone, adult_age_years, due_soon_after_hour,
-              event_retention_days, compliance_retention_days, late_entry_window_hours
+              event_retention_days, compliance_retention_days, late_entry_window_hours,
+              idle_lock_minutes
          from public.app_settings limit 1`,
     );
     return rows[0] || null;

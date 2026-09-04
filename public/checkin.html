@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <title>Hut Check-In — Daily Register</title>
 
 <!--
@@ -47,6 +47,9 @@
   .cell.ok  { background: var(--ok); }
   .cell.miss { background: var(--bad); cursor: pointer; }
   .cell.na  { background: var(--surface-2); }
+  .legend { margin: 6px 0 0; font-size: 12px; line-height: 1.4; }
+  .legend .cell { width: 10px; height: 12px; vertical-align: middle; margin: 0 4px 0 10px; cursor: default; }
+  .legend .cell:first-child { margin-left: 0; }
 
   /* ---- identity and policy notes (detail panel only) ---- */
   .idline { margin-top: 6px; font-size: 14px; color: var(--muted); }
@@ -115,7 +118,7 @@
         <span aria-current="page">Daily register</span>
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
-      <span id="netState" class="net" hidden></span>
+      <span id="netState" class="net" role="status" hidden></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
     <!-- The three tiles are the questions a manager asks; tapping one shows
@@ -123,7 +126,7 @@
   </header>
     <div class="stats">
       <button class="stat" type="button" data-filter="not_seen" aria-pressed="false"><b id="statNotSeen">–</b><span>Not seen</span></button>
-      <button class="stat" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Breaches</span></button>
+      <button class="stat" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Missed days</span></button>
       <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false"><b id="statCheckins">–</b><span>Seen today</span></button>
     </div>
 
@@ -137,7 +140,7 @@
          old Attention tab is the Breaches tile: same residents, same
          worst-first order. -->
     <section id="panelCheckin">
-      <input id="q" class="field" type="search" placeholder="Filter residents by name…"
+      <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
       <p class="hint" style="margin:8px 2px 0">Verify the person first. Tap a name for detail; swipe right to record the check-in.</p>
@@ -182,13 +185,15 @@ const state = {
 // $, esc(), toast(), ago() come from app-common.js. showError() too — this
 // page reuses its default element id ("appError"), same as index.html.
 
+// Plain words on the cards. A "breach" in the policy is a missed day on the
+// screen; the manager's report can use the formal term.
 const STATE_LABEL = {
   seen_today:   "Seen today",
   expected:     "Expected",
   due_today:    "Due today",
-  exempt:       "Exempt (under 18)",
-  breach_open:  "BREACH",
-  never:        "Never checked in",
+  exempt:       "Under 18 — not required",
+  breach_open:  "Missed days",
+  never:        "Not yet seen",
   not_required: "Not required",
 };
 
@@ -244,7 +249,37 @@ function renderList(container, rows, emptyMsg) {
   // breach uncapped, so this list can be long on a site with a large
   // backlog. It just renders in the ordinary scrolling flow — nothing here
   // slices it down or gives it a fixed clipped height.
-  container.innerHTML = rows.map((r) => residentCard(r)).join("");
+  container.innerHTML = withLetters(rows, !state.searchQuery && state.filter === "all");
+  nudgeOnce(container);
+}
+
+// Letter separators for the full alphabetical list, so a thumb scrolling a
+// long register knows where it is. Skipped for a name filter or a short list,
+// where they would only add noise.
+function withLetters(rows, wanted) {
+  if (!wanted || rows.length < 12) return rows.map((r) => residentCard(r)).join("");
+  let last = "";
+  return rows.map((r) => {
+    // The list is ordered by surname, so the separators follow the surname.
+    const surname = r.last_name || String(r.full_name || "").trim().split(/\s+/).pop() || "";
+    const letter = surname.charAt(0).toUpperCase() || "#";
+    const head = letter !== last ? `<div class="letter" aria-hidden="true">${esc(letter)}</div>` : "";
+    last = letter;
+    return head + residentCard(r);
+  }).join("");
+}
+
+// Once per terminal, the first card slides sideways to hint that a swipe
+// does something. localStorage can be unavailable (private mode); then the
+// nudge simply never shows.
+function nudgeOnce(container) {
+  try {
+    if (localStorage.getItem("swipeNudged")) return;
+    const first = container.querySelector("button.card");
+    if (!first) return;
+    first.classList.add("nudge");
+    localStorage.setItem("swipeNudged", "1");
+  } catch (_) { /* storage blocked */ }
 }
 
 // The card the resident presents at sign-in. Shown on the detail panel only,
@@ -338,7 +373,8 @@ function renderDetail(r) {
     </div>
 
     <div class="stripTitle">Last 30 days</div>
-    <div id="strip" class="strip"><span class="hint">Loading…</span></div>`;
+    <div id="strip" class="strip"><span class="hint">Loading…</span></div>
+    <p class="hint legend"><span class="cell ok"></span>seen <span class="cell miss"></span>missed <span class="cell na"></span>not required</p>`;
   el.hidden = false;
 
   $("doCheckin").onclick = () => checkin(r.id);
@@ -473,7 +509,7 @@ const FILTERS = {
   breach:   (r) => (r.open_breaches || 0) > 0,
   seen:     (r) => !!r.seen_today,
 };
-const FILTER_LABEL = { all: "everyone", not_seen: "not seen today", breach: "with open breaches", seen: "seen today" };
+const FILTER_LABEL = { all: "everyone", not_seen: "not seen today", breach: "with missed days", seen: "seen today" };
 
 function setFilter(name) {
   state.filter = FILTERS[name] ? name : "all";
@@ -526,7 +562,7 @@ function renderSearch() {
   const empty = q
     ? `No resident matching “${q}”${state.filter === "all" ? "" : ` under ${FILTER_LABEL[state.filter]}`}.`
     : state.filter === "not_seen" ? "Everyone who is required today has been seen."
-    : state.filter === "breach"   ? "No open breaches."
+    : state.filter === "breach"   ? "Nobody has missed days outstanding."
     : state.filter === "seen"     ? "Nobody has been seen yet today."
     : "No residents on the register.";
   renderList($("searchResults"), shown, empty);
@@ -685,9 +721,11 @@ async function enterApp() {
   runSearch($("q").value);
   checkHealth();
   Offline.syncNow();
+  idleLock.start();
 }
 
 function showLogin(message) {
+  idleLock.stop();
   state.profile = null;
   state.userId = null;
   $("app").hidden = true;
@@ -712,20 +750,34 @@ function showLogin(message) {
    ====================================================================== */
 
 mountLogin({ onReady: enterApp });
+trackHeaderHeight();
 
-$("logoutBtn").addEventListener("click", async () => {
-  // Send whatever is still queued first. What cannot be sent — the link is
-  // down — stays encrypted on this terminal until the same guard logs in
-  // again; the copy of the register is cleared either way.
+// Ends the session from the Log out button or the idle lock. Sends whatever
+// is still queued first. What cannot be sent — the link is down — stays
+// encrypted on this terminal until the same guard logs in again; the copy of
+// the register is cleared either way.
+async function endSession(message) {
   await Offline.syncNow();
   const pending = await Offline.onLogout();
   await logout();
   $("q").value = "";
   $("searchResults").innerHTML = "";
   renderDetail(null);
-  showLogin(pending
+  const waiting = pending
     ? `${pending} event${pending === 1 ? "" : "s"} recorded offline ${pending === 1 ? "is" : "are"} still waiting to sync. Log in again on this terminal to send ${pending === 1 ? "it" : "them"}.`
-    : "");
+    : "";
+  showLogin([message, waiting].filter(Boolean).join(" "));
+}
+
+$("logoutBtn").addEventListener("click", () => endSession(""));
+
+// A shared terminal locks after the idle minutes set under Settings (default
+// 20) — but never while the connection is down, because a guard could not
+// log back in until it returned and would lose the offline register.
+const idleLock = mountIdleLock({
+  minutes: () => state.settings?.idle_lock_minutes,
+  isActive: () => Offline.isOnline(),
+  onLock: () => endSession(`Locked after ${state.settings?.idle_lock_minutes || 20} minutes without activity. Log in again.`),
 });
 
 let searchTimer;

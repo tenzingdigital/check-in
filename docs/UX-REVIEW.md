@@ -51,6 +51,13 @@ says Queued, and nothing is silently lost.
 
 Everything else is below, grouped by priority, then screen by screen.
 
+**Status, 4 September 2026.** All five of the above are done, along with
+P1.2, P1.4, P1.5, P1.6, P1.7, P1.8, the strip legend, `role="status"` on the
+connection pill and the vocabulary pass ("Missed days", "Not yet seen",
+"Under 18 — not required"). The idle lock from the security roadmap (F7)
+landed in the same batch, with its minutes under Settings. What remains of
+P2 is listed in place below.
+
 ---
 
 ## Who is using this, and where
@@ -74,7 +81,7 @@ console. `docs/SECURITY-ROADMAP.md` already carries those as Phase 2.
 
 ## P0 — Fix before the next centre goes live
 
-### P0.1 A light theme, chosen by the device
+### P0.1 A light theme, chosen by the device — *done 4 September*
 
 `<meta name="color-scheme" content="dark">` and a palette of greys on
 near-black. There is no light mode and no response to the device's setting.
@@ -121,14 +128,14 @@ should be neutral until `due_soon_after_hour`, when it becomes amber, and red
 only for people still missing at close of day. The data to do this is already
 in `v_resident_compliance` (`state` carries `expected` versus `due_today`).
 
-### P1.2 Pin the search box on a phone
+### P1.2 Pin the search box on a phone — *done 4 September*
 
 Under 600 px, keep `#q` pinned beneath the sticky bar while the list
 scrolls. The bar is now short enough to afford it. Alternatively a small
 "to top" affordance appears after scrolling a screen's worth — but the pinned
 box is the more honest answer because typing is the primary action.
 
-### P1.3 "BREACH" on a card
+### P1.3 "BREACH" on a card — *done 4 September: "Missed days"*
 
 Keep the red left border, keep the state in the data and the export, and
 change the on-card label to something a guard can read aloud with the
@@ -137,13 +144,13 @@ say more; the list should not. The same applies to "Never checked in" on a
 resident who arrived yesterday — that reads as an accusation and is usually
 just "new".
 
-### P1.4 Section the long list
+### P1.4 Section the long list — *done 4 September: surname letters*
 
 190 names in one scroll with no landmarks. Add sticky letter headers (A, B,
 C…) as the list is sorted by surname anyway, or a right-edge index on phones.
 Cheap, and it turns a scroll into a jump.
 
-### P1.5 The tabs and the switch look alike
+### P1.5 The tabs and the switch look alike — *done 4 September: underline tabs*
 
 The Gate / Daily register switch and the Search / Log / Staff tabs are the
 same visual component two rows apart. A new guard cannot tell which is
@@ -152,7 +159,7 @@ visually distinct: a segmented control with the accent fill is fine for the
 app level; the view tabs underneath should be plain text tabs with an
 underline, not another pill row.
 
-### P1.6 Swipe is invisible
+### P1.6 Swipe is invisible — *done 4 September: a one-time nudge on the first card*
 
 Swipe-to-record is the fastest path and nothing on a card suggests it exists
 except one line of grey hint text. First-run coaching — a one-time nudge that
@@ -182,8 +189,8 @@ admin to type anyone's password at all.
   count; "179 still to present" is a state. Micro-copy that names the
   obligation reads faster.
 - **The 30-day strip has no legend and no dates.** Green, red and grey cells
-  with a `title` attribute nobody on a phone can see. Add a three-word legend
-  and mark the Mondays.
+  with a `title` attribute nobody on a phone can see. *Legend done 4
+  September;* marking the Mondays is still open.
 - **"Refresh" on the Attention tab** duplicated the automatic refresh.
   *Done:* the tab is gone; the list now refreshes with the counts each minute.
 - **Toast size.** On a phone the toast is a five-line card covering two
@@ -291,8 +298,8 @@ error-toast lifetime (P0.2).
   30-day strip cells are 10 px, but they are not interactive, so that is
   fine as long as they never become so.
 - **Screen readers.** Tabs carry roles and `aria-selected`; chips and tiles
-  carry `aria-pressed`; the toast is a live region. The connection pill is
-  plain text that changes; give it `role="status"` so a change is announced.
+  carry `aria-pressed`; the toast is a live region. The connection pill
+  carries `role="status"` (done 4 September) so a change is announced.
   Cards are buttons whose accessible name is the whole card text, which is
   long but correct.
 - **Motion.** `prefers-reduced-motion` is honoured.

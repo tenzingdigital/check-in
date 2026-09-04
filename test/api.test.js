@@ -454,6 +454,7 @@ async function main() {
     const res = await api.fetch("/api/session");
     assert.equal(res.json.profile.id, guardId);
     assert.equal(res.json.settings.late_entry_window_hours, 48);
+    assert.equal(res.json.settings.idle_lock_minutes, 20, "the idle-lock minutes reach the terminal");
   });
 
   await test("a malformed id is a 400, not a 500", async () => {
@@ -1101,6 +1102,8 @@ async function main() {
     assert.equal(badTz.status, 400);
     assert.match(badTz.json.error, /timezone/i);
     const badHour = await admin.fetch("/api/settings", { method: "PATCH", body: { due_soon_after_hour: 25 } });
+    const badIdle = await admin.fetch("/api/settings", { method: "PATCH", body: { idle_lock_minutes: 0 } });
+    assert.equal(badIdle.status, 400, "an idle lock of zero minutes must be refused");
     assert.equal(badHour.status, 400);
     const okW = await admin.fetch("/api/settings", { method: "PATCH", body: { site_name: "Harbour House", warn_after_consecutive_nights: 4 } });
     assert.equal(okW.status, 200, okW.text);

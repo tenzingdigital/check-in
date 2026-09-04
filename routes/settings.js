@@ -23,6 +23,7 @@ const COLUMNS = {
   absence_window_limit:          { kind: 'int', min: 1, max: 365 },
   warn_after_consecutive_nights: { kind: 'int', min: 1, max: 90 },
   late_entry_window_hours:       { kind: 'int', min: 1, max: 168 },
+  idle_lock_minutes:             { kind: 'int', min: 1, max: 720 },
 };
 
 router.get('/', wrap(async (req, res) => {

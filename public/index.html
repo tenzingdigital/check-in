@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <title>Hut Check-In — Gate</title>
 
 <!--
@@ -49,7 +49,7 @@
         <a href="/checkin.html">Daily register</a>
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
-      <span id="netState" class="net" hidden></span>
+      <span id="netState" class="net" role="status" hidden></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
   </header>
@@ -69,7 +69,7 @@
 
     <!-- ---- search ---- -->
     <section id="panelSearch" role="tabpanel" aria-labelledby="tabSearch">
-      <input id="q" class="field" type="search" placeholder="Filter residents by name…"
+      <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <nav class="chips" id="presenceFilter" aria-label="Filter by presence">
         <button type="button" data-presence="all" aria-pressed="true">All</button>
@@ -163,8 +163,39 @@ function renderList(container, rows, emptyMsg) {
     container.innerHTML = `<p class="empty">${esc(emptyMsg)}</p>`;
     return;
   }
-  container.innerHTML = rows.map((r) => residentCard(r)).join("");
+  container.innerHTML = withLetters(rows, !state.searchQuery && state.presence === "all");
+  nudgeOnce(container);
 }
+
+// Letter separators for the full alphabetical list, so a thumb scrolling a
+// long register knows where it is. Skipped for a name filter or a short list,
+// where they would only add noise.
+function withLetters(rows, wanted) {
+  if (!wanted || rows.length < 12) return rows.map((r) => residentCard(r)).join("");
+  let last = "";
+  return rows.map((r) => {
+    // The list is ordered by surname, so the separators follow the surname.
+    const surname = r.last_name || String(r.full_name || "").trim().split(/\s+/).pop() || "";
+    const letter = surname.charAt(0).toUpperCase() || "#";
+    const head = letter !== last ? `<div class="letter" aria-hidden="true">${esc(letter)}</div>` : "";
+    last = letter;
+    return head + residentCard(r);
+  }).join("");
+}
+
+// Once per terminal, the first card slides sideways to hint that a swipe
+// does something. localStorage can be unavailable (private mode); then the
+// nudge simply never shows.
+function nudgeOnce(container) {
+  try {
+    if (localStorage.getItem("swipeNudged")) return;
+    const first = container.querySelector("button.card");
+    if (!first) return;
+    first.classList.add("nudge");
+    localStorage.setItem("swipeNudged", "1");
+  } catch (_) { /* storage blocked */ }
+}
+
 
 function renderDetail(r) {
   state.selected = r;
@@ -179,12 +210,12 @@ function renderDetail(r) {
 
     <div class="facts">
       <div class="fact"><span>Status</span><b>${isIn ? "On site" : "Off site"}</b></div>
-      <div class="fact"><span>Last check-in</span><b>${r.last_event_at ? esc(ago(r.last_event_at)) : "No movement on record"}</b></div>
+      <div class="fact"><span>Last movement</span><b>${r.last_event_at ? esc(ago(r.last_event_at)) : "No movement on record"}</b></div>
     </div>
 
     <div class="actions">
-      <button class="btn ${isIn ? "" : "primary-in"}"  id="doIn"  type="button">Sign IN</button>
-      <button class="btn ${isIn ? "primary-out" : ""}" id="doOut" type="button">Sign OUT</button>
+      <button class="btn ${isIn ? "current" : "primary-in"}"  id="doIn"  type="button" title="${isIn ? "Already on site" : ""}">Sign IN</button>
+      <button class="btn ${isIn ? "primary-out" : "current"}" id="doOut" type="button" title="${isIn ? "" : "Already off site"}">Sign OUT</button>
       <button class="btn ghost wide" id="closeDetail" type="button">Close</button>
     </div>`;
   el.hidden = false;
@@ -430,9 +461,11 @@ async function enterApp() {
   refreshSummary();
   runSearch($("q").value);
   Offline.syncNow();
+  idleLock.start();
 }
 
 function showLogin(message) {
+  idleLock.stop();
   state.profile = null;
   state.userId = null;
   $("app").hidden = true;
@@ -457,20 +490,34 @@ function showLogin(message) {
    ====================================================================== */
 
 mountLogin({ onReady: enterApp });
+trackHeaderHeight();
 
-$("logoutBtn").addEventListener("click", async () => {
-  // Send whatever is still queued first. What cannot be sent — the link is
-  // down — stays encrypted on this terminal until the same guard logs in
-  // again; the copy of the register is cleared either way.
+// Ends the session from the Log out button or the idle lock. Sends whatever
+// is still queued first. What cannot be sent — the link is down — stays
+// encrypted on this terminal until the same guard logs in again; the copy of
+// the register is cleared either way.
+async function endSession(message) {
   await Offline.syncNow();
   const pending = await Offline.onLogout();
   await logout();
   $("q").value = "";
   $("searchResults").innerHTML = "";
   renderDetail(null);
-  showLogin(pending
+  const waiting = pending
     ? `${pending} event${pending === 1 ? "" : "s"} recorded offline ${pending === 1 ? "is" : "are"} still waiting to sync. Log in again on this terminal to send ${pending === 1 ? "it" : "them"}.`
-    : "");
+    : "";
+  showLogin([message, waiting].filter(Boolean).join(" "));
+}
+
+$("logoutBtn").addEventListener("click", () => endSession(""));
+
+// A shared terminal locks after the idle minutes set under Settings (default
+// 20) — but never while the connection is down, because a guard could not
+// log back in until it returned and would lose the offline register.
+const idleLock = mountIdleLock({
+  minutes: () => state.settings?.idle_lock_minutes,
+  isActive: () => Offline.isOnline(),
+  onLock: () => endSession(`Locked after ${state.settings?.idle_lock_minutes || 20} minutes without activity. Log in again.`),
 });
 
 let searchTimer;
