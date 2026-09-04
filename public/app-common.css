@@ -77,8 +77,11 @@
   .viewswitch a:hover { border-color: var(--accent); }
   .viewswitch a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+  /* The tiles sit just below the sticky header and scroll with the page:
+     pinning them too cost a third of a phone screen while scrolling a list
+     of two hundred people. */
   .stats {
-    max-width: 760px; margin: 0 auto; padding: 0 16px 12px;
+    max-width: 760px; margin: 12px auto 0; padding: 0 16px;
     display: flex; gap: 8px; flex-wrap: wrap;
   }
   .stat {
@@ -292,18 +295,22 @@
       grid-template-areas:
         "brand net logout"
         "switch switch switch";
-      gap: 8px 10px;
-      padding: 10px 14px;
+      gap: 6px 8px;
+      padding: 8px 12px;
     }
+    .brand { font-size: 15px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .brand small { font-size: 11px; }
+    #logoutBtn { padding: 7px 10px !important; font-size: 14px; }
+    .net { padding: 5px 9px; font-size: 11px; }
     .brand { grid-area: brand; margin-right: 0; min-width: 0; }
     .brand small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #netState { grid-area: net; }
     #logoutBtn { grid-area: logout; }
-    .viewswitch { grid-area: switch; width: 100%; }
-    .viewswitch a, .viewswitch span { flex: 1; text-align: center; padding: 10px 8px; }
+    .viewswitch { grid-area: switch; width: 100%; padding: 4px; }
+    .viewswitch a, .viewswitch span { flex: 1; text-align: center; padding: 9px 8px; font-size: 14px; }
 
     /* Equal thirds (or halves), whatever the labels' lengths. */
-    .stats { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 0 14px 10px; gap: 8px; }
+    .stats { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin-top: 10px; padding: 0 12px; gap: 8px; }
     .stat { padding: 7px 10px; min-width: 0; }
     .stat b { font-size: 20px; }
     .stat span { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }

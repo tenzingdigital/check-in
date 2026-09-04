@@ -432,9 +432,7 @@ const Offline = (() => {
     el.hidden = false;
     if (!isOnline()) {
       el.className = "net off";
-      el.textContent = pending
-        ? `Offline · ${pending} queued — keep this tab open`
-        : "Offline — recording to this terminal";
+      el.textContent = pending ? `Offline · ${pending} queued` : "Offline";
     } else if (pending) {
       el.className = "net syncing";
       el.textContent = `Syncing ${pending}…`;
@@ -442,7 +440,7 @@ const Offline = (() => {
       el.className = "net";
       el.textContent = "Online";
     }
-    renderNotice(rejected, lost);
+    renderNotice(rejected, lost, !isOnline() ? pending : 0);
   }
 
   function when(iso) {
@@ -453,16 +451,26 @@ const Offline = (() => {
   // An event the server has refused for good, or one this tab can no longer
   // read, is not silently dropped: it is shown with its reason until a person
   // dismisses it, so it can go on the paper sheet instead.
-  function renderNotice(rejected, lost) {
+  function renderNotice(rejected, lost, offlinePending) {
     const box = $("syncNotice");
     if (!box) return;
-    if (!rejected.length && !lost) { box.hidden = true; box.innerHTML = ""; return; }
-    const lines = rejected.map((e) => `
+    if (!rejected.length && !lost && !offlinePending) { box.hidden = true; box.innerHTML = ""; return; }
+    const lines = [];
+    // The one instruction that matters during an outage lives here, where
+    // there is room for it, rather than in the header pill.
+    if (offlinePending) {
+      lines.push(`
+      <div class="row">
+        <span>Offline. ${offlinePending} event${offlinePending === 1 ? "" : "s"} recorded on this terminal will be sent when the
+          connection returns. <b>Keep this tab open.</b></span>
+      </div>`);
+    }
+    lines.push(...rejected.map((e) => `
       <div class="row">
         <span>${esc(e.resident_name || e.resident_id)} · ${e.kind === "gate" ? "sign " + esc(String(e.direction || "").toUpperCase()) : "check-in"}
           · ${esc(when(e.occurred_at))}<br><span class="hint">Not recorded: ${esc(e.error || "rejected")}</span></span>
         <button class="btn ghost" type="button" data-dismiss="${esc(e.ref)}">Dismiss</button>
-      </div>`);
+      </div>`));
     if (lost) {
       lines.push(`
       <div class="row">
@@ -471,7 +479,8 @@ const Offline = (() => {
         <button class="btn ghost" type="button" data-dismiss-lost="1">Clear</button>
       </div>`);
     }
-    box.innerHTML = `<b>Needs attention</b><div class="synclist">${lines.join("")}</div>`;
+    const title = rejected.length || lost ? "Needs attention" : "Working offline";
+    box.innerHTML = `<b>${title}</b><div class="synclist">${lines.join("")}</div>`;
     box.hidden = false;
   }
 
