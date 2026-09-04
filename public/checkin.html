@@ -283,8 +283,10 @@ function nudgeOnce(container) {
     const key = "swipeNudge:register";
     const seen = Number(localStorage.getItem(key) || 0);
     if (seen >= 3) return;
+    if (nudgeOnce.done) return;             // once per page load, whatever re-renders
     const first = container.querySelector("button.card");
-    if (!first || first.classList.contains("nudge")) return;
+    if (!first) return;
+    nudgeOnce.done = true;
     first.classList.add("nudge");
     if (first.parentElement && first.parentElement.classList.contains("swipe")) first.parentElement.classList.add("nudge");
     localStorage.setItem(key, String(seen + 1));
@@ -577,6 +579,21 @@ function renderSearch() {
   renderList($("searchResults"), shown, empty);
 }
 
+// Update the card on screen from the server's answer straight away. The
+// full refresh that follows re-queries v_resident_compliance, which takes
+// seconds on the live database — long enough for a guard to think the swipe
+// did nothing and swipe again (and each new swipe cancelled the refresh the
+// last one had started). record_checkin() returns the day's register row.
+function applyCheckin(residentId, dc) {
+  const r = state.rows.get(residentId);
+  if (!r) return;
+  r.seen_today = true;
+  r.checkins_today = dc && dc.checkin_count ? dc.checkin_count : (r.checkins_today || 0) + 1;
+  if (r.state !== "breach_open") r.state = "seen_today";
+  renderSearch();
+  refreshSummary();
+}
+
 async function checkin(residentId) {
   if (state.busy) return;
   state.busy = true;
@@ -620,7 +637,7 @@ async function checkin(residentId) {
   state.busy = false;
   if (!row) return;
   toast(`Check-in recorded — ${row.checkin_count > 1 ? "already seen today" : "day satisfied"}`, "ok");
-  refreshSummary();
+  applyCheckin(residentId, row);
   runSearch($("q").value);
   // The panel's job is done once the check-in is recorded: close it so the
   // guard is straight back at the list for the next person. The toast and the

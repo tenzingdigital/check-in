@@ -200,8 +200,10 @@ function nudgeOnce(container) {
     const key = "swipeNudge:gate";
     const seen = Number(localStorage.getItem(key) || 0);
     if (seen >= 3) return;
+    if (nudgeOnce.done) return;             // once per page load, whatever re-renders
     const first = container.querySelector("button.card");
-    if (!first || first.classList.contains("nudge")) return;
+    if (!first) return;
+    nudgeOnce.done = true;
     first.classList.add("nudge");
     if (first.parentElement && first.parentElement.classList.contains("swipe")) first.parentElement.classList.add("nudge");
     localStorage.setItem(key, String(seen + 1));
@@ -427,6 +429,12 @@ async function record(residentId, direction, { fromSwipe = false } = {}) {
 
   toast(`${row.full_name} signed ${direction.toUpperCase()}`, "ok");
   if (!fromSwipe) renderDetail(row);
+  // record_check() returns the resident's new status row: put it on the
+  // card now rather than after the list refresh, so the pill flips under
+  // the guard's finger and nobody swipes twice.
+  const current = state.rows.get(residentId);
+  if (current) Object.assign(current, row);
+  renderSearch();
   refreshSummary();
   runSearch($("q").value);
 }
