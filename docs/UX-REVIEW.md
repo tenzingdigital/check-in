@@ -185,8 +185,8 @@ admin to type anyone's password at all.
 - **The 30-day strip has no legend and no dates.** Green, red and grey cells
   with a `title` attribute nobody on a phone can see. Add a three-word legend
   and mark the Mondays.
-- **"Refresh" on the Attention tab** duplicates the automatic two-minute
-  refresh. Remove it, or make it show when the list was last updated.
+- **"Refresh" on the Attention tab** duplicated the automatic refresh.
+  *Done:* the tab is gone; the list now refreshes with the counts each minute.
 - **Toast size.** On a phone the toast is a five-line card covering two
   residents. Shorter copy ("Queued — sends when back online") and a narrower
   box.
@@ -259,7 +259,14 @@ needs; consider showing three by default (Status, Today, Consecutive nights)
 and the rest on a tap. The House Rules note is the best copy in the product.
 The 30-day strip needs a legend (P2).
 
-### Daily register — Attention
+### Daily register — Breaches view (was the Attention tab)
+
+*Updated the same afternoon:* the Attention tab and the chip row were
+removed. The tiles are the only filter, and the Breaches tile lists
+worst-first exactly as the Attention tab did. The paragraph below describes
+the tab as reviewed; the ordering note still applies to the tile's list.
+
+### Daily register — Attention (as reviewed)
 Does what it says. The pip count in the tab is alarming with demo data, but
 correct. Ordering (open breaches, then never seen, then due today) is
 sensible and explained in the README, not on screen; a one-line grouping

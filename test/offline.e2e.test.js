@@ -93,11 +93,13 @@ async function launch() {
   await page.waitForFunction(() => document.querySelector('.stats button[data-filter="seen"]').getAttribute("aria-pressed") === "true");
   await page.waitForFunction(() => /Nobody has been seen yet today/.test(document.getElementById("searchResults").textContent));
   await page.click('.stats button[data-filter="not_seen"]');
-  await page.waitForFunction(() => document.querySelector('#stateFilter button[data-filter="not_seen"]').getAttribute("aria-pressed") === "true");
+  await page.waitForFunction(() => document.querySelector('.stats button[data-filter="not_seen"]').getAttribute("aria-pressed") === "true");
+  await page.waitForFunction(() => /Showing \d+ not seen today/.test(document.getElementById("filterLine").textContent));
   const notYet = await page.locator("button.card .pill").allTextContents();
   assert.ok(notYet.length > 0 && notYet.every((t) => /not yet/i.test(t)), `Not seen filter showed: ${notYet.slice(0, 3).join(", ")}`);
-  await page.click('.stats button[data-filter="not_seen"]');   // pressed again clears
-  await page.waitForFunction(() => document.querySelector('#stateFilter button[data-filter="all"]').getAttribute("aria-pressed") === "true");
+  await page.click("#showAll");                                   // the way back
+  await page.waitForFunction(() => document.getElementById("filterLine").hidden === true);
+  await page.waitForFunction(() => [...document.querySelectorAll('.stats button[data-filter]')].every((b) => b.getAttribute("aria-pressed") === "false"));
 
   await ctx.setOffline(true);
   await page.waitForFunction(() => document.getElementById("netState").classList.contains("off"));

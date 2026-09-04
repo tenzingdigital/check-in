@@ -60,6 +60,10 @@
   /* Inline editor for the ID, replacing two browser prompt() dialogs: a
      phone offers to suppress those after a couple, after which every
      later prompt silently returns nothing and "Add" appears to do nothing. */
+  #panelCheckin { margin-top: 14px; }
+  .filterline { margin: 8px 2px 0; display: flex; align-items: center; gap: 10px; color: var(--text); }
+  .filterline .linkish { padding: 0; }
+
   .idform { margin-top: 10px; display: grid; gap: 10px; }
   .idform .seg { display: flex; gap: 6px; }
   .idform .seg button {
@@ -126,35 +130,19 @@
     <div id="appError" class="alert" hidden></div>
     <div id="syncNotice" class="alert warn" hidden></div>
 
-    <nav class="tabs" role="tablist">
-      <button role="tab" id="tabCheckin"   aria-selected="true"  aria-controls="panelCheckin">Check in</button>
-      <button role="tab" id="tabAttention" aria-selected="false" aria-controls="panelAttention">Attention<span class="pip" id="attentionPip" hidden>0</span></button>
-    </nav>
-
-    <!-- ---- check in ---- -->
-    <section id="panelCheckin" role="tabpanel" aria-labelledby="tabCheckin">
+    <!-- One list, one filter. The three tiles above are the filter; the line
+         under the search box says which is on and offers the way back. The
+         old Attention tab is the Breaches tile: same residents, same
+         worst-first order. -->
+    <section id="panelCheckin">
       <input id="q" class="field" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-      <nav class="chips" id="stateFilter" aria-label="Filter by status">
-        <button type="button" data-filter="all"      aria-pressed="true">All</button>
-        <button type="button" data-filter="not_seen" aria-pressed="false">Not seen</button>
-        <button type="button" data-filter="breach"   aria-pressed="false">Breach</button>
-        <button type="button" data-filter="seen"     aria-pressed="false">Seen</button>
-      </nav>
+      <p id="filterLine" class="hint filterline" hidden></p>
       <p class="hint" style="margin:8px 2px 0">Verify the person first. Tap a name for detail; swipe right to record the check-in.</p>
       <div id="searchResults" class="list"></div>
     </section>
 
-    <!-- ---- attention ---- -->
-    <section id="panelAttention" role="tabpanel" aria-labelledby="tabAttention" hidden>
-      <div class="row">
-        <p class="hint" style="flex:1;margin:0">Open breaches, plus residents never seen or due today.</p>
-        <button class="btn ghost" id="refreshAttention">Refresh</button>
-      </div>
-      <div id="attentionList" class="list"></div>
-    </section>
-
-    <!-- ---- resident detail (shared by both tabs) ---- -->
+    <!-- ---- resident detail ---- -->
     <div id="detail" class="detail" hidden></div>
   </main>
 </div>
@@ -175,9 +163,8 @@ const state = {
   userId:    null,   // the guard this session belongs to; queued events carry it
   settings:  null,   // app_settings row
   selected:  null,   // resident row shown in the detail panel
-  tab:       "checkin",
   busy:      false,
-  attention: [],      // last attention_list() result, for the header stats and pip
+  attention: [],      // last attention_list() result, for the Breaches tile
   filter:    "all",   // which tile is pressed: all | not_seen | breach | seen
   searchRows:  [],    // the last list response, refiltered client-side
   searchQuery: "",
@@ -384,10 +371,6 @@ async function refreshSummary() {
   $("statOpenBreach").textContent = state.attention.filter((r) => r.open_breaches > 0).length;
   $("statNotSeen").textContent  = summary.not_seen ?? "–";
   $("statCheckins").textContent = summary.seen_today ?? "–";
-
-  const pip = $("attentionPip");
-  pip.textContent = state.attention.length;
-  pip.hidden = state.attention.length === 0;
 }
 
 let searchToken = 0;
@@ -446,29 +429,44 @@ const FILTERS = {
   breach:   (r) => (r.open_breaches || 0) > 0,
   seen:     (r) => !!r.seen_today,
 };
-const FILTER_LABEL = { all: "All", not_seen: "Not seen", breach: "Breach", seen: "Seen" };
+const FILTER_LABEL = { all: "everyone", not_seen: "not seen today", breach: "with open breaches", seen: "seen today" };
 
 function setFilter(name) {
   state.filter = FILTERS[name] ? name : "all";
-  if (state.tab !== "checkin") selectTab("checkin");
+  renderDetail(null);
   renderSearch();
+}
+
+// The Breaches view is the old Attention tab: worst first — longest run of
+// consecutive missed nights, then most absent in the window, then most open
+// breaches — so a manager reads the top of the list and knows who to call.
+// Every other view stays alphabetical, because a guard at the window is
+// looking for a name.
+function orderFor(filter, rows) {
+  if (filter !== "breach") return rows;
+  return [...rows].sort((a, b) =>
+    (b.consecutive_missed || 0) - (a.consecutive_missed || 0) ||
+    (b.absent_in_window || 0) - (a.absent_in_window || 0) ||
+    (b.open_breaches || 0) - (a.open_breaches || 0) ||
+    String(a.full_name).localeCompare(String(b.full_name)));
 }
 
 function renderSearch() {
   const rows = state.searchRows || [];
-  const counts = {};
-  for (const f of Object.keys(FILTERS)) counts[f] = rows.filter(FILTERS[f]).length;
-
-  document.querySelectorAll("#stateFilter button").forEach((b) => {
-    const f = b.dataset.filter;
-    b.textContent = `${FILTER_LABEL[f]} (${counts[f]})`;
-    b.setAttribute("aria-pressed", String(f === state.filter));
-  });
   document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
     b.setAttribute("aria-pressed", String(b.dataset.filter === state.filter));
   });
 
-  const shown = rows.filter(FILTERS[state.filter]);
+  const shown = orderFor(state.filter, rows.filter(FILTERS[state.filter]));
+  const line = $("filterLine");
+  if (state.filter === "all") {
+    line.hidden = true;
+    line.innerHTML = "";
+  } else {
+    line.innerHTML = `Showing ${shown.length} ${FILTER_LABEL[state.filter]}${state.filter === "breach" ? ", worst first" : ""} · <button class="linkish" type="button" id="showAll">Show everyone</button>`;
+    line.hidden = false;
+    $("showAll").onclick = () => setFilter("all");
+  }
   const q = state.searchQuery;
   const empty = q
     ? `No resident matching “${q}”${state.filter === "all" ? "" : ` under ${FILTER_LABEL[state.filter]}`}.`
@@ -524,7 +522,6 @@ async function checkin(residentId) {
   toast(`Check-in recorded — ${row.checkin_count > 1 ? "already seen today" : "day satisfied"}`, "ok");
   refreshSummary();
   runSearch($("q").value);
-  if (state.tab === "attention") loadAttention();
   // The panel's job is done once the check-in is recorded: close it so the
   // guard is straight back at the list for the next person. The toast and the
   // card's refreshed badge are the confirmation.
@@ -572,30 +569,6 @@ function openIdEditor(r) {
   });
 }
 
-async function loadAttention() {
-  const data = await guarded(
-    () => apiGet("/api/attention"),
-    (err) => {
-      Offline.noteFailure(err);
-      if (err.status === 0) {
-        // The attention list is computed on the server from every terminal's
-        // events; a copy taken before the outage would go stale in the wrong
-        // direction, so it is not offered offline.
-        $("attentionList").innerHTML = '<p class="empty">The attention list needs a connection.</p>';
-        return;
-      }
-      showError("Could not load the attention list: " + err.message);
-    },
-  );
-  if (!data) return;
-  showError("");
-  state.attention = data;
-  const pip = $("attentionPip");
-  pip.textContent = state.attention.length;
-  pip.hidden = state.attention.length === 0;
-  renderList($("attentionList"), data, "Nobody is outstanding.");
-}
-
 // The 30-day window is anchored to public.site_today() on the server rather
 // than to this terminal's clock, so the strip lines up with the register.
 async function loadStrip(residentId) {
@@ -603,21 +576,6 @@ async function loadStrip(residentId) {
   return (data || []).map(d =>
     `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(d.compliance_date)}"></i>`
   ).join("");
-}
-
-/* ========================================================================
-   Tabs
-   ====================================================================== */
-function selectTab(name) {
-  state.tab = name;
-  for (const t of ["checkin", "attention"]) {
-    const cap = t[0].toUpperCase() + t.slice(1);
-    $("tab" + cap).setAttribute("aria-selected", String(t === name));
-    $("panel" + cap).hidden = t !== name;
-  }
-  renderDetail(null);
-  if (name === "checkin")   $("q").focus();
-  if (name === "attention") loadAttention();
 }
 
 /* ========================================================================
@@ -666,7 +624,7 @@ async function enterApp() {
   $("login").hidden = true;
   $("app").hidden = false;
 
-  selectTab("checkin");
+  $("q").focus();
   refreshSummary();
   runSearch($("q").value);
   Offline.syncNow();
@@ -739,23 +697,15 @@ document.addEventListener("click", (e) => {
 
 mountCardSwipe({ onRight: (id) => checkin(id) });
 
-// A tile or a chip sets the filter; the pressed tile pressed again clears it.
+// A tile sets the filter; the pressed tile pressed again clears it, and so
+// does "Show everyone" on the line under the search box.
 document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
   b.addEventListener("click", () => setFilter(b.dataset.filter === state.filter ? "all" : b.dataset.filter));
 });
-$("stateFilter").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-filter]");
-  if (btn) setFilter(btn.dataset.filter);
-});
 
-$("tabCheckin").addEventListener("click",   () => selectTab("checkin"));
-$("tabAttention").addEventListener("click", () => selectTab("attention"));
-$("refreshAttention").addEventListener("click", loadAttention);
-
-// Periodic summary refresh so a terminal left open overnight does not show a
-// stale attention count.
-setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
-setInterval(() => { if (state.profile && state.tab === "attention") loadAttention(); }, 120000);
+// Periodic refresh so a terminal left open overnight does not show stale
+// counts or a stale list.
+setInterval(() => { if (state.profile) { refreshSummary(); runSearch($("q").value); } }, 60000);
 
 // Any request that comes back 401 — an expired session, or a supervisor
 // deactivating the account mid-shift — returns the terminal to the login
@@ -772,7 +722,6 @@ Offline.mountUI({
     toast(`${s.sent} check-in${s.sent === 1 ? "" : "s"} recorded offline ${s.sent === 1 ? "has" : "have"} been sent`, "ok");
     refreshSummary();
     runSearch($("q").value);
-    if (state.tab === "attention") loadAttention();
   },
   onUnauthenticated: () => showLogin("Your session has ended. Log in again to send the events recorded offline."),
 });

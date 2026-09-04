@@ -48,7 +48,8 @@ searches a registered resident by name, verifies the person visually, and taps
 one button to sign them in or out. Two tabs: Search and Log.
 
 **`checkin.html` — the check-in app.** The statutory daily register: did this
-resident present at the hut today? Two tabs: Check in and Attention. A gate
+resident present at the hut today? One list, filtered by the three tiles
+above it: not seen today, open breaches (worst first), seen today. A gate
 sign-in/out is a different act from a check-in and does not satisfy the daily
 requirement — see "Compliance is per calendar day" below.
 
@@ -88,7 +89,7 @@ migrations/             numbered SQL, applied in order, exactly once
   010_offline_sync.sql  late-entry functions: bounded, flagged, idempotent
 public/                 the ONLY directory served publicly
   index.html            the gate app — Search and Log
-  checkin.html          the check-in app — Check in and Attention
+  checkin.html          the check-in app — the register, filtered by its tiles
   app-common.css        styles shared by both front ends
   app-common.js         the API client and helpers shared by both
   offline.js            encrypted register copy, event queue, replay — see "Working offline"
@@ -182,9 +183,10 @@ days when they were legally a minor. This is the reason the register stores a
 full date of birth rather than a boolean — see `docs/GDPR.md` for the
 necessity argument.
 
-The **Attention** tab in the check-in app is the flow itself: unexplained
-breaches first (worst consecutive-run first), then noted breaches greyed out,
-then residents not yet seen today past the cutoff. What the hut does about a
+The **Breaches** tile in the check-in app is the flow itself: tap it and the
+list shows only residents with an open breach, worst first — longest run of
+consecutive missed nights, then most absent in the rolling window. The
+**Not seen** tile is the working list for the day. What the hut does about a
 breach — call, escalate, welfare check — is a procedure, not a feature; the
 app tells you who and for how long.
 
@@ -592,7 +594,7 @@ served CSP matches the served HTML.
 
 - **Notifying residents that they are due.** Sending SMS or email would add a
   processor, a new category of contact data, and a delivery-failure mode that
-  looks like non-compliance. The check-in app has the Attention tab; the
+  looks like non-compliance. The check-in app has the Breaches tile; the
   escalation procedure is an operational matter.
 - **Photos on the register.** Would make visual verification stronger, and would
   also turn this into a system holding biometric-adjacent data. Worth doing
@@ -652,8 +654,9 @@ deliberately kept, encrypted, and the login screen says so.
 - **A reload during an outage** carries on with the profile the tab last
   saw. A tab that was never signed in cannot log in until the link returns.
 - **Terminals cannot see each other's queued events.** Two doors both offline
-  show two different pictures until both sync. The Attention tab and the
-  header counts need the server and say so.
+  show two different pictures until both sync. The header counts come from
+  the server, and the copy kept for an outage is only as fresh as the last
+  load.
 - **The terminal's clock is trusted for a late entry, within bounds.** The
   server refuses anything dated in the future or older than
   `app_settings.late_entry_window_hours` (default 48). Keep terminal clocks
