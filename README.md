@@ -102,6 +102,7 @@ render.yaml             the blueprint: web service + Postgres + cron, all Frankf
 check.sh                one command: parse everything, then both suites
 docs/GDPR.md            what personal data is held, why, and for how long
 docs/TECH-STACK.md      stack options, costs, and why this one
+docs/SECURITY-ROADMAP.md  hardening, privacy and resilience roadmap, mapped to ISO 27001
 ```
 
 ---
