@@ -118,6 +118,37 @@ async function launch() {
   await page.click('.stats button[data-filter="seen"]');
   step("Seen tile shows the synced resident");
 
+  step("a supervisor records an ID through the inline editor");
+  {
+    const sup = await ctx.newPage();
+    await sup.goto(BASE + "/checkin.html");
+    // The guard's session cookie is shared by the context; log out of it
+    // first so the supervisor login is a clean one.
+    await sup.evaluate(() => fetch("/api/session", { method: "DELETE" }));
+    await sup.reload();
+    await sup.waitForSelector("#login:not([hidden])");
+    await sup.fill("#email", "sam@hut.example");
+    await sup.fill("#password", "correct-horse-battery");
+    await sup.click("#loginBtn");
+    await sup.waitForSelector("#app:not([hidden])");
+    await sup.waitForFunction(() => document.querySelectorAll("button.card").length > 0);
+    await sup.locator("button.card").first().click();
+    await sup.waitForSelector("#detail:not([hidden])");
+    await sup.click("#editId");
+    await sup.click('#idForm .seg button[data-type="IRP"]');
+    await sup.fill("#idNumber", "irp1234567");
+    await sup.click("#idSave");
+    await sup.waitForFunction(() => /IRP IRP1234567/.test(document.querySelector("#detail .idline").textContent));
+    assert.equal(await sup.locator("#idForm").count(), 0, "the editor should close after saving");
+    // Back to the guard for the remaining steps.
+    await sup.evaluate(() => fetch("/api/session", { method: "DELETE" }));
+    await sup.close();
+    await page.evaluate(async () => { await fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "gina@hut.example", password: "correct-horse-battery" }) }); });
+    await page.reload();
+    await page.waitForSelector("#app:not([hidden])");
+    await page.waitForFunction(() => document.getElementById("netState").textContent === "Online");
+  }
+
   step("logout while offline, then reconnect: the server session must end");
   await ctx.setOffline(true);
   await page.waitForFunction(() => document.getElementById("netState").classList.contains("off"));

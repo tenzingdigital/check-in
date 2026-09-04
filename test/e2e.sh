@@ -28,6 +28,7 @@ DATABASE_URL="$DATABASE_URL" node -e "
 const db=require('./database'); const fs=require('fs');
 db.withOwner(async c=>{
   await c.query('select auth.create_user(\$1,\$2,\$3,\$4)',['gina@hut.example','correct-horse-battery','Gina Guard','guard']);
+  await c.query('select auth.create_user(\$1,\$2,\$3,\$4)',['sam@hut.example','correct-horse-battery','Sam Supervisor','supervisor']);
   await c.query(fs.readFileSync('seed.sql','utf8'));
 }).then(()=>db.closePool());
 "

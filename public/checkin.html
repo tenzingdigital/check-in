@@ -57,6 +57,21 @@
   }
   .linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
+  /* Inline editor for the ID, replacing two browser prompt() dialogs: a
+     phone offers to suppress those after a couple, after which every
+     later prompt silently returns nothing and "Add" appears to do nothing. */
+  .idform { margin-top: 10px; display: grid; gap: 10px; }
+  .idform .seg { display: flex; gap: 6px; }
+  .idform .seg button {
+    flex: 1; padding: 11px 8px; border-radius: 10px;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-weight: 650;
+  }
+  .idform .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #041025; }
+  .idform .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .idform input.field { font-variant-numeric: tabular-nums; letter-spacing: .04em; text-transform: uppercase; }
+  .idform .actions { margin: 0; }
+  .idform .actions .btn { padding: 14px 12px; font-size: 15px; }
+
   /* Facts with the rule named, never a verdict. Amber, not red: this is
      something for the manager to weigh, not an alarm the app has raised. */
   .policy {
@@ -245,15 +260,39 @@ function renderList(container, rows, emptyMsg) {
 // The card the resident presents at sign-in. Shown on the detail panel only,
 // never in a list: a number belongs on screen when somebody is checking it
 // against a card, and at no other time.
+function canEditId() {
+  return !!(state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin"));
+}
+
 function idLine(r) {
-  const can = state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
   const shown = r.id_number
     ? `<b>${esc(r.id_type)} ${esc(r.id_number)}</b>`
     : `<span class="hint">No ID recorded</span>`;
-  const edit = can
+  const edit = canEditId()
     ? ` <button class="linkish" id="editId" type="button">${r.id_number ? "Change" : "Add"}</button>`
     : "";
   return shown + edit;
+}
+
+// The editor itself, rendered into the detail sheet on demand. Supervisors
+// and admins only — and the database enforces that regardless, through the
+// residents_supervisor row policy behind PATCH /api/residents/:id.
+function idForm(r) {
+  const type = r.id_type || "TRC";
+  return `
+    <form id="idForm" class="idform" autocomplete="off">
+      <div class="seg" role="group" aria-label="ID type">
+        <button type="button" data-type="TRC" aria-pressed="${type === "TRC"}">TRC</button>
+        <button type="button" data-type="IRP" aria-pressed="${type === "IRP"}">IRP</button>
+      </div>
+      <input id="idNumber" class="field" type="text" placeholder="Number as printed on the card"
+             value="${esc(r.id_number || "")}" maxlength="40" autocapitalize="characters"
+             autocorrect="off" spellcheck="false" enterkeyhint="done" required>
+      <div class="actions">
+        <button class="btn primary-in" id="idSave" type="submit">Save ID</button>
+        <button class="btn ghost" id="idCancel" type="button">Cancel</button>
+      </div>
+    </form>`;
 }
 
 // The two House Rules thresholds, stated as facts with the rule named. This
@@ -315,7 +354,7 @@ function renderDetail(r) {
   $("doCheckin").onclick = () => checkin(r.id);
   $("closeDetail").onclick = () => renderDetail(null);
   const editBtn = $("editId");
-  if (editBtn) editBtn.onclick = () => editIdentity(r);
+  if (editBtn) editBtn.onclick = () => openIdEditor(r);
 
   loadStrip(r.id).then((html) => {
     if (!state.selected || state.selected.id !== r.id) return; // a newer selection already won
@@ -493,26 +532,44 @@ async function checkin(residentId) {
 }
 
 // Recording the card a resident presented. Supervisors and admins only —
-// enforced by the row policy, so a guard who reaches this gets a 403 from the
-// database rather than a hidden button being the only thing stopping them.
-async function editIdentity(r) {
-  const type = prompt("ID type — TRC or IRP:", r.id_type || "TRC");
-  if (type === null) return;
-  const number = prompt(`${type.trim().toUpperCase()} number as printed on the card:`, r.id_number || "");
-  if (number === null) return;
+// enforced by the row policy, so a guard who somehow reaches this gets a 403
+// from the database rather than a hidden button being the only barrier.
+function openIdEditor(r) {
+  const line = document.querySelector("#detail .idline");
+  if (!line || $("idForm")) return;
+  line.insertAdjacentHTML("afterend", idForm(r));
+  const form = $("idForm");
+  let type = r.id_type || "TRC";
 
-  const saved = await guarded(
-    () => apiPatch(`/api/residents/${r.id}`, {
-      id_type: type.trim().toUpperCase(),
-      id_number: number.trim(),
-    }),
-    (err) => toast("Not saved: " + err.message, "err"),
-  );
-  if (!saved) return;
+  form.querySelectorAll(".seg button").forEach((b) => {
+    b.addEventListener("click", () => {
+      type = b.dataset.type;
+      form.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      $("idNumber").focus();
+    });
+  });
+  $("idCancel").onclick = () => form.remove();
+  $("idNumber").focus();
 
-  toast("ID recorded", "ok");
-  const fresh = await guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {});
-  if (fresh && state.selected && state.selected.id === r.id) renderDetail(fresh);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const number = $("idNumber").value.trim().toUpperCase();
+    if (!number) { toast("Enter the number printed on the card", "err"); return; }
+    if (!Offline.isOnline()) { toast("Recording an ID needs a connection. Try again when the pill is green.", "err"); return; }
+
+    $("idSave").disabled = true;
+    const saved = await guarded(
+      () => apiPatch(`/api/residents/${r.id}`, { id_type: type, id_number: number }),
+      (err) => { Offline.noteFailure(err); toast("Not saved: " + err.message, "err"); },
+    );
+    $("idSave").disabled = false;
+    if (!saved) return;
+
+    toast(`${type} ${number} recorded`, "ok");
+    const fresh = await guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {});
+    if (fresh && state.selected && state.selected.id === r.id) renderDetail(fresh);
+    runSearch($("q").value);
+  });
 }
 
 async function loadAttention() {
