@@ -379,6 +379,14 @@ function mountCardSwipe({ onRight, onLeft } = {}) {
     swipe.card.style.transform = `translateX(${shown}px)`;
     swipe.card.classList.toggle("swipe-arm",     dx >=  FIRE);
     swipe.card.classList.toggle("swipe-arm-out", dx <= -FIRE);
+    // The strip behind the card fades in with the drag and is fully shown
+    // once the swipe is armed, so the guard reads what letting go will do.
+    const wrap = swipe.card.parentElement;
+    if (wrap && wrap.classList.contains("swipe")) {
+      const reveal = Math.min(1, 0.35 + Math.abs(dx) / FIRE);
+      wrap.style.setProperty("--reveal-right", dx > 0 ? reveal : 0);
+      wrap.style.setProperty("--reveal-left",  dx < 0 ? reveal : 0);
+    }
   });
 
   function end(fire) {
@@ -387,6 +395,11 @@ function mountCardSwipe({ onRight, onLeft } = {}) {
     if (!s) return;
     s.card.style.transform = "";
     s.card.classList.remove("swipe-arm", "swipe-arm-out");
+    const wrap = s.card.parentElement;
+    if (wrap && wrap.classList.contains("swipe")) {
+      wrap.style.removeProperty("--reveal-right");
+      wrap.style.removeProperty("--reveal-left");
+    }
     if (Math.abs(s.dx) > TAP_SLOP) swallow = true;
     if (!fire) return;
     if (s.dx >=  FIRE && onRight) onRight(s.id);

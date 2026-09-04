@@ -147,7 +147,7 @@ function residentCard(r, { clickable = true } = {}) {
   const bits = [];
   bits.push(r.last_event_at ? `last movement ${ago(r.last_event_at)}` : "no movement on record");
 
-  return `
+  const card = `
     <${tag} class="${cls}" ${clickable ? `data-id="${esc(r.id)}" type="button"` : ""}>
       <span class="who">
         <span class="name">${esc(r.full_name)}</span>
@@ -157,6 +157,11 @@ function residentCard(r, { clickable = true } = {}) {
         ? `<span class="pill queued">Queued · ${r.presence === "in" ? "in" : "out"}</span>`
         : `<span class="pill ${r.presence === "in" ? "in" : "out"}">${r.presence === "in" ? "On site" : "Off site"}</span>`}
     </${tag}>`;
+  if (!clickable) return card;
+  // The strips behind the card say what each swipe does (see .swipe-bg).
+  return `<div class="swipe">
+    <span class="swipe-bg right" aria-hidden="true">Sign in ✓</span>
+    <span class="swipe-bg left" aria-hidden="true">Sign out</span>${card}</div>`;
 }
 
 function renderList(container, rows, emptyMsg) {
@@ -185,16 +190,21 @@ function withLetters(rows, wanted) {
   }).join("");
 }
 
-// Once per terminal, the first card slides sideways to hint that a swipe
-// does something. localStorage can be unavailable (private mode); then the
-// nudge simply never shows.
+// On the first three loads of this app in this browser, the first card
+// slides aside to reveal the strip behind it — a demonstration of the swipe.
+// Counted per app, because the gate and the register swipe for different
+// things. localStorage can be unavailable (private mode); then the nudge
+// simply never shows.
 function nudgeOnce(container) {
   try {
-    if (localStorage.getItem("swipeNudged")) return;
+    const key = "swipeNudge:gate";
+    const seen = Number(localStorage.getItem(key) || 0);
+    if (seen >= 3) return;
     const first = container.querySelector("button.card");
-    if (!first) return;
+    if (!first || first.classList.contains("nudge")) return;
     first.classList.add("nudge");
-    localStorage.setItem("swipeNudged", "1");
+    if (first.parentElement && first.parentElement.classList.contains("swipe")) first.parentElement.classList.add("nudge");
+    localStorage.setItem(key, String(seen + 1));
   } catch (_) { /* storage blocked */ }
 }
 

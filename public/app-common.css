@@ -174,10 +174,31 @@
     font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
     color: var(--muted); padding: 10px 4px 0; margin-bottom: -4px;
   }
-  /* A one-time nudge: the first card slides right and back, once per
-     browser, to show that cards can be swiped. */
-  @keyframes nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(28px); } 60% { transform: translateX(0); } 80% { transform: translateX(14px); } }
-  button.card.nudge { animation: nudge 1.4s ease-in-out 0.6s 1; }
+  /* What a swipe will do is written on a coloured strip BEHIND the card, so
+     dragging the card aside reveals it: "Check in" / "Sign in" on the right
+     swipe, "Sign out" on the left. --reveal-right / --reveal-left are set
+     from the drag distance by mountCardSwipe(). */
+  /* overflow-x: clip (not hidden) so the sliding card is cut at the edge
+     without the wrapper becoming a scroll container. */
+  .swipe { position: relative; overflow-x: clip; overflow-clip-margin: 4px; }
+  .swipe > button.card { position: relative; z-index: 1; }
+  .swipe-bg {
+    position: absolute; inset: 0; border-radius: var(--radius);
+    display: flex; align-items: center; padding: 0 18px;
+    font-weight: 700; font-size: 14px; letter-spacing: .02em;
+    pointer-events: none;
+  }
+  .swipe-bg.right { justify-content: flex-start; background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); opacity: var(--reveal-right, 0); }
+  .swipe-bg.left  { justify-content: flex-end;   background: color-mix(in srgb, var(--accent) 26%, var(--surface)); color: var(--accent); opacity: var(--reveal-left, 0); }
+
+  /* The nudge: on the first few loads of each app the first card slides
+     aside far enough to read the strip behind it, then settles — a
+     demonstration of the gesture rather than a wobble. */
+  @keyframes nudge   { 0%, 100% { transform: translateX(0); } 25%, 45% { transform: translateX(96px); } 65% { transform: translateX(0); } 80% { transform: translateX(28px); } }
+  @keyframes nudgebg { 0%, 100% { opacity: 0; } 20%, 50% { opacity: 1; } 65% { opacity: 0; } 80% { opacity: .6; } }
+  button.card.nudge { animation: nudge 2.2s ease-in-out 0.6s 1; }
+  .swipe.nudge .swipe-bg.right { animation: nudgebg 2.2s ease-in-out 0.6s 1; }
+  @media (prefers-reduced-motion: reduce) { .swipe.nudge .swipe-bg.right { animation: none; } }
   /* The action that matches the current state stays tappable (a repeat
      sign-in is a legitimate correction) but reads as the secondary one. */
   .actions .btn.current { opacity: .55; }

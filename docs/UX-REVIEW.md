@@ -159,7 +159,7 @@ visually distinct: a segmented control with the accent fill is fine for the
 app level; the view tabs underneath should be plain text tabs with an
 underline, not another pill row.
 
-### P1.6 Swipe is invisible — *done 4 September: a one-time nudge on the first card*
+### P1.6 Swipe is invisible — *done 4 September: the strip behind the card says what the swipe does, and the first three loads of each app slide the first card aside to show it*
 
 Swipe-to-record is the fastest path and nothing on a card suggests it exists
 except one line of grey hint text. First-run coaching — a one-time nudge that
