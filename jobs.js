@@ -48,6 +48,7 @@ const PLATFORM_JOBS = [
   ["purge-expired-sessions", "select auth.purge_expired_sessions()"],
   ["purge-expired-password-resets", "select auth.purge_expired_password_resets()"],
   ["purge-expired-login-events", "select auth.purge_expired_login_events()"],
+  ["purge-expired-mfa", "select auth.purge_expired_mfa()"],
   ["expire-lapsed-trials", "select public.expire_lapsed_trials()"],
 ];
 

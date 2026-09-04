@@ -18,6 +18,7 @@
    ========================================================================= */
 
 const assert = require('assert/strict');
+process.env.HUT_MAIL_SINK = '1';   // lib/mail.js keeps what it would have sent in global.__mailSink
 const app = require('../server');
 const auth = require('../lib/auth');
 const { closePool, withIdentity, withOwner, migrate } = require('../database');
@@ -43,12 +44,17 @@ async function test(name, fn) {
    A cookie-holding HTTP client, which is all the front end is
    ---------------------------------------------------------------------- */
 
+// A small cookie jar: the session cookie and, since migration 021, the
+// trusted-device cookie travel together, and a cleared cookie (Max-Age=0 or
+// an empty value) is forgotten rather than sent back.
 function client(base) {
-  let cookie = null;
+  const jar = new Map();
+  const header = () => [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ") || null;
   return {
-    get cookie() { return cookie; },
-    set cookie(v) { cookie = v; },
+    get cookie() { return header(); },
+    set cookie(v) { jar.clear(); if (v) for (const part of String(v).split(";")) { const [k, ...rest] = part.trim().split("="); if (k) jar.set(k, rest.join("=")); } },
     async fetch(path, { method = "GET", body, headers = {} } = {}) {
+      const cookie = header();
       const res = await fetch(base + path, {
         method,
         headers: {
@@ -59,8 +65,14 @@ function client(base) {
         body: body ? JSON.stringify(body) : undefined,
         redirect: "manual",
       });
-      const setCookie = res.headers.get("set-cookie");
-      if (setCookie) cookie = setCookie.split(";")[0];
+      const setCookies = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [res.headers.get("set-cookie")].filter(Boolean);
+      for (const sc of setCookies) {
+        const [pair, ...attrs] = sc.split(";").map((x) => x.trim());
+        const [name, ...rest] = pair.split("=");
+        const value = rest.join("=");
+        const cleared = !value || attrs.some((a) => /^max-age=0$/i.test(a));
+        if (cleared) jar.delete(name); else jar.set(name, value);
+      }
       const text = await res.text();
       let json = null;
       try { json = JSON.parse(text); } catch { /* not json — a static file */ }
@@ -1370,6 +1382,79 @@ async function main() {
     // put it back so later boots in this cluster are quiet
     const real = require("crypto").createHash("sha256").update(require("fs").readFileSync(require("path").join(__dirname, "..", "migrations", "001_platform.sql"), "utf8"), "utf8").digest("hex");
     await withOwner((c) => c.query(`update public.schema_migrations set checksum = $1 where name = '001_platform.sql'`, [real]));
+  });
+
+  console.log("\n== codes by email at login (migration 021) ==");
+
+  const mfaAdmin = client(base), mfaSup = client(base);
+  const lastCode = () => {
+    const m = (global.__mailSink || []).slice().reverse().find((x) => /login code/.test(x.subject));
+    return m && (m.text.match(/\b(\d{6})\b/) || [])[1];
+  };
+  await test("the switch is off by default and a guard's login is one step", async () => {
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["mfaadmin@hut.example", PASSWORD, "Mfa Admin", "admin"]));
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["mfasup@hut.example", PASSWORD, "Mfa Super", "supervisor"]));
+    const login = await mfaAdmin.fetch("/api/session", { method: "POST", body: { email: "mfaadmin@hut.example", password: PASSWORD } });
+    assert.equal(login.status, 200, login.text);
+    assert.equal(login.json.ok, true, "with the switch off, an admin login must be one step");
+    const on = await mfaAdmin.fetch("/api/settings", { method: "PATCH", body: { mfa_email: true } });
+    assert.equal(on.status, 200, on.text);
+    assert.equal(on.json.mfa_email, true);
+    const guard = client(base);
+    const g = await guard.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
+    assert.equal(g.json.ok, true, "a guard must not be asked for a code");
+  });
+
+  let challenge;
+  await test("a supervisor's password opens no session until the emailed code is typed", async () => {
+    const first = await mfaSup.fetch("/api/session", { method: "POST", body: { email: "mfasup@hut.example", password: PASSWORD } });
+    assert.equal(first.status, 200, first.text);
+    assert.equal(first.json.mfa_required, true);
+    assert.match(first.json.email_hint, /^m•••@hut\.example$/);
+    challenge = first.json.challenge;
+    assert.equal((await mfaSup.fetch("/api/session")).status, 401, "a session existed before the code");
+    const code = lastCode();
+    assert.match(code || "", /^\d{6}$/, "no code was emailed");
+    const wrong = await mfaSup.fetch("/api/session/mfa", { method: "POST", body: { challenge, code: code === "000000" ? "111111" : "000000" } });
+    assert.equal(wrong.status, 401);
+    const right = await mfaSup.fetch("/api/session/mfa", { method: "POST", body: { challenge, code, trust_device: true } });
+    assert.equal(right.status, 200, right.text);
+    assert.equal((await mfaSup.fetch("/api/session")).status, 200, "the code did not open a session");
+    const again = await mfaSup.fetch("/api/session/mfa", { method: "POST", body: { challenge, code } });
+    assert.equal(again.status, 401, "a used challenge must not open a second session");
+    const { rows } = await withOwner((c) => c.query(`select outcome from auth.login_events where email = 'mfasup@hut.example' order by at`));
+    assert.deepEqual(rows.map((r) => r.outcome).slice(-3), ["mfa_sent", "mfa_failed", "ok"]);
+  });
+
+  await test("a trusted device skips the code for thirty days; a new password forgets it", async () => {
+    await mfaSup.fetch("/api/session", { method: "DELETE" });
+    const back = await mfaSup.fetch("/api/session", { method: "POST", body: { email: "mfasup@hut.example", password: PASSWORD } });
+    assert.equal(back.json.ok, true, "the trusted device was asked for a code again");
+    await withOwner((c) => c.query(`select auth.set_password($1, $2)`, ["mfasup@hut.example", PASSWORD]));
+    // set_password ends sessions; the device survives it (the API forgets
+    // devices only on a reset link, which proves the mailbox). Simulate that.
+    await withOwner((c) => c.query(`delete from auth.mfa_devices d using auth.users u where u.id = d.user_id and u.email = 'mfasup@hut.example'`));
+    const asked = await mfaSup.fetch("/api/session", { method: "POST", body: { email: "mfasup@hut.example", password: PASSWORD } });
+    assert.equal(asked.json.mfa_required, true, "with no trusted device the code must be asked for again");
+  });
+
+  await test("five wrong codes end the challenge, and the switch cannot be turned on without mail", async () => {
+    const fresh = client(base);
+    const first = await fresh.fetch("/api/session", { method: "POST", body: { email: "mfasup@hut.example", password: PASSWORD } });
+    const code = lastCode();
+    for (let i = 0; i < 5; i++) {
+      const bad = await fresh.fetch("/api/session/mfa", { method: "POST", body: { challenge: first.json.challenge, code: code === "999999" ? "111111" : "999999" } });
+      assert.equal(bad.status, 401);
+    }
+    const late = await fresh.fetch("/api/session/mfa", { method: "POST", body: { challenge: first.json.challenge, code } });
+    assert.equal(late.status, 401, "the right code opened a challenge that had five wrong guesses");
+
+    delete process.env.HUT_MAIL_SINK;
+    const refused = await mfaAdmin.fetch("/api/settings", { method: "PATCH", body: { mfa_email: true } });
+    assert.equal(refused.status, 400, "the switch was accepted with no mail service");
+    process.env.HUT_MAIL_SINK = "1";
+    const off = await mfaAdmin.fetch("/api/settings", { method: "PATCH", body: { mfa_email: false } });
+    assert.equal(off.status, 200, off.text);
   });
 
   console.log("\n== staff management ==");

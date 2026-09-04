@@ -20,7 +20,8 @@ router.post('/', wrap(async (req, res) => {
     return res.status(429).json({ error: 'Too many attempts. Wait five minutes and try again.' });
   }
 
-  const result = await auth.signIn(email, password, { ip, userAgent: req.get('user-agent') });
+  const deviceToken = auth.parseCookies(req.headers.cookie)[auth.DEVICE_COOKIE_NAME];
+  const result = await auth.signIn(email, password, { ip, userAgent: req.get('user-agent'), deviceToken });
   if (!result) {
     // One message for every failure mode — wrong password, unknown email,
     // deactivated profile. Distinguishing them tells an attacker which
@@ -29,7 +30,30 @@ router.post('/', wrap(async (req, res) => {
     return res.status(401).json({ error: 'Email or password not recognised.' });
   }
 
+  if (result.mfaRequired) {
+    // No session yet. The browser shows the code screen; the challenge id
+    // alone opens nothing — the code does, and only five guesses are allowed.
+    return res.json({ mfa_required: true, challenge: result.challengeId, email_hint: result.emailHint, delivered: result.delivered });
+  }
   res.setHeader('Set-Cookie', auth.sessionCookie(result.token, result.expiresAt));
+  res.json({ ok: true });
+}));
+
+// POST /api/session/mfa — the second step: { challenge, code, trust_device }.
+router.post('/mfa', wrap(async (req, res) => {
+  const { challenge, code, trust_device } = req.body || {};
+  const ip = req.ip;
+  if (auth.lockedOut(`mfa:${challenge}`, ip)) {
+    return res.status(429).json({ error: 'Too many attempts. Wait five minutes and log in again.' });
+  }
+  const result = await auth.completeMfa({ challengeId: String(challenge || ''), code, trustDevice: trust_device === true, ip, userAgent: req.get('user-agent') });
+  if (!result) {
+    auth.noteFailure(`mfa:${challenge}`, ip);
+    return res.status(401).json({ error: 'That code was not recognised. Check the email, or log in again for a new one.' });
+  }
+  const cookies = [auth.sessionCookie(result.token, result.expiresAt)];
+  if (result.deviceToken) cookies.push(auth.deviceCookie(result.deviceToken));
+  res.setHeader('Set-Cookie', cookies);
   res.json({ ok: true });
 }));
 
@@ -49,7 +73,7 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
     const { rows } = await client.query(
       `select site_name, local_timezone, adult_age_years, due_soon_after_hour,
               event_retention_days, compliance_retention_days, late_entry_window_hours,
-              idle_lock_minutes, feature_buildings, feature_evacuation, feature_households
+              idle_lock_minutes, feature_buildings, feature_evacuation, feature_households, mfa_email
          from app_settings limit 1`,
     );
     return rows[0] || null;

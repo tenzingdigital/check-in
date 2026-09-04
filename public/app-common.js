@@ -346,6 +346,49 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
   if (first) first.focus();
 }
 
+// The second step for supervisors and admins at a site that requires it: a
+// six-digit code from the email. Injected into the login section on demand.
+function showMfa(challenge, onReady) {
+  const form = $("loginForm");
+  let panel = $("mfaPanel");
+  if (!panel) {
+    panel = document.createElement("form");
+    panel.id = "mfaPanel";
+    panel.className = "mt14";
+    panel.autocomplete = "off";
+    panel.innerHTML = `
+      <p class="hint lead" id="mfaHint"></p>
+      <input id="mfaCode" class="field" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" placeholder="6-digit code" required>
+      <label class="hint lead" id="mfaTrustWrap"><input id="mfaTrust" type="checkbox"> Trust this device for 30 days. Not on a shared terminal.</label>
+      <button id="mfaBtn" class="btn" type="submit">Continue</button>
+      <p class="hint centre"><a href="#" id="mfaBack">Start again</a></p>`;
+    form.insertAdjacentElement("afterend", panel);
+    panel.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("mfaBtn"); btn.disabled = true;
+      $("loginError").hidden = true;
+      try {
+        await apiPost("/api/session/mfa", { challenge: panel.dataset.challenge, code: $("mfaCode").value.trim(), trust_device: $("mfaTrust").checked });
+        $("mfaCode").value = "";
+        panel.hidden = true; form.hidden = false;
+        if (panel.dataset.onReady && onReady) onReady();
+      } catch (err) {
+        $("loginError").textContent = err.message;
+        $("loginError").hidden = false;
+      } finally { btn.disabled = false; }
+    });
+    $("mfaBack").addEventListener("click", (e) => { e.preventDefault(); panel.hidden = true; form.hidden = false; $("loginError").hidden = true; $("password").focus(); });
+  }
+  panel.dataset.challenge = challenge.challenge;
+  panel.dataset.onReady = "1";
+  $("mfaHint").textContent = challenge.delivered
+    ? `A 6-digit code has been emailed to ${challenge.email_hint}. Enter it to finish logging in. It expires in 10 minutes.`
+    : `Email is not configured on this service, so the code could not be sent. Ask your administrator.`;
+  form.hidden = true;
+  panel.hidden = false;
+  $("mfaCode").focus();
+}
+
 function mountLogin({ onReady } = {}) {
   mountResetUI();
 
@@ -357,11 +400,12 @@ function mountLogin({ onReady } = {}) {
     $("loginError").hidden = true;
 
     try {
-      await apiPost("/api/session", {
+      const out = await apiPost("/api/session", {
         email: $("email").value.trim(),
         password: $("password").value,
       });
       $("password").value = "";
+      if (out && out.mfa_required) return showMfa(out, onReady);
       if (onReady) onReady();
     } catch (err) {
       $("loginError").textContent = err.message;

@@ -28,6 +28,8 @@ const COLUMNS = {
   feature_buildings:             { kind: 'bool' },
   feature_evacuation:            { kind: 'bool' },
   feature_households:            { kind: 'bool' },
+  // Codes by email at login for supervisors and admins (021).
+  mfa_email:                     { kind: 'bool' },
 };
 
 router.get('/', wrap(async (req, res) => {
@@ -60,6 +62,14 @@ router.patch('/', wrap(async (req, res) => {
     sets.push(`${col} = $${args.length}`);
   }
   if (!sets.length) throw new HttpError(400, 'Nothing to change');
+  // A code nobody can receive is a lockout: the switch needs a working mail
+  // service before it may be turned on.
+  if (body.mfa_email === true || body.mfa_email === 'true') {
+    const mail = require('../lib/mail');
+    if (!mail.isConfigured() && process.env.HUT_MAIL_SINK !== '1') {
+      throw new HttpError(400, 'Configure email (RESEND_API_KEY and MAIL_FROM) before requiring codes by email');
+    }
+  }
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     if (Object.prototype.hasOwnProperty.call(body, 'local_timezone')) {

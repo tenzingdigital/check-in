@@ -286,6 +286,9 @@
         <div><label class="lbl" for="stWinDays">Rolling window (days)</label><input id="stWinDays" class="field" type="number" min="7" max="365" required></div>
         <p class="hint flush">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
 
+        <h2 class="mt6">Security</h2>
+        <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login. Needs email configured on the service.</span></label>
+
         <h2 class="mt6">Features for this site</h2>
         <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
         <label class="check"><input id="stFeatHouseholds" type="checkbox"> <span><b>Households.</b> Link family members so a child appears with a parent on the roll call and a room's occupants read as a family. Holds only which residents share a household.</span></label>
@@ -947,7 +950,7 @@ const SETTINGS_FIELDS = {
   idle_lock_minutes: "stIdle",
 };
 
-const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds" };
+const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", mfa_email: "stMfa" };
 
 async function loadSettings() {
   const s = await guarded(() => apiGet("/api/settings"), (err) => showError("Could not load settings: " + err.message));
@@ -975,6 +978,7 @@ $("settingsForm").addEventListener("submit", async (e) => {
   if (!out) return;
   // The switches take effect here at once; other tabs see them on their next load.
   for (const col of Object.keys(FEATURE_FIELDS)) state.settings[col] = !!out[col];
+  if (out.mfa_email) toast("Codes by email are now required for supervisors and administrators", "ok");
   applyFeatures();
   toast("Settings saved", "ok");
   loadSettings();

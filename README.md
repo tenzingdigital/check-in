@@ -372,6 +372,10 @@ out of the two working apps:
   occupancy and the evacuation list as they stand, each as a CSV download
   or a printable page. A reason is required and every export is on the
   audit record with the range.
+- **Codes by email at login** (admins, Settings → Security; on the working
+  branch until proven on a copy): supervisors and administrators type a
+  six-digit emailed code after their password, may trust a personal device
+  for 30 days, and guards keep password-only login. Needs email configured.
 - **Organisation page** (`/org.html`, platform administrators only, on the
   working branch until it has been proven on a copy of the live database):
   a level above any one site. Every centre on the service with its counts,

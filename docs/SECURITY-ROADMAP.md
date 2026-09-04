@@ -123,7 +123,16 @@ in `app_settings`. Changing an ID number on a register that is returned weekly
 to IPAS, with no record of who changed it from what, is the kind of gap a
 regulator notices. ISO 8.15 and GDPR Art. 5(2).
 
-### F6. No multi-factor authentication
+### F6. No multi-factor authentication — *codes by email built 4 September (migration 021), on the working branch*
+
+*Built:* supervisors and administrators at a site with *Codes by email at
+login* switched on (Admin → Settings → Security) type a six-digit code
+emailed to them after their password. Ten minutes, one use, five wrong
+guesses end it; a personal device may be trusted for thirty days; a new
+password forgets every trusted device. Guards keep password-only login.
+The switch refuses to turn on while email is unconfigured, because a code
+nobody can receive is a lockout. Authenticator-app codes remain the
+stronger option and can be added behind the same switch.
 
 Password only, for every role, including the administrator who can reset every
 other password. `docs/KNOWN-ISSUES.md` item 12 lists MFA as a deliberate
