@@ -1010,16 +1010,105 @@ async function main() {
 
     const res = await adminC.fetch("/api/staff", {
       method: "POST",
-      body: { email: SUPER_EMAIL, full_name: "Nadia Supervisor", role: "supervisor", password: SUPER_PASSWORD },
+      body: { email: SUPER_EMAIL, full_name: "Nadia Supervisor", role: "supervisor" },
     });
     assert.equal(res.status, 201, res.text);
     assert.ok(res.json.id);
+    // Mail is not configured in the suite, so the link comes back to the admin.
+    assert.equal(res.json.delivered, false);
+    assert.match(res.json.link, /\?reset=/, "no link returned when mail is unconfigured");
 
+    // No password exists yet: nothing logs in.
     const fresh = client(base);
+    const early = await fresh.fetch("/api/session", { method: "POST", body: { email: SUPER_EMAIL, password: "anything-at-all-12" } });
+    assert.equal(early.status, 401, "an invited account logged in before choosing a password");
+
+    // The link is the forgot-password link: use it to choose one.
+    const token = new URL(res.json.link).searchParams.get("reset");
+    const chosen = await fresh.fetch("/api/password-reset/confirm", { method: "POST", body: { token, password: SUPER_PASSWORD } });
+    assert.equal(chosen.status, 200, chosen.text);
     const newLogin = await fresh.fetch("/api/session", { method: "POST", body: { email: SUPER_EMAIL, password: SUPER_PASSWORD } });
-    assert.equal(newLogin.status, 200, "the created account could not log in");
+    assert.equal(newLogin.status, 200, "the invited account could not log in after choosing a password");
     const who = await fresh.fetch("/api/session");
     assert.equal(who.json.profile.role, "supervisor");
+  });
+
+  await test("an admin can send a login link; a guard cannot", async () => {
+    const list = await adminC.fetch("/api/staff");
+    const nadia = list.json.find((s) => s.email === SUPER_EMAIL);
+    // The invite link was spent above, so a fresh one is issued — and comes
+    // back to the admin, since mail is unconfigured here.
+    const first = await adminC.fetch(`/api/staff/${nadia.id}/link`, { method: "POST", body: {} });
+    assert.equal(first.status, 200, first.text);
+    assert.equal(first.json.delivered, false);
+    assert.match(first.json.link, /\?reset=/);
+    // A second one seconds later hits the per-account gap.
+    const tooSoon = await adminC.fetch(`/api/staff/${nadia.id}/link`, { method: "POST", body: {} });
+    assert.equal(tooSoon.status, 400);
+    assert.match(tooSoon.json.error, /less than a minute/);
+    const guardC = client(base);
+    await guardC.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
+    const refused = await guardC.fetch(`/api/staff/${nadia.id}/link`, { method: "POST", body: {} });
+    assert.equal(refused.status, 403);
+  });
+
+  await test("export downloads with a logged reason; erase needs the name typed back", async () => {
+    // A fresh resident for this, since newId is erased by the next test.
+    const made = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Export", last_name: "Candidate", date_of_birth: "1985-01-02" } });
+    const rid = made.json.id;
+    const admin = client(base);
+    await admin.fetch("/api/session", { method: "POST", body: { email: "head@hut.example", password: PASSWORD } });
+
+    const noReason = await admin.fetch(`/api/residents/${rid}/export`);
+    assert.equal(noReason.status, 400);
+    const guardTry = await api.fetch(`/api/residents/${rid}/export?reason=curious`);
+    assert.equal(guardTry.status, 403);
+    const supTry = await supC.fetch(`/api/residents/${rid}/export?reason=curious`);
+    assert.equal(supTry.status, 403, "a supervisor could export");
+
+    const ok = await admin.fetch(`/api/residents/${rid}/export?reason=SAR%20received`);
+    assert.equal(ok.status, 200, ok.text);
+    assert.match(ok.headers.get("content-disposition"), /attachment; filename="record-Candidate-Export-/);
+    assert.equal(ok.json.resident.first_name, "Export");
+    assert.ok(Array.isArray(ok.json.changes));
+    const noted = await withOwner((c) => c.query(`select note from public.admin_audit where action = 'export' and row_id = $1`, [rid]));
+    assert.deepEqual(noted.rows.map((r) => r.note), ["SAR received"]);
+
+    const wrongName = await admin.fetch(`/api/residents/${rid}`, { method: "DELETE", body: { reason: "test", confirm_name: "Someone Else" } });
+    assert.equal(wrongName.status, 400);
+    assert.match(wrongName.json.error, /does not match/);
+    const supErase = await supC.fetch(`/api/residents/${rid}`, { method: "DELETE", body: { reason: "test", confirm_name: "Export Candidate" } });
+    assert.equal(supErase.status, 403, "a supervisor could erase");
+    const erased = await admin.fetch(`/api/residents/${rid}`, { method: "DELETE", body: { reason: "test", confirm_name: "export  candidate" } });
+    assert.equal(erased.status, 200, erased.text);
+    assert.equal(erased.json.erased, true);
+    const gone = await supC.fetch(`/api/residents/${rid}/record`);
+    assert.equal(gone.status, 404);
+  });
+
+  await test("settings: staff read, admins write, Postgres judges the timezone", async () => {
+    const read = await api.fetch("/api/settings");
+    assert.equal(read.status, 200);
+    assert.equal(read.json.local_timezone, "Europe/Dublin");
+    const guardWrite = await api.fetch("/api/settings", { method: "PATCH", body: { site_name: "Hacked" } });
+    assert.equal(guardWrite.status, 403);
+    const supWrite = await supC.fetch("/api/settings", { method: "PATCH", body: { site_name: "Hacked" } });
+    assert.equal(supWrite.status, 403, "a supervisor changed settings");
+
+    const admin = client(base);
+    await admin.fetch("/api/session", { method: "POST", body: { email: "head@hut.example", password: PASSWORD } });
+    const badTz = await admin.fetch("/api/settings", { method: "PATCH", body: { local_timezone: "Mars/Olympus" } });
+    assert.equal(badTz.status, 400);
+    assert.match(badTz.json.error, /timezone/i);
+    const badHour = await admin.fetch("/api/settings", { method: "PATCH", body: { due_soon_after_hour: 25 } });
+    assert.equal(badHour.status, 400);
+    const okW = await admin.fetch("/api/settings", { method: "PATCH", body: { site_name: "Harbour House", warn_after_consecutive_nights: 4 } });
+    assert.equal(okW.status, 200, okW.text);
+    assert.equal(okW.json.site_name, "Harbour House");
+    assert.equal(okW.json.warn_after_consecutive_nights, 4);
+    const audited = await withOwner((c) => c.query(`select count(*)::int as n from public.admin_audit where table_name = 'app_settings'`));
+    assert.ok(audited.rows[0].n >= 1, "the settings change was not audited");
+    await admin.fetch("/api/settings", { method: "PATCH", body: { site_name: "Security Hut", warn_after_consecutive_nights: 3 } });
   });
 
   await test("export carries the change history; erasure removes it", async () => {
@@ -1046,7 +1135,7 @@ async function main() {
 
     const create = await guardC.fetch("/api/staff", {
       method: "POST",
-      body: { email: "sneaky@hut.example", full_name: "Sneaky", role: "admin", password: "a-long-enough-password" },
+      body: { email: "sneaky@hut.example", full_name: "Sneaky", role: "admin" },
     });
     assert.equal(create.status, 400);
     assert.match(create.json.error, /administrator/);
@@ -1060,20 +1149,20 @@ async function main() {
     assert.equal(disable.status, 404, "a guard's deactivation did not fail closed");
   });
 
-  await test("a duplicate email and a short password are refused cleanly", async () => {
+  await test("a duplicate email and a bad address are refused cleanly", async () => {
     const dup = await adminC.fetch("/api/staff", {
       method: "POST",
-      body: { email: SUPER_EMAIL, full_name: "Again", role: "guard", password: "a-long-enough-password" },
+      body: { email: SUPER_EMAIL, full_name: "Again", role: "guard" },
     });
     assert.equal(dup.status, 400);
     assert.match(dup.json.error, /already exists/);
 
-    const short = await adminC.fetch("/api/staff", {
+    const bad = await adminC.fetch("/api/staff", {
       method: "POST",
-      body: { email: "short@hut.example", full_name: "Short", role: "guard", password: "short" },
+      body: { email: "not-an-address", full_name: "Short", role: "guard" },
     });
-    assert.equal(short.status, 400);
-    assert.match(short.json.error, /12 characters/);
+    assert.equal(bad.status, 400);
+    assert.match(bad.json.error, /email/i);
   });
 
   await test("disabling an account ends its session; enabling restores access", async () => {

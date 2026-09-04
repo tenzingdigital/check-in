@@ -167,7 +167,7 @@ working screen. It now lives on an Admin page reached from the header
 (`public/admin.html`), with Residents for supervisors and Staff for admins,
 and the two working apps are left for working. Settings will join it there.
 
-### P1.8 Password reset through `prompt()`
+### P1.8 Password reset through `prompt()` — *done the same afternoon: a login link is sent instead*
 
 The last browser prompt in the product. Same failure as the ID editor had:
 suppressed dialogs make it silently do nothing, and it types a password into a

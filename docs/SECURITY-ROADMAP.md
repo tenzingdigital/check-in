@@ -73,7 +73,7 @@ the DPA and privacy notice correctly list two, Render and Resend. It describes
 the schema would stop trusting every other document. The legal documents are
 correct; this one needs rewriting from Annex I and Annex II of the DPA.
 
-### F2. The privacy notice promises logging the code does not do — `docs/legal/PRIVACY-2026-09-03.md`, `migrations/001_platform.sql`
+### F2. The privacy notice promises logging the code does not do *(fixed 4 September: `auth.login_events`)* — `docs/legal/PRIVACY-2026-09-03.md`, `migrations/001_platform.sql`
 
 The notice says login records include "from which IP address" and are "kept
 for 90 days". `auth.sessions` has no IP column, sessions are deleted at expiry
@@ -82,7 +82,7 @@ by the nightly purge, and failed attempts live only in an in-memory `Map` in
 let alone 90 days of it. Either the code gains a login log or the notice loses
 the claim; a notice that overstates what is held is its own finding.
 
-### F3. The DPA promises "one-click export" and "one-click erasure" — neither has a route
+### F3. The DPA promises "one-click export" and "one-click erasure" — neither has a route *(fixed 4 September)*
 
 `export_resident_record()` and `erase_resident()` exist in the database, but
 `routes/` has no endpoint for either and neither front end has a button. Today
@@ -92,7 +92,7 @@ section 7 claim is contractually made to customers. Build the two routes and an
 admin-only "Export" and "Erase" action on the resident detail panel, with a
 typed confirmation for erasure.
 
-### F4. Residents cannot be added, edited or departed from the app
+### F4. Residents cannot be added, edited or departed from the app *(fixed 4 September)*
 
 `routes/residents.js` has one write: `PATCH` for the ID number. There is no
 create, no edit of name or date of birth, no way to set `departed_on`. The
@@ -103,7 +103,7 @@ is the privileged access ISO 8.2 exists to eliminate. This is also why
 `departed_on` will be set late, which is exactly the false-breach scenario in
 `docs/KNOWN-ISSUES.md` item 1.
 
-### F5. Administrators' actions leave no trail
+### F5. Administrators' actions leave no trail *(fixed 4 September, migration 012)*
 
 Guards' every tap is attributed and immutable. The people with power are not
 logged at all: creating a staff account, changing a role, disabling an account,
@@ -140,7 +140,7 @@ moderate findings in `qs` and `body-parser` via Express 4.22, all with a fix
 available. Annex II of the DPA tells customers that changes "pass an automated
 test suite before deployment"; that is a manual step today.
 
-### F9. The README claims migration checksums that were removed
+### F9. The README claims migration checksums that were removed *(checksums restored 4 September)*
 
 `README.md` "Changing the schema" says each applied file is checksummed and
 drift warns at boot. `docs/KNOWN-ISSUES.md` item 16 says that was removed for
@@ -148,7 +148,7 @@ parity with the scheduler repo, and `database.js` confirms it. Beyond the doc
 drift, the control is worth having back in both repos: an edited migration is
 exactly the "half-known schema" Tao 17 refuses to serve.
 
-### F10. The nightly job has no existence monitor — `jobs.js`, `render.yaml`
+### F10. The nightly job has no existence monitor — `jobs.js`, `render.yaml` *(banner and job_runs added 4 September; Render notifications still yours)*
 
 Item 13 in the known issues is right that this is the biggest operational risk
 the move introduced. A red run shows in Render, but a *deleted* cron job shows
@@ -172,7 +172,7 @@ second centre is provisioned before the binding is finished. The roadmap needs
 a gate: no second tenant until a negative test proves a user in `t_a` cannot
 read, write, list or reset anything in `t_b`.
 
-### F12. ID numbers travel in every list response — `routes/residents.js`, migration `008`
+### F12. ID numbers travel in every list response *(fixed 4 September)* — `routes/residents.js`, migration `008`
 
 Annex II says identity numbers are "displayed only on an individual's detail
 view, never in lists". That is true of the *screen*. The `GET /api/residents`
@@ -278,12 +278,12 @@ mark departed with a last day on site, reactivate. Date of birth is entered
 once and shown only in the edit sheet. Covered by five HTTP assertions and
 the browser test. (fixes F4)
 
-**2.2 Export and erase.** `GET /api/residents/:id/export` returning the JSON,
+**2.2 Export and erase.** *Done, 4 September.* `GET /api/residents/:id/export` returning the JSON,
 and `DELETE /api/residents/:id` taking a reason and requiring the resident's
 full name typed back. Admin only, enforced by the functions themselves. Two
 buttons on the detail panel, visible to admins. (fixes F3)
 
-**2.3 Staff management that works on a phone.** *Partly done:* the Staff
+**2.3 Staff management that works on a phone.** *Done, 4 September (migration 013): invite by email, no typed passwords, "Send login link" replaces "Reset password".* Previously: the Staff
 tab has moved out of the gate app to `public/admin.html`, where the form is
 labelled and stacks on a phone and the card actions get a row of their own.
 Still to do is the part that removes typing passwords for other people:
@@ -306,7 +306,7 @@ Effort: a day for the invite flow including two HTTP assertions, a day for
 the layout. It removes the last reason for an administrator to type a password
 on behalf of someone else.
 
-**2.4 Settings screen.** Admin-only: site name, timezone, due-soon hour, the
+**2.4 Settings screen.** *Done, 4 September.* Admin-only: site name, timezone, due-soon hour, the
 three IPAS thresholds, retention. Each change logged by 1.1. Today these are
 "a centre can match its own rules" only via psql.
 

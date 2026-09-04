@@ -329,8 +329,9 @@ so the link points at your own domain rather than the host Render answers on.
 > your logs can take an account during the hour a link is live. Configure mail
 > before you have staff who are not you.
 
-Two other routes exist and always have: an admin can reset anyone's password
-from the **Admin** page, and `node staff.js passwd <email>` works from a shell.
+Two other routes exist and always have: an admin can send anyone a fresh
+login link from the **Admin** page, and `node staff.js passwd <email>` works
+from a shell.
 The reset link is the only one of the three that helps the *last remaining
 admin*, who has nobody above them to do it.
 
@@ -346,10 +347,18 @@ out of the two working apps:
   The date of birth is entered here and never shown anywhere else. An Active
   / Departed switch shows who has left. Set the departure date before the
   next nightly close-out, or the days after it are recorded as missed.
-- **Staff** (admins only): every account, with add (name, email, role,
-  initial password), change role, reset password, and disable or re-enable.
-  Disabling and password resets end the account's open sessions
-  immediately, the same as the CLI below.
+- **Staff** (admins only): every account, with add (name, email, role —
+  no password: the new colleague gets a one-day link by email to choose
+  their own), send a fresh login link, change role, and disable or
+  re-enable. Nobody but the account's owner ever sees their password.
+  With email unconfigured the link is shown to the admin to pass on.
+  Disabling ends the account's open sessions immediately.
+- **Settings** (admins only): site name, timezone, the adult age, the
+  due-soon hour, the House Rules thresholds, retention, and the offline
+  sync window. Every change is audited.
+- **Export and erase** (admins only), on a resident's edit sheet: the
+  Art. 15 / 20 export downloads as JSON with the reason recorded, and the
+  Art. 17 erasure needs the full name typed back.
 
 Visibility is presentation, not security: the database refuses each of those
 operations for anyone else regardless. Resident writes go through the

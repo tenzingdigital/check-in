@@ -245,4 +245,49 @@ router.patch('/:id', wrap(async (req, res) => {
   res.json({ ok: true, ...row });
 }));
 
+// GET /api/residents/:id/export?reason=… — everything held about one
+// resident, as a downloadable JSON file (Art. 15 / Art. 20). Admin only,
+// enforced by export_resident_record() itself; the reason is recorded in
+// admin_audit by note_disclosure() in the same transaction, so a disclosure
+// cannot happen without its record.
+router.get('/:id/export', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const reason = String(req.query.reason || '').trim();
+  if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
+
+  const out = await db.withIdentity(req.session.userId, async (client) => {
+    await client.query('select public.note_disclosure($1, $2)', [id, reason]);
+    const { rows } = await client.query('select public.export_resident_record($1) as record', [id]);
+    return rows[0].record;
+  }).catch((err) => { throw err.code === '42501' ? new HttpError(403, 'Only an administrator can export a record') : err; });
+
+  const name = `${out.resident.last_name || 'resident'}-${out.resident.first_name || ''}`.replace(/[^A-Za-z0-9-]+/g, '_');
+  res.setHeader('Content-Disposition', `attachment; filename="record-${name}-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.setHeader('Content-Type', 'application/json');
+  res.send(JSON.stringify(out, null, 2));
+}));
+
+// DELETE /api/residents/:id — erase a resident and their history (Art. 17).
+// Admin only, enforced by erase_resident(). The caller types the resident's
+// full name back, which the route checks against the record before the
+// function runs: an erasure is the one thing here nobody can undo.
+router.delete('/:id', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const body = req.body || {};
+  const reason = String(body.reason || '').trim();
+  const typed = String(body.confirm_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the erasure (up to 200 characters)');
+
+  const result = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query('select first_name, last_name from public.residents where id = $1', [id]);
+    if (!rows[0]) throw new HttpError(404, 'No such resident, or not authorised');
+    const full = `${rows[0].first_name} ${rows[0].last_name}`.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (typed !== full) throw new HttpError(400, "The name typed does not match the resident's name");
+    const { rows: out } = await client.query('select public.erase_resident($1, $2) as r', [id, reason]);
+    return out[0].r;
+  }).catch((err) => { throw err.code === '42501' ? new HttpError(403, 'Only an administrator can erase a resident') : err; });
+
+  res.json(result);
+}));
+
 module.exports = router;

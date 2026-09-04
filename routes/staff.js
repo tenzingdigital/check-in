@@ -10,8 +10,10 @@
 // did what, and auth.users grants `authenticated` exactly the credential-free
 // columns selected here.
 const express = require('express');
+const crypto = require('crypto');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
+const mail = require('../lib/mail');
 const { HttpError, translateDbError, uuidParam } = require('../lib/api');
 
 const router = express.Router();
@@ -31,22 +33,86 @@ router.get('/', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-// POST /api/staff — create an account. The admin chooses the initial
-// password and hands it over in person; there is no email flow to leak it
-// through, which is the same posture staff.js takes.
+// POST /api/staff — create an account and email its owner a link to choose
+// a password. No password is typed by the administrator, ever: the account
+// starts with a hash nobody can match (migration 013) and the link is the
+// same single-use, one-day token the forgot-password flow uses.
+//
+// With mail unconfigured the link is returned to the administrator instead,
+// so it can be handed over — that is no more than they could do before by
+// choosing the password themselves, and it is said so in the response.
 router.post('/', wrap(async (req, res) => {
-  const { email, full_name, role, password } = req.body || {};
+  const { email, full_name, role } = req.body || {};
+  const cleanEmail = String(email || '').trim();
 
   const id = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'select public.admin_create_staff($1, $2, $3, $4) as id',
-      [String(email || ''), String(password || ''), String(full_name || ''), String(role || 'guard')],
+      'select public.admin_invite_staff($1, $2, $3) as id',
+      [cleanEmail, String(full_name || ''), String(role || 'guard')],
     );
     return rows[0].id;
   }).catch((err) => { throw translateDbError(err); });
 
-  res.status(201).json({ id });
+  const sent = await sendLoginLink(req, cleanEmail, { invite: true });
+  res.status(201).json({ id, ...sent });
 }));
+
+// POST /api/staff/:id/link — send (again) the link to choose a password.
+// Replaces typing a new password for somebody: it logs the account out
+// everywhere only once its owner uses it, and nobody but them sees it.
+router.post('/:id/link', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'staff id');
+
+  // Admin-only, and the target must exist: read the email under the
+  // caller's identity, where the staff-visible columns of auth.users are
+  // granted, then confirm the role with the admin policy on profiles.
+  const target = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select u.email, p.full_name from auth.users u join public.profiles p on p.id = u.id where u.id = $1`, [id]);
+    return rows[0];
+  });
+  if (!target) throw new HttpError(404, 'No such account.');
+  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can send a login link.');
+
+  const sent = await sendLoginLink(req, target.email, { invite: false });
+  res.json(sent);
+}));
+
+// Mint the token, store its digest, and send it. Returns what the admin
+// needs to know: whether it was emailed, and — only when mail is not
+// configured — the link itself.
+async function sendLoginLink(req, email, { invite }) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(token).digest();
+  const TTL_MINUTES = 24 * 60;
+
+  const fullName = await db.withOwner(async (client) => {
+    const { rows } = await client.query(
+      'select auth.create_password_reset($1, $2, $3) as full_name',
+      [email, tokenHash, TTL_MINUTES],
+    );
+    return rows[0] && rows[0].full_name;
+  });
+  if (!fullName) throw new HttpError(400, 'A link was sent less than a minute ago, or the account is disabled.');
+
+  const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  const base = configured || `${req.get('x-forwarded-proto') || req.protocol || 'https'}://${req.get('host')}`;
+  const link = `${base}/?reset=${encodeURIComponent(token)}`;
+
+  const siteName = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query('select site_name from public.app_settings limit 1');
+    return rows[0] && rows[0].site_name;
+  });
+
+  const message = invite
+    ? mail.inviteEmail({ fullName, siteName, link, hours: 24, invitedBy: req.session.fullName })
+    : mail.resetEmail({ fullName, link, minutes: TTL_MINUTES });
+  const { delivered } = await mail.send({ to: email, subject: message.subject, text: message.text });
+
+  return delivered
+    ? { delivered: true, email }
+    : { delivered: false, email, link, note: 'Email is not configured on this service, so the link was not sent. Pass it on yourself; it works once and expires in 24 hours.' };
+}
 
 // POST /api/staff/:id/active — enable or disable an account. Disabling ends
 // access on the very next request (sessionFromToken joins profiles.active).

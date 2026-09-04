@@ -59,6 +59,24 @@ $$;
 
 --
 
+-- Name: admin_invite_staff(text, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.admin_invite_staff(p_email text, p_full_name text, p_role text DEFAULT 'guard'::text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if not __TENANT__.is_admin() then
+    raise exception 'Only an administrator can create staff accounts' using errcode = '42501';
+  end if;
+  return auth.create_user_invited(p_email, p_full_name, p_role);
+end;
+$$;
+
+
+--
+
 -- Name: admin_set_staff_password(uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
