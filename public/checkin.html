@@ -347,6 +347,13 @@ async function runSearch(q) {
   const box = $("searchResults");
   q = (q || "").trim();
 
+  // Until the first list arrives the box says so, rather than sitting blank
+  // in a way that reads as "nobody is on the register". Once cards are on
+  // screen they stay while a newer list is fetched, so typing never flickers.
+  if (!box.querySelector("button.card")) {
+    box.innerHTML = '<p class="empty">Loading the register…</p>';
+  }
+
   // Online: the server's typo-tolerant search with the compliance state
   // merged in (`compliance=1`) — and, when the box is empty, the whole
   // register, which is also the copy kept for an outage. Offline: that
@@ -364,7 +371,11 @@ async function runSearch(q) {
   if (!rows && !Offline.isOnline()) {
     const cached = await Offline.loadRegister("checkin");
     if (token !== searchToken) return;
-    if (!cached) { showError("Offline, and this terminal holds no copy of the register yet."); return; }
+    if (!cached) {
+      box.innerHTML = "";
+      showError("Offline, and this terminal holds no copy of the register yet.");
+      return;
+    }
     rows = Offline.filterRows(cached.rows, q);
   }
   if (!rows) return;
