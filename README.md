@@ -367,6 +367,11 @@ out of the two working apps:
   family members from a resident's edit sheet. A family stays together on
   the roll call, children marked, and reads as a family in a room. The
   link is an id shared by the members and nothing else.
+- **Reports** (supervisors and admins): the daily register, an attendance
+  summary, the movement log and the drill record for a date range, and
+  occupancy and the evacuation list as they stand, each as a CSV download
+  or a printable page. A reason is required and every export is on the
+  audit record with the range.
 - **Features for this site** (admins, under Settings): the three switches
   above. All are off until an administrator turns them on, so a centre
   that never does sees exactly what it saw before.

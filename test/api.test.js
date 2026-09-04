@@ -1088,6 +1088,47 @@ async function main() {
     assert.equal(bad.status, 400, "household_id can only be cleared through this route");
   });
 
+  console.log("\n== reports ==");
+
+  await test("a report needs a reason and a supervisor; a guard is refused", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const noReason = await supC.fetch(`/api/reports/register?from=${today}&to=${today}`);
+    assert.equal(noReason.status, 400);
+    const asGuard = await api.fetch(`/api/reports/register?from=${today}&to=${today}&reason=test`);
+    assert.equal(asGuard.status, 403);
+    const unknown = await supC.fetch(`/api/reports/secrets?reason=test`);
+    assert.equal(unknown.status, 404);
+    const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
+    assert.equal(tooLong.status, 400);
+    const list = await api.fetch("/api/reports");
+    assert.equal(list.json.length, 6);
+  });
+
+  await test("the register and attendance reports come as CSV and JSON, and the export is logged", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+    const csv = await supC.fetch(`/api/reports/register?from=${from}&to=${today}&reason=HIQA+inspection`);
+    assert.equal(csv.status, 200, csv.text);
+    assert.match(csv.headers.get("content-type"), /text\/csv/);
+    assert.match(csv.headers.get("content-disposition"), /register-.*\.csv/);
+    assert.match(csv.text, /^\ufeff?date,resident,age,required,presented,first_seen,check_ins,closed\r\n/);   // fetch strips the BOM
+    const att = await supC.fetch(`/api/reports/attendance?from=${from}&to=${today}&reason=HIQA+inspection&format=json`);
+    assert.equal(att.status, 200, att.text);
+    assert.equal(att.json.title, "Attendance summary");
+    const me = att.json.rows.find((r) => /Newcomer/.test(r.resident));
+    assert.ok(me, "the supervisor's resident is missing from attendance");
+    assert.ok("days_required" in me && "days_missed" in me);
+    const occ = await supC.fetch(`/api/reports/occupancy?reason=inspection&format=json`);
+    assert.equal(occ.status, 200);
+    const evac = await supC.fetch(`/api/reports/evacuation?reason=inspection&format=json`);
+    assert.ok(evac.json.rows.some((r) => /Newcomer/.test(r.resident)));
+    const drills = await supC.fetch(`/api/reports/roll-calls?from=${from}&to=${today}&reason=inspection&format=json`);
+    assert.ok(drills.json.rows.length >= 1, "the drill recorded earlier is missing");
+    const { rows } = await withOwner((c) => c.query(`select row_id, note from public.admin_audit where table_name = 'reports' order by at`));
+    assert.ok(rows.length >= 5, "report exports were not logged");
+    assert.match(rows[0].note, /HIQA inspection \[/);
+  });
+
   console.log("\n== audit trail ==");
 
   await test("a supervisor's edit is on the record, with before and after", async () => {

@@ -213,6 +213,7 @@ supervisor by the database function itself, not just by the screen.
 
 | Right | How | Notes |
 |---|---|---|
+| Reports for an inspection | Admin → Reports: register, attendance, movements, occupancy, evacuation, drills, as CSV or a printable page | Supervisors and admins. A reason is required; each export is written to `admin_audit` with the range (`note_report()`) |
 | Access (Art. 15) and portability (Art. 20) | Export button → `GET /api/residents/:id/export?reason=…` | JSON: the record, every event with the recording staff member's name, the register, the change history. The reason is recorded in `admin_audit` |
 | Rectification (Art. 16) | Edit sheet (supervisors and admins) | Names, date of birth, identity document, departure date. The change is audited. Events are corrected by new events, never edited |
 | Erasure (Art. 17) | Erase button, with the reason and the full name typed back | See "Erasure leaves proof" above. The decision is the centre's; Art. 17(3)(b) may apply |

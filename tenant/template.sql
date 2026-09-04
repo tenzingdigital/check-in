@@ -838,6 +838,30 @@ $$;
 
 --
 
+-- Name: note_report(text, text, date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.note_report(p_report text, p_reason text, p_from date DEFAULT NULL::date, p_to date DEFAULT NULL::date) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin may export a report' using errcode = '42501';
+  end if;
+  if length(coalesce(btrim(p_reason), '')) = 0 then
+    raise exception 'A reason for the export is required' using errcode = '22023';
+  end if;
+  insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, note)
+  values (auth.uid(), 'reports', p_report,
+          'export',
+          btrim(p_reason) || case when p_from is not null then ' [' || p_from::text || ' to ' || coalesce(p_to, p_from)::text || ']' else '' end);
+end;
+$$;
+
+
+--
+
 -- Name: prune_empty_households(); Type: FUNCTION; Schema: public; Owner: -
 --
 

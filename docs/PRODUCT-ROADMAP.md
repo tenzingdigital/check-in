@@ -78,7 +78,8 @@ decision for a customer to make in writing, with a DPIA behind it.
 
 ## Stage 4 — Reports
 
-**Status: next.**
+**Status: built 4 September 2026 (migration 019). No switch: reports are
+a supervisor's tool and add no data.**
 
 - Occupancy by building and room, attendance for a date range, the daily
   register for a date range, the evacuation list, as CSV and as a printable
@@ -88,7 +89,7 @@ decision for a customer to make in writing, with a DPIA behind it.
 
 ## Stage 5 — Many centres
 
-**Status: groundwork built (schema per tenant, migrations 009–011);
+**Status: next. Groundwork built (schema per tenant, migrations 009–011);
 isolation and the organisation view not started.**
 
 - Tenancy isolation: a request runs inside its own centre's schema, the

@@ -48,6 +48,24 @@
   .check input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
   .check b { color: var(--text); }
   .need { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn-text); }
+  /* Reports tab */
+  .report { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .report b { display: block; }
+  .report .hint { font-size: 12px; }
+  .report .row { flex: none; }
+  .rphead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 0; }
+  .rphead h2 { margin: 0; font-size: 18px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  #rpTable { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #rpTable th, #rpTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  #rpTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  @media print {
+    body.printing header, body.printing nav.tabs, body.printing #reportActions, body.printing .rphead .row,
+    body.printing #panelResidents, body.printing #panelBuildings, body.printing #panelStaff, body.printing #panelSettings,
+    body.printing #toast, body.printing #detail, body.printing #notForYou { display: none !important; }
+    body.printing .tablewrap { border: 0; overflow: visible; }
+    body.printing #rpTable th, body.printing #rpTable td { white-space: normal; border-color: #999; }
+  }
   .seg { display: flex; gap: 6px; }
   .seg button {
     flex: 1; padding: 11px 8px; border-radius: 10px;
@@ -120,6 +138,7 @@
     <nav class="tabs" role="tablist" id="adminTabs" hidden>
       <button role="tab" id="tabResidents" aria-selected="true"  aria-controls="panelResidents">Residents</button>
       <button role="tab" id="tabBuildings" aria-selected="false" aria-controls="panelBuildings">Buildings</button>
+      <button role="tab" id="tabReports"   aria-selected="false" aria-controls="panelReports">Reports</button>
       <button role="tab" id="tabStaff"     aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
       <button role="tab" id="tabSettings"  aria-selected="false" aria-controls="panelSettings" hidden>Settings</button>
     </nav>
@@ -192,6 +211,28 @@
         </div>
       </form>
       <div id="buildingList" class="list"></div>
+    </section>
+
+    <!-- ---- reports (supervisors and admins) ---- -->
+    <section id="panelReports" role="tabpanel" aria-labelledby="tabReports" hidden>
+      <div id="reportActions">
+        <p class="hint flush">For an inspection or the file. Every export is on the record with your name, the range and the reason.</p>
+        <form id="reportForm" class="formcard mt14" autocomplete="off">
+          <div class="grid2">
+            <div><label class="lbl" for="rpFrom">From</label><input id="rpFrom" class="field" type="date" required></div>
+            <div><label class="lbl" for="rpTo">To</label><input id="rpTo" class="field" type="date" required></div>
+          </div>
+          <div><label class="lbl" for="rpReason">Reason for the export</label><input id="rpReason" class="field" type="text" maxlength="200" required placeholder="e.g. HIQA inspection 12 September"></div>
+          <div id="reportList" class="list"></div>
+        </form>
+      </div>
+      <div id="reportView" hidden>
+        <div class="rphead">
+          <div><h2 id="rpTitle"></h2><p class="hint flush" id="rpSub"></p></div>
+          <div class="row"><button class="btn sm" type="button" id="rpPrint">Print</button><button class="btn ghost sm" type="button" id="rpClose">Close</button></div>
+        </div>
+        <div class="tablewrap"><table id="rpTable"></table></div>
+      </div>
     </section>
 
     <!-- ---- staff (admins only; the database refuses every operation below
@@ -839,6 +880,63 @@ $("buildingList").addEventListener("click", async (e) => {
 });
 
 /* ========================================================================
+   Reports (supervisors and admins) — Stage 4 of the product roadmap
+   ====================================================================== */
+async function loadReports() {
+  if (!$("rpFrom").value) {
+    const d = new Date(); const p = (v) => String(v).padStart(2, "0");
+    const iso = (x) => `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
+    $("rpTo").value = iso(d); d.setDate(d.getDate() - 6); $("rpFrom").value = iso(d);
+  }
+  $("reportView").hidden = true; $("reportActions").hidden = false;
+  const list = await guarded(() => apiGet("/api/reports"), (err) => showError("Could not load reports: " + err.message));
+  if (!list) return;
+  showError("");
+  $("reportList").innerHTML = list.map((r) => `
+    <div class="report">
+      <div><b>${esc(r.title)}</b><span class="hint">${r.ranged ? "For the dates above" : "As it stands now"}</span></div>
+      <div class="row">
+        <button class="btn ghost sm" type="button" data-view="${esc(r.name)}">View</button>
+        <button class="btn sm" type="button" data-csv="${esc(r.name)}">CSV</button>
+      </div>
+    </div>`).join("");
+}
+
+function reportQuery(name) {
+  const reason = $("rpReason").value.trim();
+  if (!reason) { toast("Give the reason for the export", "err"); $("rpReason").focus(); return null; }
+  return `/api/reports/${name}?from=${encodeURIComponent($("rpFrom").value)}&to=${encodeURIComponent($("rpTo").value)}&reason=${encodeURIComponent(reason)}`;
+}
+
+$("reportForm").addEventListener("submit", (e) => e.preventDefault());
+$("reportList").addEventListener("click", async (e) => {
+  const csvBtn = e.target.closest("[data-csv]"); const viewBtn = e.target.closest("[data-view]");
+  if (csvBtn) {
+    const q = reportQuery(csvBtn.dataset.csv); if (!q) return;
+    window.location.href = q; toast("Export recorded and downloading", "ok");
+  } else if (viewBtn) {
+    const q = reportQuery(viewBtn.dataset.view); if (!q) return;
+    const out = await guarded(() => apiGet(q + "&format=json"), (err) => toast("Could not load: " + err.message, "err"));
+    if (!out) return;
+    $("rpTitle").textContent = out.title;
+    $("rpSub").textContent = `${state.settings?.site_name || ""}${out.from ? ` · ${out.from} to ${out.to}` : ""} · ${out.rows.length} row${out.rows.length === 1 ? "" : "s"} · printed ${new Date().toLocaleString()}`;
+    const cols = out.rows.length ? Object.keys(out.rows[0]) : [];
+    const head = (c) => c.replace(/_/g, " ");
+    const cell = (v) => v === null || v === undefined ? "" : typeof v === "boolean" ? (v ? "yes" : "no") : esc(String(v).replace(/T\d\d:\d\d:\d\d.*$/, ""));
+    $("rpTable").innerHTML = out.rows.length
+      ? `<thead><tr>${cols.map((c) => `<th>${esc(head(c))}</th>`).join("")}</tr></thead><tbody>${out.rows.map((r) => `<tr>${cols.map((c) => `<td>${cell(r[c])}</td>`).join("")}</tr>`).join("")}</tbody>`
+      : `<tbody><tr><td class="hint">Nothing in this range.</td></tr></tbody>`;
+    $("reportActions").hidden = true; $("reportView").hidden = false;
+    window.scrollTo(0, 0);
+  }
+});
+$("rpClose").addEventListener("click", () => { $("reportView").hidden = true; $("reportActions").hidden = false; });
+$("rpPrint").addEventListener("click", () => {
+  document.body.classList.add("printing"); window.print();
+  setTimeout(() => document.body.classList.remove("printing"), 500);
+});
+
+/* ========================================================================
    Settings (admins only)
    ====================================================================== */
 const SETTINGS_FIELDS = {
@@ -887,7 +985,7 @@ $("stReload").addEventListener("click", loadSettings);
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["residents", "buildings", "staff", "settings"]) {
+  for (const t of ["residents", "buildings", "reports", "staff", "settings"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
@@ -895,6 +993,7 @@ function selectTab(name) {
   renderDetail(null);
   if (name === "residents") loadResidents();
   if (name === "buildings") loadBuildings();
+  if (name === "reports") loadReports();
   if (name === "staff") loadStaff();
   if (name === "settings") loadSettings();
 }
@@ -986,6 +1085,7 @@ $("residentList").addEventListener("click", (e) => {
 });
 $("tabResidents").addEventListener("click", () => selectTab("residents"));
 $("tabBuildings").addEventListener("click", () => selectTab("buildings"));
+$("tabReports").addEventListener("click", () => selectTab("reports"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));
 $("tabSettings").addEventListener("click", () => selectTab("settings"));
 

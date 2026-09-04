@@ -980,3 +980,16 @@ update public.residents set household_id = null where id = :'hh_b';
 reset role;
 select count(*) as n from public.households where id = :'hh' \gset gone_
 select pg_temp.expect('the empty household is pruned', (:'gone_n')::integer, 0);
+
+\echo ''
+\echo '=========== J. REPORTS ARE LOGGED (migration 019) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.try('guard logs a report export', 'select public.note_report(''register'', ''test'', current_date, current_date)');
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.try('supervisor logs a report without a reason', 'select public.note_report(''register'', ''  '', current_date, current_date)');
+select public.note_report('register', 'inspection', current_date - 7, current_date);
+reset role;
+select count(*) as n from public.admin_audit where table_name = 'reports' and row_id = 'register' and action = 'export' and note like 'inspection [%' \gset rp_
+select pg_temp.expect('the export is on the record with its range', (:'rp_n')::integer, 1);

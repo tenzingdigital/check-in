@@ -603,7 +603,10 @@ async function renderRoll() {
       <div class="rollrow ${roll && roll.marks[r.id] ? "done" : ""}" data-id="${esc(r.id)}">
         <span class="who">
           <span class="name">${esc(r.full_name)}</span>
-          <span class="meta">${r.room_label && state.settings?.feature_buildings ? esc(r.room_label) + " · " : ""}${households && r.household_label ? esc(r.household_label) + (r.is_adult === false ? " · child" : "") + " · " : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : "no assistance needed"}</span>
+          <span class="meta">${[
+            r.room_label && state.settings?.feature_buildings ? esc(r.room_label) : "",
+            households && r.household_label ? esc(r.household_label) + (r.is_adult === false ? " · child" : "") : "",
+          ].filter(Boolean).join(" · ")}${(r.room_label && state.settings?.feature_buildings) || (households && r.household_label) ? (r.evac_need && r.evac_need !== "none" ? " · " : "") : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : ""}</span>
         </span>
         ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}">${roll.marks[r.id] ? "✓" : "Here"}</button>` : ""}
       </div>`).join("")}
