@@ -273,53 +273,13 @@ CREATE VIEW __TENANT__.v_resident_compliance AS
             app_settings.updated_at,
             app_settings.absence_window_days,
             app_settings.absence_window_limit,
-            app_settings.warn_after_consecutive_nights
+            app_settings.warn_after_consecutive_nights,
+            app_settings.late_entry_window_hours,
+            app_settings.idle_lock_minutes
            FROM __TENANT__.app_settings
           WHERE app_settings.id
         ), today AS (
          SELECT __TENANT__.site_today() AS d
-        ), tally AS (
-         SELECT dc.resident_id,
-            (count(*) FILTER (WHERE (dc.required AND (NOT dc.presented))))::integer AS open_breaches,
-            max(dc.compliance_date) FILTER (WHERE dc.presented) AS last_seen_on
-           FROM __TENANT__.daily_compliance dc
-          WHERE (dc.closed_at IS NOT NULL)
-          GROUP BY dc.resident_id
-        ), window_tally AS (
-         SELECT dc.resident_id,
-            (count(*) FILTER (WHERE (dc.required AND (NOT dc.presented))))::integer AS absent_in_window
-           FROM ((__TENANT__.daily_compliance dc
-             CROSS JOIN today today_1)
-             CROSS JOIN s s_1)
-          WHERE ((dc.closed_at IS NOT NULL) AND (dc.compliance_date >= (today_1.d - s_1.absence_window_days)) AND (dc.compliance_date < today_1.d))
-          GROUP BY dc.resident_id
-        ), streak AS (
-         SELECT d.resident_id,
-            (count(*))::integer AS consecutive_missed
-           FROM ( SELECT dc.resident_id,
-                    dc.compliance_date,
-                    dc.required,
-                    dc.presented,
-                    dc.first_seen_at,
-                    dc.checkin_count,
-                    dc.closed_at,
-                    sum(
-                        CASE
-                            WHEN dc.presented THEN 1
-                            ELSE 0
-                        END) OVER (PARTITION BY dc.resident_id ORDER BY dc.compliance_date DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS breaks
-                   FROM __TENANT__.daily_compliance dc
-                  WHERE ((dc.closed_at IS NOT NULL) AND dc.required)) d
-          WHERE (d.breaks = 0)
-          GROUP BY d.resident_id
-        ), todayrow AS (
-         SELECT dc.resident_id,
-            dc.presented,
-            dc.checkin_count,
-            dc.required
-           FROM __TENANT__.daily_compliance dc,
-            today today_1
-          WHERE (dc.compliance_date = today_1.d)
         )
  SELECT r.id,
     ((btrim(r.first_name) || ' '::text) || btrim(r.last_name)) AS full_name,
@@ -327,34 +287,44 @@ CREATE VIEW __TENANT__.v_resident_compliance AS
     r.id_number,
     r.status,
     (date_part('year'::text, age((r.date_of_birth)::timestamp with time zone)))::integer AS age_years,
-    __TENANT__.compliance_required(r.date_of_birth, ((r.registered_at AT TIME ZONE s.local_timezone))::date, r.departed_on, today.d, s.adult_age_years) AS required_today,
+    req.required_today,
     COALESCE(tr.presented, false) AS seen_today,
     COALESCE(tr.checkin_count, 0) AS checkins_today,
-    COALESCE(t.open_breaches, 0) AS open_breaches,
-    COALESCE(st.consecutive_missed, 0) AS consecutive_missed,
-    COALESCE(wt.absent_in_window, 0) AS absent_in_window,
+    b.open_breaches,
+    st.consecutive_missed,
+    wt.absent_in_window,
     s.absence_window_days,
     s.absence_window_limit,
     s.warn_after_consecutive_nights,
-    t.last_seen_on,
+    ls.last_seen_on,
         CASE
             WHEN (r.status <> 'active'::text) THEN 'not_required'::text
-            WHEN (NOT __TENANT__.compliance_required(r.date_of_birth, ((r.registered_at AT TIME ZONE s.local_timezone))::date, r.departed_on, today.d, s.adult_age_years)) THEN 'exempt'::text
-            WHEN (COALESCE(t.open_breaches, 0) > 0) THEN 'breach_open'::text
+            WHEN (NOT req.required_today) THEN 'exempt'::text
+            WHEN (b.open_breaches > 0) THEN 'breach_open'::text
             WHEN COALESCE(tr.presented, false) THEN 'seen_today'::text
-            WHEN (NOT (EXISTS ( SELECT 1
-               FROM __TENANT__.daily_compliance x
-              WHERE ((x.resident_id = r.id) AND x.presented)))) THEN 'never'::text
+            WHEN ((ls.last_seen_on IS NULL) AND (NOT COALESCE(tr.presented, false))) THEN 'never'::text
             WHEN (date_part('hour'::text, (now() AT TIME ZONE s.local_timezone)) >= (s.due_soon_after_hour)::double precision) THEN 'due_today'::text
             ELSE 'expected'::text
         END AS state
-   FROM ((((((__TENANT__.residents r
+   FROM ((((((((__TENANT__.residents r
      CROSS JOIN s)
      CROSS JOIN today)
-     LEFT JOIN tally t ON ((t.resident_id = r.id)))
-     LEFT JOIN window_tally wt ON ((wt.resident_id = r.id)))
-     LEFT JOIN streak st ON ((st.resident_id = r.id)))
-     LEFT JOIN todayrow tr ON ((tr.resident_id = r.id)))
+     CROSS JOIN LATERAL ( SELECT __TENANT__.compliance_required(r.date_of_birth, ((r.registered_at AT TIME ZONE s.local_timezone))::date, r.departed_on, today.d, s.adult_age_years) AS required_today) req)
+     LEFT JOIN __TENANT__.daily_compliance tr ON (((tr.resident_id = r.id) AND (tr.compliance_date = today.d))))
+     CROSS JOIN LATERAL ( SELECT (count(*))::integer AS open_breaches
+           FROM __TENANT__.daily_compliance x
+          WHERE ((x.resident_id = r.id) AND x.required AND (NOT x.presented) AND (x.closed_at IS NOT NULL))) b)
+     CROSS JOIN LATERAL ( SELECT max(x.compliance_date) AS last_seen_on
+           FROM __TENANT__.daily_compliance x
+          WHERE ((x.resident_id = r.id) AND x.presented AND (x.closed_at IS NOT NULL))) ls)
+     CROSS JOIN LATERAL ( SELECT (count(*))::integer AS absent_in_window
+           FROM __TENANT__.daily_compliance x
+          WHERE ((x.resident_id = r.id) AND x.required AND (NOT x.presented) AND (x.closed_at IS NOT NULL) AND (x.compliance_date >= (today.d - s.absence_window_days)) AND (x.compliance_date < today.d))) wt)
+     CROSS JOIN LATERAL ( SELECT (count(*))::integer AS consecutive_missed
+           FROM __TENANT__.daily_compliance x
+          WHERE ((x.resident_id = r.id) AND x.required AND (NOT x.presented) AND (x.closed_at IS NOT NULL) AND (x.compliance_date > COALESCE(( SELECT max(y.compliance_date) AS max
+                   FROM __TENANT__.daily_compliance y
+                  WHERE ((y.resident_id = r.id) AND y.required AND y.presented AND (y.closed_at IS NOT NULL))), '1900-01-01'::date)))) st)
   WHERE __TENANT__.is_staff();
 
 
@@ -1543,6 +1513,14 @@ CREATE INDEX daily_compliance_date_idx ON __TENANT__.daily_compliance USING btre
 --
 
 CREATE INDEX daily_compliance_open_idx ON __TENANT__.daily_compliance USING btree (compliance_date) WHERE (closed_at IS NULL);
+
+
+--
+
+-- Name: daily_compliance_seen_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX daily_compliance_seen_idx ON __TENANT__.daily_compliance USING btree (resident_id, compliance_date DESC) WHERE presented;
 
 
 --

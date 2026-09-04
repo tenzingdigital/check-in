@@ -54,6 +54,13 @@ const pool = new Pool({
   max: Number(process.env.PGPOOL_MAX || 4),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
+  // No JIT. Postgres LLVM-compiles any query whose estimated cost crosses
+  // jit_above_cost, and it does so on EVERY execution — 340–600 ms of CPU on
+  // a laptop for the compliance view, which on a 0.1-CPU database plan is
+  // the seven seconds the register took to load (docs/KNOWN-ISSUES.md 19d).
+  // Nothing here runs long enough for compiled code to pay that back; every
+  // query is a few hundred rows.
+  options: '-c jit=off',
 });
 
 // An IDLE client's connection dying is not a program error — it is Postgres

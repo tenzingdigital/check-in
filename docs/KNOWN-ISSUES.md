@@ -232,21 +232,43 @@ and carried item 3 above (the unbounded `tally` and `streak` scans in
 `v_resident_compliance`) is the code-side change that would lower the
 per-query cost if the plan cannot change.
 
-### 19d. `v_resident_compliance` costs seconds on the live database
+### 19d. `v_resident_compliance` cost seconds on the live database — *found and fixed 4 September, evening*
 
 Measured on 4 September 2026, healthy database, 200 residents: the list
 query the register page makes on every load took **7.3 seconds** in the
-database log. The identical query on a laptop against the same shape of
-data takes 6 milliseconds. The difference is the `basic-256mb` plan — a
-fraction of a CPU and half the memory in shared buffers — and it is why the
-loading state on the register matters and why the plan is the fix.
+database log, against 6 milliseconds on a laptop. The plan (`basic-256mb`:
+a tenth of a CPU, 256 MB) was blamed first. It is a factor, but the cause was
+found by reading `EXPLAIN (ANALYZE, BUFFERS)` to the bottom:
 
-Two mitigations are in the page: the tiles are now counted from the list
-rows rather than by three further evaluations of the view, so a load is one
-heavy query, not four; and the list, once shown, stays on screen while the
-next one is fetched. The code-side change that would cut the query itself is
-carried item 3 above — bounding the `tally`, `streak` and `window_tally`
-scans to the retention window.
+```
+JIT:
+  Timing: Generation 2.7 ms, Inlining 65 ms, Optimization 304 ms, Emission 226 ms, Total 598 ms
+Execution Time: 691 ms
+```
+
+Postgres was **LLVM-compiling the query on every execution** — 600 ms of
+the 691 on a laptop, and ten times that on a tenth of a CPU. It did so
+because the planner costed a 200-row query at 85,000 rows: `app_settings`
+has one row and had never been analysed (autovacuum's threshold is about 50
+changed rows, which a one-row table never reaches), so the planner used its
+default guess of ~300 rows for it, and every view cross-joins it. That
+guess pushed the estimated cost over `jit_above_cost`.
+
+Three fixes, all in the repo: `database.js` passes `-c jit=off` on every
+connection (nothing here runs long enough for compiled code to pay for
+itself, and the HTTP suite asserts the setting); migration 015 analyses the
+small tables and `jobs.js` repeats it nightly; and the view itself was
+rewritten in 015 from four passes over the whole register (one of them a
+window function that needed a disk sort at Render's `work_mem`) into
+per-resident index probes, with an index for the "last day presented"
+lookup. On a year of history for 200 residents, at Render's `work_mem`, the
+query fell from 691 ms to 84 ms locally with JIT off alone, and to 59 ms with
+the rewritten view, with identical output row for row. The 1 GB plan is still the
+right call for headroom (19c), but it is no longer what makes the register
+slow.
+
+The lesson for the next one: when a query is slow only in production, read
+the whole plan, including the `JIT:` block at the end.
 
 ### 19e. What migration 012 changed about who is on the record
 

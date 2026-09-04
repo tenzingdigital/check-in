@@ -35,6 +35,12 @@ const JOBS = [
   ["purge-expired-login-events", "select auth.purge_expired_login_events()"],
   ["purge-expired-audit", "select public.purge_expired_audit()"],
   ["purge-expired-job-runs", "select public.purge_expired_job_runs()"],
+  // Autovacuum never analyses a table with fewer than ~50 changed rows, so
+  // app_settings (one row) and a small residents table can carry the
+  // planner's default guess of ~300 rows forever. Cross-joined into every
+  // view, that guess is how a 200-row query was costed at 85,000 rows and
+  // JIT-compiled on every run (docs/KNOWN-ISSUES.md 19d). Cheap, nightly.
+  ["analyze-small-tables", "analyze public.app_settings, public.residents, public.profiles, public.daily_compliance"],
 ];
 
 // Every run leaves a row, so v_system_health can say when close-out last

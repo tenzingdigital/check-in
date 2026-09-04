@@ -457,6 +457,11 @@ async function main() {
     assert.equal(res.json.settings.idle_lock_minutes, 20, "the idle-lock minutes reach the terminal");
   });
 
+  await test("the app's connections run with JIT off", async () => {
+    const { rows } = await withOwner((c) => c.query("select current_setting('jit') as jit"));
+    assert.equal(rows[0].jit, "off", "database.js must pass -c jit=off; see KNOWN-ISSUES 19d");
+  });
+
   await test("a malformed id is a 400, not a 500", async () => {
     const res = await api.fetch("/api/residents/not-a-uuid/compliance");
     assert.equal(res.status, 400);
