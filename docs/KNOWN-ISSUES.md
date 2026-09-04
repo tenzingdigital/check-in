@@ -200,6 +200,32 @@ Three consequences are accepted rather than solved:
 - **The terminal clock dates the event.** Bounded by
   `app_settings.late_entry_window_hours` and flagged, never silently trusted.
 
+### 19c. The smallest database plan crashes under a burst of queries
+
+On 4 September 2026 at 13:25 and again at 13:30 UTC the production Postgres
+(`basic-256mb`) ran out of memory and crash-restarted, each time while a
+phone was loading the register. Its memory sat at about 100 MB, then rose to
+248 MB against a 256 MB limit as up to eight backends evaluated
+`v_resident_compliance` at once; queries that take milliseconds on a laptop
+took 12–18 seconds just to bind, then the instance died. Recovery is about
+two minutes. This service then crashed as well (an unhandled `'error'` on a
+checked-out client) and restarted, so guards saw 502s for the whole window.
+
+Three things changed in code: the pool now defaults to four connections
+rather than eight (`PGPOOL_MAX` to override), a checked-out client keeps an
+error listener so a dropped connection fails one request instead of the
+process, and the front end queues a tap that meets a 5xx the same way it
+queues one with no link. Both suites cover the second; the third is in the
+browser test.
+
+Two things are for the dashboard, not the code: turn on failure
+notifications for `hut-db` and `hut-check-in`, and budget for the next
+database plan (1 GB) before a second centre is provisioned. A 256 MB
+Postgres with half of it in shared buffers is a demo tier for this workload,
+and carried item 3 above (the unbounded `tally` and `streak` scans in
+`v_resident_compliance`) is the code-side change that would lower the
+per-query cost if the plan cannot change.
+
 ### 19b. New logins had no tenant until migration 011
 
 009 backfilled every existing login into the default tenant and nothing

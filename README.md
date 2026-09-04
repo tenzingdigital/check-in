@@ -441,6 +441,17 @@ edit the JavaScript inside `index.html` or `checkin.html` while the server is
 running, the browser refuses to run the page until you restart it. A blank page
 with a CSP error in the console is almost always this.
 
+### 7b. Watch the database's memory
+
+`hut-db` is on Render's smallest plan, 256 MB with half of it in shared
+buffers. A burst of concurrent queries — one phone loading the register while
+another terminal refreshes — has pushed it over that limit and crash-restarted
+it (see `docs/KNOWN-ISSUES.md`, item 19c). The service keeps the burst small
+(`PGPOOL_MAX`, default 4) and stays up while the database recovers, and the
+front ends queue anything recorded meanwhile, but the outage itself is a plan
+limit. Turn on Render's failure notifications for both resources, and move to
+the 1 GB plan before a second centre goes live.
+
 ### 8. Restrict who can reach it
 
 The login page is on the public internet. Render supports IP allowlists on

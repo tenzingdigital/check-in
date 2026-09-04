@@ -79,11 +79,26 @@ const Offline = (() => {
   window.addEventListener("offline", () => setOnline(false));
   setInterval(() => { if (!online) probe(); }, PROBE_MS);
 
-  // app-common.js's api() throws ApiError with status 0 on a transport
-  // failure. Pages call this from their error handlers so one failed request
-  // flips the indicator without waiting for the next probe.
+  // "The server cannot take this right now" — whether the link is down
+  // (status 0: fetch never got an answer) or the service answered that it is
+  // broken (500 from the app when its database is unreachable, 502/503/504
+  // from Render while the service restarts). Pages queue an event on any of
+  // these rather than telling the guard it was not recorded: every one is a
+  // state the health probe will see clear, and replaying through the late
+  // functions is safe even if the original request did land, because the
+  // same 60-second dedupe applies. A 4xx is a real refusal and is never
+  // queued.
+  function isOutage(err) {
+    const s = err && err.status;
+    return s === 0 || s === 500 || s === 502 || s === 503 || s === 504;
+  }
+
+  // Pages call this from their error handlers so one failed request flips
+  // the indicator without waiting for the next probe. The probe hits
+  // /healthz, which touches the database, so it stays red until the whole
+  // system can take a write again.
   function noteFailure(err) {
-    if (err && err.status === 0) setOnline(false);
+    if (isOutage(err)) setOnline(false);
   }
 
   /* ------------------------------------------------------------------
@@ -288,7 +303,7 @@ const Offline = (() => {
           });
         } catch (err) {
           noteFailure(err);
-          summary.offline = err && err.status === 0;
+          summary.offline = isOutage(err);
           // A 401 or 5xx: leave everything queued; the caller decides what to
           // tell the guard. Nothing has been lost.
           summary.error = err;
@@ -493,7 +508,7 @@ const Offline = (() => {
   }
 
   return {
-    isOnline, onChange, probe, noteFailure,
+    isOnline, onChange, probe, noteFailure, isOutage,
     saveRegister, loadRegister, filterRows, overlay,
     enqueue, list, unreadable, remove, flush,
     rememberSession, rememberedSession, forgetSession,

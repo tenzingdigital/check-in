@@ -182,6 +182,18 @@ in one request. Strip both from the list endpoint and return them only from
 `/:id/compliance`. Searching by number can stay, since `search_key` already
 holds it.
 
+### F12b. The database plan is a demo tier — `render.yaml`, `basic-256mb`
+
+Found the hard way on 4 September 2026: two out-of-memory crash-restarts of
+the production Postgres in six minutes, each triggered by nothing more than
+a phone loading the register, each a two-minute outage. `docs/KNOWN-ISSUES.md`
+item 19c has the timeline. The code-side mitigations are in (a smaller pool,
+a service that survives a dropped connection, a front end that queues on a
+5xx); the plan itself is the fix. Budget the 1 GB plan, turn on failure
+notifications for the database and the service, and treat the memory graph
+as part of the monthly check in Phase 1.5. (ISO 8.6 capacity management,
+8.16)
+
 ### F13. Backups are claimed, not tested
 
 Annex II promises "managed daily backups with point-in-time recovery". Confirm

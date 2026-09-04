@@ -209,6 +209,25 @@ async function main() {
     assert.equal(seen.staff, false);
   });
 
+  // A checked-out client has no error listener of its own. If the database
+  // drops the connection while a request holds it, pg emits 'error' on that
+  // client, and an unhandled 'error' event kills the process — which is how
+  // a database restart became a two-minute outage of this service. The
+  // probe: hold a client, have another connection terminate its backend, and
+  // require that the process is still here and the request merely fails.
+  await test("a dropped database connection fails that request, not the process", async () => {
+    await withOwner(async (held) => {
+      const { rows: [{ pid }] } = await held.query("select pg_backend_pid() as pid");
+      await withOwner((other) => other.query("select pg_terminate_backend($1)", [pid]));
+      // Let the socket close and the 'error' event fire before we ask again.
+      await new Promise((r) => setTimeout(r, 300));
+      await assert.rejects(held.query("select 1"), /terminat|closed|Connection/i);
+    });
+    // The pool discarded the dead client; the next borrower gets a live one.
+    const { rows } = await withOwner((c) => c.query("select 1 as ok"));
+    assert.equal(rows[0].ok, 1);
+  });
+
   // SET LOCAL is scoped to the transaction. If a bare SET ever crept in, a
   // pooled connection would carry one guard's identity into the next request
   // — the single worst bug this design could have.

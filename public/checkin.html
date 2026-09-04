@@ -363,7 +363,7 @@ async function runSearch(q) {
   if (Offline.isOnline()) {
     rows = await guarded(
       () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000&compliance=1`),
-      (err) => { Offline.noteFailure(err); if (err.status !== 0) showError("Search failed: " + err.message); },
+      (err) => { Offline.noteFailure(err); if (!Offline.isOutage(err)) showError("Search failed: " + err.message); },
     );
     if (token !== searchToken) return;     // a newer keystroke already won
     if (rows && !q) Offline.saveRegister("checkin", rows);
@@ -400,7 +400,7 @@ async function checkin(residentId) {
     row = await guarded(
       () => apiPost("/api/checkins", { resident_id: residentId }),
       (err) => {
-        if (err.status === 0) { Offline.noteFailure(err); queue = true; return; }
+        if (Offline.isOutage(err)) { Offline.noteFailure(err); queue = true; return; }
         toast("Not recorded: " + err.message, "err");
       },
     );

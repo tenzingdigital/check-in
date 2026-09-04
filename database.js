@@ -40,10 +40,17 @@ if (!process.env.DATABASE_URL) {
 // private network and for the throwaway cluster the test suites build.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // A hut has a handful of terminals. The cap exists to stay well inside
-  // Render's connection limit on the smallest Postgres plans, not because
-  // concurrency is expected.
-  max: Number(process.env.PGPOOL_MAX || 8),
+  // A hut has a handful of terminals, and every query here runs in
+  // milliseconds, so requests waiting briefly for a connection cost nothing
+  // a guard can see. The cap is about the DATABASE, not the app: on Render's
+  // smallest Postgres plan (256 MB, half of it shared buffers) eight backends
+  // evaluating the compliance view at once was enough to push the instance
+  // over its memory limit and crash it — twice in six minutes on 4 Sep 2026,
+  // each crash a two-minute outage while it recovered and this service
+  // restarted. Four keeps the burst a phone can generate on load (the
+  // register, the summary, the attention list, the detail panel) inside what
+  // that plan can hold. Raise PGPOOL_MAX only on a bigger database plan.
+  max: Number(process.env.PGPOOL_MAX || 4),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
 });
@@ -61,9 +68,29 @@ pool.on('error', (err) => {
 // The workhorse. Every non-transactional read goes through this.
 function query(text, params) { return pool.query(text, params); }
 
+// A client checked out of the pool has NO error listener of its own: the
+// pool attaches one only while the client is idle. If the server drops the
+// connection while fn holds it — the database restarting, a failover, a
+// network blip — the client emits 'error', and an 'error' event with no
+// listener is a hard throw that takes the whole process down. That is what
+// turned each of the database's two crashes on 4 Sep 2026 into a crash of
+// this service as well, and two minutes of 502s while it restarted and
+// re-checked the migrations. With a listener, the dropped connection surfaces
+// as a rejection from the next query on that client, the caller gets a 500
+// for that one request, and the pool discards the client.
+function holdErrors(client) {
+  const onError = (err) => {
+    console.error(`[${new Date().toISOString()}] [db] connection lost while in use (the request will fail, the service will not):`,
+      err && err.message ? err.message : err);
+  };
+  client.on('error', onError);
+  return () => client.removeListener('error', onError);
+}
+
 // Run fn inside a transaction, rolling back if it throws.
 async function withTransaction(fn) {
   const client = await pool.connect();
+  const release = holdErrors(client);
   try {
     await client.query('BEGIN');
     const out = await fn(client);
@@ -76,6 +103,7 @@ async function withTransaction(fn) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
   } finally {
+    release();
     client.release();
   }
 }
@@ -123,9 +151,11 @@ function withIdentity(userId, fn) {
 // this — resident data goes through withIdentity() so that RLS applies.
 async function withOwner(fn) {
   const client = await pool.connect();
+  const release = holdErrors(client);
   try {
     return await fn(client);
   } finally {
+    release();
     client.release();
   }
 }
