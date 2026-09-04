@@ -14,6 +14,12 @@ more than one centre. Nobody has yet asked for a specific HIQA report
 format. Each of these is a question in the note to Donal; the plan changes
 if the answers do.
 
+**Per-site switches.** Each of these features is off by default and turned
+on per centre under Admin → Settings → *Features for this site*
+(`app_settings.feature_buildings`, `feature_evacuation`; migration 017). A
+centre that never turns one on sees exactly what it saw before, and a trial
+centre can turn them on one at a time.
+
 **The line the product keeps.** It holds almost nothing about a person, and
 that is why a centre can adopt it in a week. Every stage below adds the
 least data that does the job, from a fixed list where a list will do, with
@@ -41,7 +47,8 @@ decision for a customer to make in writing, with a DPIA behind it.
 
 ## Stage 2 — Evacuation
 
-**Status: next.**
+**Status: built 4 September 2026 (migration 017), behind the
+`feature_evacuation` switch.**
 
 - An evacuation-assistance flag on the resident, from a fixed list:
   none, needs help to move, needs help to hear an alarm, needs help to see
@@ -60,7 +67,7 @@ decision for a customer to make in writing, with a DPIA behind it.
 
 ## Stage 3 — Households
 
-**Status: not started.**
+**Status: next.**
 
 - Link residents into a household, so a child appears with a parent, a
   family evacuates as one row, and a room's occupants read as a family.

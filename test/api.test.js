@@ -986,6 +986,72 @@ async function main() {
     assert.equal(after.json.find((b) => b.id === castleId).rooms.length, 2);
   });
 
+  console.log("\n== evacuation and roll call ==");
+
+  await test("the feature switches default off and reach the terminal", async () => {
+    const res = await api.fetch("/api/session");
+    assert.equal(res.json.settings.feature_buildings, false);
+    assert.equal(res.json.settings.feature_evacuation, false);
+    const asGuard = await api.fetch("/api/settings", { method: "PATCH", body: { feature_evacuation: true } });
+    assert.equal(asGuard.status, 403);
+  });
+
+  await test("an evacuation need is one code from the list, set by a supervisor", async () => {
+    const bad = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { evac_need: "diabetic" } });
+    assert.equal(bad.status, 400, "free text must be refused");
+    const ok = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { evac_need: "mobility" } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.equal(ok.json.evac_need, "mobility");
+    const asGuard = await api.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { evac_need: "none" } });
+    assert.equal(asGuard.status, 403);
+    const list = await api.fetch("/api/evacuation");
+    assert.equal(list.status, 200);
+    const row = list.json.find((r) => r.id === newId);
+    assert.equal(row.evac_need, "mobility");
+    assert.ok(["in", "out"].includes(row.presence));
+  });
+
+  let rcId;
+  await test("a guard runs a roll call: start, mark twice, end", async () => {
+    rcId = "dddddddd-1111-4000-8000-000000000001";
+    const start = await api.fetch("/api/roll-calls", { method: "POST", body: { id: rcId, kind: "drill" } });
+    assert.equal(start.status, 201, start.text);
+    assert.equal(start.json.kind, "drill");
+    const active = await api.fetch("/api/roll-calls/active");
+    assert.equal(active.json.id, rcId);
+    const m1 = await api.fetch(`/api/roll-calls/${rcId}/marks`, { method: "POST", body: { resident_id: newId, ref: ref() } });
+    assert.equal(m1.status, 200, m1.text);
+    const m2 = await api.fetch(`/api/roll-calls/${rcId}/marks`, { method: "POST", body: { resident_id: newId, ref: ref() } });
+    assert.equal(m2.status, 200, "a second mark is a no-op, not an error");
+    const again = await api.fetch("/api/roll-calls/active");
+    assert.equal(again.json.marks.length, 1);
+    const end = await api.fetch(`/api/roll-calls/${rcId}/end`, { method: "POST", body: {} });
+    assert.equal(end.status, 200);
+    assert.ok(end.json.ended_at);
+    assert.equal((await api.fetch("/api/roll-calls/active")).json, null);
+    const record = await api.fetch("/api/roll-calls");
+    assert.equal(record.json.find((r) => r.id === rcId).accounted, 1);
+  });
+
+  await test("a roll call recorded offline syncs in order: start, marks, end", async () => {
+    const id = "dddddddd-1111-4000-8000-000000000002";
+    const t0 = agoIso(600);
+    const res = await api.fetch("/api/sync", { method: "POST", body: { events: [
+      { ref: ref(), kind: "rollcall_start", roll_call_id: id, rc_kind: "incident", occurred_at: t0 },
+      { ref: ref(), kind: "rollcall_mark", roll_call_id: id, resident_id: newId, occurred_at: agoIso(500) },
+      { ref: ref(), kind: "rollcall_end", roll_call_id: id, occurred_at: agoIso(400) },
+      { ref: ref(), kind: "rollcall_mark", roll_call_id: "dddddddd-1111-4000-8000-0000000000ff", resident_id: newId, occurred_at: agoIso(300) },
+    ] } });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.json.results.map((r) => r.status), ["ok", "ok", "ok", "rejected"]);
+    assert.match(res.json.results[3].error, /No such roll call/);
+    const record = await api.fetch("/api/roll-calls");
+    const rc = record.json.find((r) => r.id === id);
+    assert.equal(rc.kind, "incident");
+    assert.equal(rc.accounted, 1);
+    assert.ok(rc.ended_at);
+  });
+
   console.log("\n== audit trail ==");
 
   await test("a supervisor's edit is on the record, with before and after", async () => {

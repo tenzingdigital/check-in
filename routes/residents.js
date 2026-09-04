@@ -63,6 +63,14 @@ function roomParam(value) {
   if (value === undefined || value === null || value === '') return null;
   return uuidParam(value, 'room_id');
 }
+// evac_need: one code from the fixed list in migration 017, or nothing.
+const EVAC_NEEDS = ['none', 'mobility', 'hearing', 'sight', 'carer', 'other'];
+function evacParam(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const v = String(value).trim().toLowerCase();
+  if (!EVAC_NEEDS.includes(v)) throw new HttpError(400, `evac_need must be one of ${EVAC_NEEDS.join(', ')}`);
+  return v;
+}
 function roomError(err) {
   if (err && err.code === '23503' && /room/.test(err.constraint || '')) return new HttpError(400, 'No such room');
   return err;
@@ -102,15 +110,18 @@ router.get('/', wrap(async (req, res) => {
     if (found.length === 0) return found;
     // The room, for every card (Stage 1 of docs/PRODUCT-ROADMAP.md).
     const { rows: rooms } = await client.query(
-      `select id, room_id, building_id, building, floor, room, room_label
+      `select id, room_id, building_id, building, floor, room, room_label, evac_need
          from public.v_resident_room where id = any($1::uuid[])`,
       [found.map(r => r.id)],
     );
     const roomById = new Map(rooms.map(r => [r.id, r]));
     for (const r of found) {
-      const rm = roomById.get(r.id);
-      Object.assign(r, rm ? { room_id: rm.room_id, building_id: rm.building_id, building: rm.building, floor: rm.floor, room: rm.room, room_label: rm.room_label }
-                         : { room_id: null, building_id: null, building: null, floor: null, room: null, room_label: null });
+      const rm = roomById.get(r.id) || {};
+      Object.assign(r, {
+        room_id: rm.room_id || null, building_id: rm.building_id || null, building: rm.building || null,
+        floor: rm.floor || null, room: rm.room || null, room_label: rm.room_label || null,
+        evac_need: rm.evac_need || 'none',
+      });
     }
     if (!wantCompliance) return found;
 
@@ -180,13 +191,14 @@ router.post('/', wrap(async (req, res) => {
   const dob = dobParam(body.date_of_birth);
   const id = idParams(body) || { idType: null, idNumber: null };
   const roomId = roomParam(body.room_id);
+  const evac = evacParam(body.evac_need) || 'none';
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `insert into public.residents (first_name, last_name, date_of_birth, id_type, id_number, room_id, registered_by)
-       values ($1, $2, $3, $4, $5, $6, auth.uid())
+      `insert into public.residents (first_name, last_name, date_of_birth, id_type, id_number, room_id, evac_need, registered_by)
+       values ($1, $2, $3, $4, $5, $6, $7, auth.uid())
        returning id`,
-      [first, last, dob, id.idType, id.idNumber, roomId],
+      [first, last, dob, id.idType, id.idNumber, roomId, evac],
     );
     return rows[0];
   }).catch((err) => { throw roomError(supervisorOnly(err)); });
@@ -202,7 +214,7 @@ router.get('/:id/record', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select id, first_name, last_name, date_of_birth, id_type, id_number,
-              status, departed_on, registered_at, room_id
+              status, departed_on, registered_at, room_id, evac_need
          from public.residents where id = $1`,
       [uuidParam(req.params.id, 'resident id')],
     );
@@ -240,6 +252,7 @@ router.patch('/:id', wrap(async (req, res) => {
   if (id) { set('id_type', id.idType); set('id_number', id.idNumber); }
 
   if (Object.prototype.hasOwnProperty.call(body, 'room_id')) set('room_id', roomParam(body.room_id));
+  if (Object.prototype.hasOwnProperty.call(body, 'evac_need')) set('evac_need', evacParam(body.evac_need) || 'none');
 
   if (Object.prototype.hasOwnProperty.call(body, 'status')) {
     const status = String(body.status || '');
@@ -262,7 +275,7 @@ router.patch('/:id', wrap(async (req, res) => {
     const { rows } = await client.query(
       `update public.residents set ${sets.join(', ')}
         where id = $1
-        returning id, first_name, last_name, id_type, id_number, status, departed_on, room_id`,
+        returning id, first_name, last_name, id_type, id_number, status, departed_on, room_id, evac_need`,
       args,
     );
     return rows[0];

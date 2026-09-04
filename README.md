@@ -353,9 +353,19 @@ out of the two working apps:
   re-enable. Nobody but the account's owner ever sees their password.
   With email unconfigured the link is shown to the admin to pass on.
   Disabling ends the account's open sessions immediately.
-- **Buildings** (supervisors and admins): the centre's buildings and the
-  rooms in each, with a capacity; a resident's room is set on their record
-  and shows on every card; occupancy per room with who is on site now.
+- **Buildings** (supervisors and admins; only when the site's *Buildings
+  and rooms* feature is on): the centre's buildings and the rooms in each,
+  with a capacity; a resident's room is set on their record and shows on
+  every card; occupancy per room with who is on site now.
+- **Evacuation** (only when the site's *Evacuation* feature is on): an
+  evacuation-need code on each record, from a fixed list with no free text,
+  and a **Roll call** tab on the gate: everyone on site by building, needs
+  first, a tap per person at the assembly point, working without a
+  connection and syncing the ticks later. A printable evacuation list.
+  Drills and incidents are kept as a record for as long as the register.
+- **Features for this site** (admins, under Settings): the two switches
+  above. Both are off until an administrator turns them on, so a centre
+  that never does sees exactly what it saw before.
 - **Settings** (admins only): site name, timezone, the adult age, the
   due-soon hour, the House Rules thresholds, retention, the offline
   sync window, and the idle lock (minutes without a touch before a

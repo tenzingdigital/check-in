@@ -877,3 +877,56 @@ select occupants from public.v_room_occupancy where room_id = :'room_id' \gset d
 select pg_temp.expect('departed resident is not counted', (:'d_occupants')::integer, 0);
 update public.residents set status = 'active', departed_on = null where id = :'late_id';
 reset role;
+
+\echo ''
+\echo '=========== H. EVACUATION AND ROLL CALL (migration 017) ==========='
+reset role;
+select feature_buildings, feature_evacuation from public.app_settings \gset f_
+select pg_temp.expect('features default off: buildings',  (:'f_feature_buildings')::boolean, false);
+select pg_temp.expect('features default off: evacuation', (:'f_feature_evacuation')::boolean, false);
+
+\echo '--- the need is one code from a fixed list'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+update public.residents set evac_need = 'mobility' where id = :'late_id';
+select pg_temp.try('supervisor sets a need outside the list', 'update public.residents set evac_need = ''diabetic'' where id = ' || quote_literal(:'late_id'));
+reset role;
+
+\echo '--- a guard reads the evacuation list, needs first, but not the need on the status view'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select evac_need from public.v_evacuation_list where id = :'late_id' \gset e_
+select pg_temp.expect('guard sees the need on the evacuation list', :'e_evac_need'::text, 'mobility'::text);
+select count(*) as n from information_schema.columns where table_name = 'v_resident_status' and column_name = 'evac_need' \gset c_
+select pg_temp.expect('the status view (gate cards, search) carries no need', (:'c_n')::integer, 0);
+select pg_temp.try('guard changes a need', 'update public.residents set evac_need = ''none'' where id = ' || quote_literal(:'late_id'));
+
+\echo '--- any staff member runs a roll call; marks are idempotent; anon cannot'
+select (public.start_roll_call('dddddddd-0000-4000-8000-000000000001', 'drill')).kind as k \gset rc_
+select pg_temp.expect('guard starts a drill', :'rc_k'::text, 'drill'::text);
+select (public.start_roll_call('dddddddd-0000-4000-8000-000000000001', 'incident')).kind as k \gset rc2_
+select pg_temp.expect('a replayed start keeps the original', :'rc2_k'::text, 'drill'::text);
+select public.mark_roll_call('dddddddd-0000-4000-8000-000000000001', :'late_id', 'eeeeeeee-0000-4000-8000-000000000001');
+select public.mark_roll_call('dddddddd-0000-4000-8000-000000000001', :'late_id', 'eeeeeeee-0000-4000-8000-000000000002');
+select count(*) as n from public.roll_call_marks where roll_call_id = 'dddddddd-0000-4000-8000-000000000001' \gset m_
+select pg_temp.expect('two marks for one resident are one row', (:'m_n')::integer, 1);
+select pg_temp.try('guard deletes a mark', 'delete from public.roll_call_marks where roll_call_id = ''dddddddd-0000-4000-8000-000000000001''');
+select pg_temp.try('guard inserts a mark directly', 'insert into public.roll_call_marks (roll_call_id, resident_id) values (''dddddddd-0000-4000-8000-000000000001'', ' || quote_literal(:'late_id') || ')');
+select pg_temp.try('guard starts a roll call of an unknown kind', 'select public.start_roll_call(''dddddddd-0000-4000-8000-000000000009'', ''party'')');
+select (public.end_roll_call('dddddddd-0000-4000-8000-000000000001')).ended_at is not null as ended \gset end_
+select pg_temp.expect('the roll call is ended', (:'end_ended')::boolean, true);
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon starts a roll call', 'select public.start_roll_call(''dddddddd-0000-4000-8000-000000000002'', ''drill'')');
+select pg_temp.try('anon reads the evacuation list', 'select * from public.v_evacuation_list');
+select pg_temp.try('anon reads roll calls', 'select * from public.roll_calls');
+reset role;
+
+\echo '--- erasing the resident removes their marks'
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.erase_resident(:'late_id', 'test');
+reset role;
+select count(*) as n from public.roll_call_marks where resident_id = :'late_id' \gset gone_
+select pg_temp.expect('marks go with the resident', (:'gone_n')::integer, 0);

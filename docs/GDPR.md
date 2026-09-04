@@ -42,12 +42,25 @@ residents is the centre's document, and the DPA says so.
 | Check-in events | `checkin_events` | The daily presentation the policy requires | All staff |
 | The daily register | `daily_compliance` | One row per resident per day: required, presented, first seen, count. The durable record | All staff |
 | Late-entry provenance | `late_entry`, `recorded_at`, `client_ref` on both event tables | Separates "recorded live" from "recorded on the terminal during an outage and sent later" | All staff; appears in the export |
+| Room | `residents.room_id` (migration 016, only where the centre turns buildings on) | Where the person sleeps; occupancy and the evacuation list | All staff |
+| Evacuation need | `residents.evac_need` (migration 017, only where the centre turns evacuation on) | One code from a fixed list: needs help to move, to hear the alarm, to find the way, has an infant or is a carer, other. The PEEP minimum | The roll call, the evacuation list and room occupancy only. Never on the gate or register cards, never searchable |
+| Roll calls | `roll_calls`, `roll_call_marks` | Who was accounted for in a drill or an incident, by whom, when | All staff; kept as long as the register |
 
-Nothing else. There is no free-text note, no room number (both removed in
-migration 006 because they were where special-category data would arrive by
-accident), no photograph, no biometric, no health data, and no field in which
-to put any. Identity is established by the guard looking at the person and,
-where the centre requires it, at their card.
+Nothing else. There is no free-text note, no photograph, no biometric, and
+no field in which to put any. Identity is established by the guard looking
+at the person and, where the centre requires it, at their card.
+
+**The evacuation need is the one special-category field.** It exists because
+a centre has a fire-safety duty to know who needs help to get out, and a
+personal emergency evacuation plan is what a fire officer expects. It is
+held as a single code from a fixed list (no free text, so nothing beyond the
+code can arrive), shown only where evacuation happens, and only where the
+centre has turned the feature on. A centre that turns it on is holding
+Article 9 data and must say so in its DPIA; Art. 9(2)(c), protecting vital
+interests, and the centre's statutory fire-safety duty are the bases to
+record. The old free-text room reference and note were removed in
+migration 006 precisely because free text is where such detail arrives by
+accident; the room is now a reference to a room a supervisor created.
 
 **Special-category data by inference.** A TRC or IRP number is not itself
 Article 9 data, but a number issued only to international protection

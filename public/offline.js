@@ -299,6 +299,7 @@ const Offline = (() => {
             events: page.map((e) => ({
               ref: e.ref, kind: e.kind, resident_id: e.resident_id,
               direction: e.direction, occurred_at: e.occurred_at,
+              roll_call_id: e.roll_call_id, rc_kind: e.rc_kind,
             })),
           });
         } catch (err) {
@@ -467,7 +468,7 @@ const Offline = (() => {
     }
     lines.push(...rejected.map((e) => `
       <div class="row">
-        <span>${esc(e.resident_name || e.resident_id)} · ${e.kind === "gate" ? "sign " + esc(String(e.direction || "").toUpperCase()) : "check-in"}
+        <span>${esc(e.resident_name || e.resident_id || "Roll call")} · ${e.kind === "gate" ? "sign " + esc(String(e.direction || "").toUpperCase()) : e.kind === "checkin" ? "check-in" : e.kind === "rollcall_mark" ? "accounted for" : e.kind === "rollcall_start" ? "roll call started" : e.kind === "rollcall_end" ? "roll call ended" : esc(e.kind)}
           · ${esc(when(e.occurred_at))}<br><span class="hint">Not recorded: ${esc(e.error || "rejected")}</span></span>
         <button class="btn ghost" type="button" data-dismiss="${esc(e.ref)}">Dismiss</button>
       </div>`));

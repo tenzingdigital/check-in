@@ -7,6 +7,35 @@
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
 <title>Hut Check-In — Gate</title>
+<style>
+  /* ---- roll call (migration 017) ---- */
+  .rollstart { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .rollstart .btn { min-height: 64px; font-size: 17px; }
+  .rollhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .rollhead b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .rollhead .hint { font-size: 14px; }
+  .rollprog { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+  .rollprog > div { height: 100%; background: var(--ok); transition: width .2s; }
+  .rollgroup { margin-top: 14px; }
+  .rollgroup h3 { margin: 0 0 6px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; justify-content: space-between; }
+  .rollrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); margin-bottom: 6px; }
+  .rollrow.done { opacity: .55; }
+  .rollrow .who { flex: 1; min-width: 0; }
+  .rollrow .name { display: block; font-weight: 600; }
+  .rollrow .meta { display: block; font-size: 12px; color: var(--muted); }
+  .need { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn-text); }
+  .rollrow .btn { padding: 10px 14px; font-size: 14px; flex: none; }
+  .rollrow.done .btn { background: var(--ok); color: var(--on-ok); border-color: transparent; }
+  .rollend { margin-top: 16px; display: flex; gap: 10px; }
+  @media print {
+    body.printing header, body.printing .stats, body.printing nav.tabs, body.printing #panelSearch,
+    body.printing #panelLog, body.printing #rollActions, body.printing .rollend, body.printing #toast,
+    body.printing #detail, body.printing .rollrow .btn { display: none !important; }
+    body.printing .rollrow { break-inside: avoid; border-color: #999; }
+    body.printing .rollrow.done { opacity: 1; }
+    body.printing .rollrow.done .who::after { content: " ✓ accounted"; }
+  }
+</style>
 
 <!--
   Hut Check-In — the gate app. No build step, no framework, no CDN.
@@ -69,6 +98,7 @@
     <nav class="tabs" role="tablist">
       <button role="tab" id="tabSearch" aria-selected="true"  aria-controls="panelSearch">Search</button>
       <button role="tab" id="tabLog"    aria-selected="false" aria-controls="panelLog">Log</button>
+      <button role="tab" id="tabRoll"   aria-selected="false" aria-controls="panelRoll" hidden>Roll call</button>
     </nav>
 
     <!-- ---- search ---- -->
@@ -91,6 +121,19 @@
       <div id="logList" class="list"></div>
     </section>
 
+    <!-- ---- roll call (feature_evacuation) ---- -->
+    <section id="panelRoll" role="tabpanel" aria-labelledby="tabRoll" hidden>
+      <div id="rollActions">
+        <p class="hint flush">Everyone recorded on site, by building, those who need help first. Works without a connection; ticks are sent when it returns.</p>
+        <div class="rollstart" id="rollStart">
+          <button class="btn primary-in" type="button" id="rollDrill">Start a drill</button>
+          <button class="btn primary-out" type="button" id="rollIncident">Roll call now</button>
+        </div>
+        <p class="hint tight"><button class="linkish" type="button" id="rollPrint">Print the evacuation list</button></p>
+      </div>
+      <div id="rollBody"></div>
+    </section>
+
   </main>
 </div>
 
@@ -111,6 +154,7 @@ const state = {
   settings: null,   // app_settings row
   selected: null,   // resident status row shown in the detail panel
   tab:      "search",
+  roll:     null,   // the open roll call on this terminal: { id, kind, started_at, marks: {residentId: iso} }
   busy:     false,
   filter:   "all",  // which tile is pressed: all | in | out | today
   loaded:   false,  // the first list has arrived (or come from the offline copy)
@@ -145,7 +189,7 @@ function residentCard(r, { clickable = true } = {}) {
   const tag = clickable ? "button" : "div";
   const cls = ["card"].join(" ");
   const bits = [];
-  if (r.room_label) bits.push(esc(r.room_label));
+  if (r.room_label && state.settings?.feature_buildings) bits.push(esc(r.room_label));
   bits.push(r.last_event_at ? `last movement ${ago(r.last_event_at)}` : "no movement on record");
 
   const card = `
@@ -458,13 +502,169 @@ async function loadLog(dateStr) {
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["search", "log"]) {
+  for (const t of ["search", "log", "roll"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
   }
   if (name === "search") $("q").focus();
   if (name === "log")    loadLog($("logDate").value || todayISODate());
+  if (name === "roll")   renderRoll();
+}
+
+/* ========================================================================
+   Roll call — Stage 2 of docs/PRODUCT-ROADMAP.md
+   ======================================================================
+   The list is whoever the register says is on site, grouped by building,
+   needs first. It comes from the same rows the search uses, so it is there
+   offline too. The roll call itself is kept in localStorage on this terminal
+   (a reload in the middle of a fire alarm must not lose it) and on the
+   server when the connection allows; marks that cannot be sent are queued
+   like any other event and replayed by offline.js.
+   ====================================================================== */
+const NEED_LABEL = { none: "", mobility: "Needs help to move", hearing: "Needs help to hear the alarm", sight: "Needs help to find the way", carer: "Infant or carer", other: "Needs help" };
+const ROLL_KEY = "rollcall";
+
+function loadRoll() {
+  try { const v = JSON.parse(localStorage.getItem(ROLL_KEY) || "null"); if (v && v.id) state.roll = v; } catch (_) { /* none */ }
+}
+function saveRoll() {
+  try { if (state.roll) localStorage.setItem(ROLL_KEY, JSON.stringify(state.roll)); else localStorage.removeItem(ROLL_KEY); } catch (_) { /* storage blocked */ }
+}
+
+// Adopt an open roll call another terminal started, or forget one that was
+// ended elsewhere. Quiet on failure: the local copy stands.
+async function syncRoll() {
+  if (!Offline.isOnline() || !state.settings?.feature_evacuation) return;
+  const server = await guarded(() => apiGet("/api/roll-calls/active"), () => {});
+  if (server === undefined) return;
+  if (server && server.id) {
+    const marks = state.roll && state.roll.id === server.id ? state.roll.marks : {};
+    for (const m of server.marks || []) marks[m.resident_id] = m.marked_at;
+    state.roll = { id: server.id, kind: server.kind, started_at: server.started_at, marks };
+  } else if (state.roll && server === null) {
+    // Our roll call is not open on the server: either never sent (queued) or
+    // ended elsewhere. Keep it only while something of ours is still queued.
+    const queued = (await Offline.list()).some((e) => e.roll_call_id === state.roll.id && !e.rejected);
+    if (!queued) state.roll = null;
+  }
+  saveRoll();
+  if (state.tab === "roll") renderRoll();
+}
+
+async function rollRows() {
+  let rows = state.allRows;
+  if (!rows || !rows.length) {
+    const cached = await Offline.loadRegister("gate");
+    rows = cached ? cached.rows : [];
+  }
+  return (await Offline.overlay("gate", rows)).filter((r) => r.presence === "in");
+}
+
+async function renderRoll() {
+  const body = $("rollBody");
+  const roll = state.roll;
+  $("rollStart").hidden = !!roll;
+  const rows = await rollRows();
+  const groups = new Map();
+  for (const r of rows) {
+    const key = state.settings?.feature_buildings && r.building ? r.building : "No room recorded";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  const needRank = (r) => (r.evac_need && r.evac_need !== "none" ? 0 : 1);
+  const accounted = roll ? rows.filter((r) => roll.marks[r.id]).length : 0;
+  const head = roll ? `
+    <div class="rollhead">
+      <div><b>${accounted} of ${rows.length}</b> <span class="hint">accounted for · ${roll.kind === "drill" ? "drill" : "roll call"} started ${esc(timeOfDay(roll.started_at))}</span></div>
+      <span class="hint">${rows.length - accounted} still to find</span>
+    </div>
+    <div class="rollprog"><div id="rollProg"></div></div>` : `
+    <div class="rollhead"><div><b>${rows.length}</b> <span class="hint">on site right now</span></div></div>`;
+  const list = [...groups.entries()].map(([name, people]) => {
+    people.sort((a, b) => needRank(a) - needRank(b) || String(a.full_name).localeCompare(String(b.full_name)));
+    const done = roll ? people.filter((r) => roll.marks[r.id]).length : 0;
+    return `
+    <div class="rollgroup">
+      <h3><span>${esc(name)}</span><span>${roll ? `${done}/${people.length}` : people.length}</span></h3>
+      ${people.map((r) => `
+      <div class="rollrow ${roll && roll.marks[r.id] ? "done" : ""}" data-id="${esc(r.id)}">
+        <span class="who">
+          <span class="name">${esc(r.full_name)}</span>
+          <span class="meta">${r.room_label && state.settings?.feature_buildings ? esc(r.room_label) + " · " : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : "no assistance needed"}</span>
+        </span>
+        ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}">${roll.marks[r.id] ? "✓" : "Here"}</button>` : ""}
+      </div>`).join("")}
+    </div>`;
+  }).join("");
+  const foot = roll ? `<div class="rollend"><button class="btn ghost wide" type="button" id="rollEnd">End ${roll.kind === "drill" ? "drill" : "roll call"}</button></div>` : "";
+  body.innerHTML = head + (rows.length ? list : '<p class="empty">Nobody is recorded on site.</p>') + foot;
+  // Width through the CSSOM: a style="" attribute would be refused by the CSP.
+  const prog = $("rollProg");
+  if (prog) prog.style.width = `${rows.length ? Math.round(100 * accounted / rows.length) : 0}%`;
+}
+
+async function startRoll(kind) {
+  if (state.roll) return;
+  const id = crypto.randomUUID();
+  const started_at = new Date().toISOString();
+  state.roll = { id, kind, started_at, marks: {} };
+  saveRoll();
+  renderRoll();
+  let sent = false;
+  if (Offline.isOnline()) {
+    const out = await guarded(() => apiPost("/api/roll-calls", { id, kind, started_at }), (err) => { if (!Offline.isOutage(err)) toast("Roll call not recorded on the server: " + err.message, "err"); });
+    sent = !!out;
+  }
+  if (!sent) {
+    try { await Offline.enqueue({ kind: "rollcall_start", roll_call_id: id, rc_kind: kind, guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "" }); }
+    catch (err) { toast(err.message, "err"); }
+    Offline.renderNet();
+  }
+}
+
+async function markRoll(residentId) {
+  const roll = state.roll;
+  if (!roll || roll.marks[residentId]) return;
+  const at = new Date().toISOString();
+  roll.marks[residentId] = at;
+  saveRoll();
+  renderRoll();
+  const ref = crypto.randomUUID();
+  let sent = false;
+  if (Offline.isOnline()) {
+    const out = await guarded(() => apiPost(`/api/roll-calls/${roll.id}/marks`, { resident_id: residentId, ref, at }), (err) => { if (!Offline.isOutage(err)) toast("Not recorded: " + err.message, "err"); });
+    sent = !!out;
+  }
+  if (!sent) {
+    const r = state.rows.get(residentId);
+    try { await Offline.enqueue({ kind: "rollcall_mark", roll_call_id: roll.id, resident_id: residentId, resident_name: r ? r.full_name : "", guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "" }); }
+    catch (err) { toast(err.message, "err"); }
+    Offline.renderNet();
+  }
+}
+
+async function endRoll() {
+  const roll = state.roll;
+  if (!roll) return;
+  const rows = await rollRows();
+  const accounted = rows.filter((r) => roll.marks[r.id]).length;
+  if (accounted < rows.length && !confirm(`${rows.length - accounted} not yet accounted for. End the ${roll.kind === "drill" ? "drill" : "roll call"} anyway?`)) return;
+  const at = new Date().toISOString();
+  state.roll = null;
+  saveRoll();
+  renderRoll();
+  let sent = false;
+  if (Offline.isOnline()) {
+    const out = await guarded(() => apiPost(`/api/roll-calls/${roll.id}/end`, { at }), (err) => { if (!Offline.isOutage(err)) toast("Not recorded: " + err.message, "err"); });
+    sent = !!out;
+  }
+  if (!sent) {
+    try { await Offline.enqueue({ kind: "rollcall_end", roll_call_id: roll.id, guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "" }); }
+    catch (err) { toast(err.message, "err"); }
+    Offline.renderNet();
+  }
+  toast(`${roll.kind === "drill" ? "Drill" : "Roll call"} ended · ${accounted} of ${rows.length} accounted for`, "ok");
 }
 
 /* ========================================================================
@@ -510,6 +710,9 @@ async function enterApp() {
   $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
   $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
+  $("tabRoll").hidden = !settings?.feature_evacuation;
+  loadRoll();
+  syncRoll();
 
   $("login").hidden = true;
   $("app").hidden = false;
@@ -623,6 +826,20 @@ document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
 
 $("tabSearch").addEventListener("click", () => selectTab("search"));
 $("tabLog").addEventListener("click",    () => selectTab("log"));
+$("tabRoll").addEventListener("click",   () => selectTab("roll"));
+$("rollDrill").addEventListener("click",    () => startRoll("drill"));
+$("rollIncident").addEventListener("click", () => startRoll("incident"));
+$("rollPrint").addEventListener("click", async () => {
+  await renderRoll();
+  document.body.classList.add("printing");
+  window.print();
+  setTimeout(() => document.body.classList.remove("printing"), 500);
+});
+$("rollBody").addEventListener("click", (e) => {
+  const mark = e.target.closest("[data-mark]");
+  if (mark) return markRoll(mark.dataset.mark);
+  if (e.target.closest("#rollEnd")) return endRoll();
+});
 $("logDate").addEventListener("change", (e) => loadLog(e.target.value || todayISODate()));
 $("logToday").addEventListener("click", () => {
   $("logDate").value = todayISODate();

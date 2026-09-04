@@ -44,6 +44,10 @@
   .occ .pill { font-size: 11px; padding: 3px 8px; text-transform: none; letter-spacing: 0; }
   .roomsForm .actions { margin-top: 0; }
   @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); }
+  .check input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
+  .check b { color: var(--text); }
+  .need { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn-text); }
   .seg { display: flex; gap: 6px; }
   .seg button {
     flex: 1; padding: 11px 8px; border-radius: 10px;
@@ -156,6 +160,18 @@
           <label class="lbl" for="afRoom">Room</label>
           <select id="afRoom" class="field"></select>
         </div>
+        <div id="afEvacWrap" hidden>
+          <label class="lbl" for="afEvac">Evacuation assistance</label>
+          <select id="afEvac" class="field">
+            <option value="none">None needed</option>
+            <option value="mobility">Needs help to move</option>
+            <option value="hearing">Needs help to hear the alarm</option>
+            <option value="sight">Needs help to find the way</option>
+            <option value="carer">Infant or carer</option>
+            <option value="other">Needs help (no detail held)</option>
+          </select>
+          <p class="hint under">One code, no notes. Shown on the roll call and the evacuation list only.</p>
+        </div>
         <div class="actions">
           <button class="btn primary-in" id="afSave" type="submit">Add to register</button>
           <button class="btn ghost" id="afCancel" type="button">Cancel</button>
@@ -228,6 +244,10 @@
         <div><label class="lbl" for="stWinDays">Rolling window (days)</label><input id="stWinDays" class="field" type="number" min="7" max="365" required></div>
         <p class="hint flush">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
 
+        <h2 class="mt6">Features for this site</h2>
+        <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
+        <label class="check"><input id="stFeatEvac" type="checkbox"> <span><b>Evacuation.</b> An evacuation-need code on each record (fixed list, no free text) and a Roll call tab on the gate. Turning this on means the site holds a special-category field: record it in the DPIA.</span></label>
+
         <h2 class="mt6">Retention</h2>
         <div class="grid2">
           <div><label class="lbl" for="stEventDays">Movement log (days)</label><input id="stEventDays" class="field" type="number" min="1" max="3650" required></div>
@@ -289,9 +309,11 @@ function todayISODate() {
 
 // Lists never carry a date of birth (Tao 3 / data minimisation): the card
 // shows age and the ID, and the date is fetched into the edit sheet only.
+const EVAC_LABEL = { none: "None needed", mobility: "Needs help to move", hearing: "Needs help to hear the alarm", sight: "Needs help to find the way", carer: "Infant or carer", other: "Needs help (no detail held)" };
+
 function residentCard(r) {
   const bits = [`age ${r.age_years}`];
-  if (r.room_label) bits.push(esc(r.room_label));
+  if (r.room_label && featureOn("feature_buildings")) bits.push(esc(r.room_label));
   bits.push(r.has_id ? "ID recorded" : "no ID recorded");
   const departed = r.status === "departed";
   return `
@@ -357,7 +379,8 @@ $("addForm").addEventListener("submit", async (e) => {
     date_of_birth: $("afDob").value,
   };
   if (state.addType) { body.id_type = state.addType; body.id_number = $("afNumber").value.trim().toUpperCase(); }
-  if (state.buildings.length) body.room_id = $("afRoom").value || null;
+  if (featureOn("feature_buildings") && state.buildings.length) body.room_id = $("afRoom").value || null;
+  if (featureOn("feature_evacuation")) body.evac_need = $("afEvac").value;
   $("afSave").disabled = true;
   const out = await guarded(() => apiPost("/api/residents", body), (err) => toast("Not added: " + err.message, "err"));
   $("afSave").disabled = false;
@@ -407,9 +430,13 @@ function renderDetail(rec, summary) {
         <input id="efNumber" class="field upper mt8" type="text" placeholder="Number as printed on the card" maxlength="40"
                value="${esc(rec.id_number || "")}" ${type ? "" : "hidden"}>
       </div>
-      <div ${state.buildings.length ? "" : "hidden"}>
+      <div ${featureOn("feature_buildings") && state.buildings.length ? "" : "hidden"}>
         <label class="lbl" for="efRoom">Room</label>
         <select id="efRoom" class="field">${roomOptions(rec.room_id)}</select>
+      </div>
+      <div ${featureOn("feature_evacuation") ? "" : "hidden"}>
+        <label class="lbl" for="efEvac">Evacuation assistance</label>
+        <select id="efEvac" class="field">${["none","mobility","hearing","sight","carer","other"].map((v) => `<option value="${v}" ${rec.evac_need === v ? "selected" : ""}>${esc(EVAC_LABEL[v])}</option>`).join("")}</select>
       </div>
       <div class="actions">
         <button class="btn primary-in" id="efSave" type="submit">Save changes</button>
@@ -471,7 +498,8 @@ function renderDetail(rec, summary) {
       id_type: idType || null,
       id_number: idType ? $("efNumber").value.trim().toUpperCase() : null,
     };
-    if (state.buildings.length) body.room_id = $("efRoom").value || null;
+    if (featureOn("feature_buildings") && state.buildings.length) body.room_id = $("efRoom").value || null;
+    if (featureOn("feature_evacuation")) body.evac_need = $("efEvac").value;
     $("efSave").disabled = true;
     const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, body), (err) => toast("Not saved: " + err.message, "err"));
     $("efSave").disabled = false;
@@ -693,7 +721,7 @@ async function loadBuildings({ quiet = false } = {}) {
   const rows = await guarded(() => apiGet("/api/buildings"), (err) => { if (!quiet) showError("Could not load buildings: " + err.message); });
   if (!rows) return;
   state.buildings = rows;
-  $("afRoomWrap").hidden = !rows.some((b) => b.rooms.length);
+  $("afRoomWrap").hidden = !featureOn("feature_buildings") || !rows.some((b) => b.rooms.length);
   $("afRoom").innerHTML = roomOptions(null);
   if (state.tab !== "buildings") return;
   showError("");
@@ -716,7 +744,7 @@ async function loadBuildings({ quiet = false } = {}) {
             <span class="hint">${r.occupants}/${r.capacity}${r.occupants ? ` · ${r.on_site} on site` : ""}</span>
             <button class="linkish" type="button" data-del-room="${esc(r.id)}" aria-label="Remove room ${esc(r.number)}">remove</button>
           </div>
-          ${r.residents.length ? `<div class="occ">${r.residents.map((p) => `<span class="pill ${p.presence === "in" ? "in" : "out"}">${esc(p.full_name)}</span>`).join("")}</div>` : ""}
+          ${r.residents.length ? `<div class="occ">${r.residents.map((p) => `<span class="pill ${p.presence === "in" ? "in" : "out"}">${esc(p.full_name)}</span>${featureOn("feature_evacuation") && p.evac_need && p.evac_need !== "none" ? `<span class="need">${esc(EVAC_LABEL[p.evac_need])}</span>` : ""}`).join("")}</div>` : ""}
         </div>`).join("")}</div>` : '<p class="hint flush">No rooms yet.</p>'}
       <form class="roomsForm" data-bid="${esc(b.id)}" autocomplete="off">
         <div class="grid3">
@@ -781,21 +809,35 @@ const SETTINGS_FIELDS = {
   idle_lock_minutes: "stIdle",
 };
 
+const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac" };
+
 async function loadSettings() {
   const s = await guarded(() => apiGet("/api/settings"), (err) => showError("Could not load settings: " + err.message));
   if (!s) return;
   showError("");
   for (const [col, id] of Object.entries(SETTINGS_FIELDS)) $(id).value = s[col] ?? "";
+  for (const [col, id] of Object.entries(FEATURE_FIELDS)) $(id).checked = !!s[col];
+}
+
+const featureOn = (name) => !!(state.settings && state.settings[name]);
+function applyFeatures() {
+  $("tabBuildings").hidden = !featureOn("feature_buildings");
+  if (!featureOn("feature_buildings")) $("afRoomWrap").hidden = true;
+  $("afEvacWrap").hidden = !featureOn("feature_evacuation");
 }
 
 $("settingsForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = {};
   for (const [col, id] of Object.entries(SETTINGS_FIELDS)) body[col] = $(id).value.trim();
+  for (const [col, id] of Object.entries(FEATURE_FIELDS)) body[col] = $(id).checked;
   $("stSave").disabled = true;
   const out = await guarded(() => apiPatch("/api/settings", body), (err) => toast("Not saved: " + err.message, "err"));
   $("stSave").disabled = false;
   if (!out) return;
+  // The switches take effect here at once; other tabs see them on their next load.
+  for (const col of Object.keys(FEATURE_FIELDS)) state.settings[col] = !!out[col];
+  applyFeatures();
   toast("Settings saved", "ok");
   loadSettings();
 });
@@ -852,7 +894,8 @@ async function enterApp() {
   $("adminTabs").hidden = false;
   $("tabStaff").hidden = !canStaff();
   $("tabSettings").hidden = !canStaff();
-  loadBuildings({ quiet: true });
+  applyFeatures();
+  if (featureOn("feature_buildings")) loadBuildings({ quiet: true });
   selectTab("residents");
 }
 

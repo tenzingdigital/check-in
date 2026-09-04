@@ -24,6 +24,9 @@ const COLUMNS = {
   warn_after_consecutive_nights: { kind: 'int', min: 1, max: 90 },
   late_entry_window_hours:       { kind: 'int', min: 1, max: 168 },
   idle_lock_minutes:             { kind: 'int', min: 1, max: 720 },
+  // Per-site switches for the buildings and evacuation features (017).
+  feature_buildings:             { kind: 'bool' },
+  feature_evacuation:            { kind: 'bool' },
 };
 
 router.get('/', wrap(async (req, res) => {
@@ -44,6 +47,10 @@ router.patch('/', wrap(async (req, res) => {
     if (rule.kind === 'int') {
       v = Number.parseInt(v, 10);
       if (!Number.isFinite(v) || v < rule.min || v > rule.max) throw new HttpError(400, `${col.replace(/_/g, ' ')} must be between ${rule.min} and ${rule.max}`);
+    } else if (rule.kind === 'bool') {
+      if (v === true || v === 'true' || v === 1 || v === '1' || v === 'on') v = true;
+      else if (v === false || v === 'false' || v === 0 || v === '0' || v === '' || v === null || v === 'off') v = false;
+      else throw new HttpError(400, `${col.replace(/_/g, ' ')} must be true or false`);
     } else {
       v = String(v || '').trim();
       if (!v || (rule.max && v.length > rule.max)) throw new HttpError(400, `${col.replace(/_/g, ' ')} is required`);

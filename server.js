@@ -127,6 +127,7 @@ app.use('/api/password-reset', require('./routes/password-reset'));
 app.use('/api', auth.requireSession);
 app.use('/api/residents', require('./routes/residents'));
 app.use('/api', require('./routes/buildings'));
+app.use('/api', require('./routes/rollcall'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api', require('./routes/gate'));

@@ -37,13 +37,32 @@ function parseItem(raw) {
   if (!UUID_RE.test(ref)) throw new HttpError(400, 'ref must be a uuid');
 
   const kind = String(item.kind || '');
-  if (kind !== 'checkin' && kind !== 'gate') throw new HttpError(400, "kind must be 'checkin' or 'gate'");
-
-  const residentId = String(item.resident_id || '');
-  if (!UUID_RE.test(residentId)) throw new HttpError(400, 'resident_id must be a uuid');
+  if (!['checkin', 'gate', 'rollcall_start', 'rollcall_mark', 'rollcall_end'].includes(kind)) {
+    throw new HttpError(400, "kind must be 'checkin', 'gate', 'rollcall_start', 'rollcall_mark' or 'rollcall_end'");
+  }
 
   const at = new Date(String(item.occurred_at || ''));
   if (Number.isNaN(at.getTime())) throw new HttpError(400, 'occurred_at must be a timestamp');
+
+  // Roll-call items (migration 017) carry the roll call's id, chosen by the
+  // terminal so one started offline keeps its identity.
+  if (kind.startsWith('rollcall_')) {
+    const rollCallId = String(item.roll_call_id || '');
+    if (!UUID_RE.test(rollCallId)) throw new HttpError(400, 'roll_call_id must be a uuid');
+    let rcKind = null, residentId = null;
+    if (kind === 'rollcall_start') {
+      rcKind = String(item.rc_kind || '');
+      if (rcKind !== 'drill' && rcKind !== 'incident') throw new HttpError(400, "rc_kind must be 'drill' or 'incident'");
+    }
+    if (kind === 'rollcall_mark') {
+      residentId = String(item.resident_id || '');
+      if (!UUID_RE.test(residentId)) throw new HttpError(400, 'resident_id must be a uuid');
+    }
+    return { ref, kind, rollCallId, rcKind, residentId, occurredAt: at.toISOString() };
+  }
+
+  const residentId = String(item.resident_id || '');
+  if (!UUID_RE.test(residentId)) throw new HttpError(400, 'resident_id must be a uuid');
 
   let direction = null;
   if (kind === 'gate') {
@@ -82,7 +101,13 @@ router.post('/sync', wrap(async (req, res) => {
 
     try {
       await db.withIdentity(req.session.userId, async (client) => {
-        if (item.kind === 'checkin') {
+        if (item.kind === 'rollcall_start') {
+          await client.query('select public.start_roll_call($1, $2, $3)', [item.rollCallId, item.rcKind, item.occurredAt]);
+        } else if (item.kind === 'rollcall_mark') {
+          await client.query('select public.mark_roll_call($1, $2, $3, $4)', [item.rollCallId, item.residentId, item.ref, item.occurredAt]);
+        } else if (item.kind === 'rollcall_end') {
+          await client.query('select public.end_roll_call($1, $2)', [item.rollCallId, item.occurredAt]);
+        } else if (item.kind === 'checkin') {
           await client.query(
             'select * from public.record_checkin_late($1, $2, $3)',
             [item.residentId, item.occurredAt, item.ref],

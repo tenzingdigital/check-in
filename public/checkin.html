@@ -218,7 +218,7 @@ function residentCard(r) {
   const cls = ["card", esc(r.state)];
 
   const bits = [];
-  if (r.room_label) bits.push(esc(r.room_label));
+  if (r.room_label && state.settings?.feature_buildings) bits.push(esc(r.room_label));
   bits.push(`last seen ${esc(lastSeenText(r))}`);
 
   // "3 missed days" says more than "Missed days"; the count is on the row.

@@ -35,6 +35,7 @@ const JOBS = [
   ["purge-expired-login-events", "select auth.purge_expired_login_events()"],
   ["purge-expired-audit", "select public.purge_expired_audit()"],
   ["purge-expired-job-runs", "select public.purge_expired_job_runs()"],
+  ["purge-expired-roll-calls", "select public.purge_expired_roll_calls()"],
   // Autovacuum never analyses a table with fewer than ~50 changed rows, so
   // app_settings (one row) and a small residents table can carry the
   // planner's default guess of ~300 rows forever. Cross-joined into every
