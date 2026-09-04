@@ -98,10 +98,12 @@
       <span id="netState" class="net" hidden></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
+    <!-- The three tiles are the questions a manager asks; tapping one shows
+         exactly those residents in the Check in list. Tap again for all. -->
     <div class="stats">
-      <div class="stat bad">  <b id="statNotSeen">–</b><span>Not seen today</span></div>
-      <div class="stat bad">  <b id="statOpenBreach">–</b><span>Open breaches</span></div>
-      <div class="stat ok">   <b id="statCheckins">–</b><span>Seen today</span></div>
+      <button class="stat bad" type="button" data-filter="not_seen" aria-pressed="false"><b id="statNotSeen">–</b><span>Not seen today</span></button>
+      <button class="stat bad" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Open breaches</span></button>
+      <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false"><b id="statCheckins">–</b><span>Seen today</span></button>
     </div>
   </header>
 
@@ -118,6 +120,12 @@
     <section id="panelCheckin" role="tabpanel" aria-labelledby="tabCheckin">
       <input id="q" class="field" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <nav class="chips" id="stateFilter" aria-label="Filter by status">
+        <button type="button" data-filter="all"      aria-pressed="true">All</button>
+        <button type="button" data-filter="not_seen" aria-pressed="false">Not seen</button>
+        <button type="button" data-filter="breach"   aria-pressed="false">Breach</button>
+        <button type="button" data-filter="seen"     aria-pressed="false">Seen</button>
+      </nav>
       <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register first. Tap a name for detail, or swipe it to the right to record the check-in.</p>
       <div id="searchResults" class="list"></div>
     </section>
@@ -155,6 +163,9 @@ const state = {
   tab:       "checkin",
   busy:      false,
   attention: [],      // last attention_list() result, for the header stats and pip
+  filter:    "all",   // which tile is pressed: all | not_seen | breach | seen
+  searchRows:  [],    // the last list response, refiltered client-side
+  searchQuery: "",
   // Every row we have rendered, by id. Tapping a card reads from here rather
   // than making a second round trip.
   rows:      new Map(),
@@ -381,8 +392,53 @@ async function runSearch(q) {
   if (!rows) return;
 
   showError("");
-  rows = await Offline.overlay("checkin", rows);
-  renderList(box, rows, q ? `No resident matching “${q}”.` : "No residents on the register.");
+  state.searchRows = await Offline.overlay("checkin", rows);
+  state.searchQuery = q;
+  renderSearch();
+}
+
+// The three header tiles and the chip row are one filter, applied here to
+// the rows already on screen. Client-side on purpose: the counts on the
+// chips always describe the rows the current query matched, switching never
+// costs a round trip, and it works offline against the cached copy. The
+// tests mirror the header's own definitions (routes/checkins.js).
+const FILTERS = {
+  all:      () => true,
+  not_seen: (r) => r.required_today && !r.seen_today,
+  breach:   (r) => (r.open_breaches || 0) > 0,
+  seen:     (r) => !!r.seen_today,
+};
+const FILTER_LABEL = { all: "All", not_seen: "Not seen", breach: "Breach", seen: "Seen" };
+
+function setFilter(name) {
+  state.filter = FILTERS[name] ? name : "all";
+  if (state.tab !== "checkin") selectTab("checkin");
+  renderSearch();
+}
+
+function renderSearch() {
+  const rows = state.searchRows || [];
+  const counts = {};
+  for (const f of Object.keys(FILTERS)) counts[f] = rows.filter(FILTERS[f]).length;
+
+  document.querySelectorAll("#stateFilter button").forEach((b) => {
+    const f = b.dataset.filter;
+    b.textContent = `${FILTER_LABEL[f]} (${counts[f]})`;
+    b.setAttribute("aria-pressed", String(f === state.filter));
+  });
+  document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.filter === state.filter));
+  });
+
+  const shown = rows.filter(FILTERS[state.filter]);
+  const q = state.searchQuery;
+  const empty = q
+    ? `No resident matching “${q}”${state.filter === "all" ? "" : ` under ${FILTER_LABEL[state.filter]}`}.`
+    : state.filter === "not_seen" ? "Everyone who is required today has been seen."
+    : state.filter === "breach"   ? "No open breaches."
+    : state.filter === "seen"     ? "Nobody has been seen yet today."
+    : "No residents on the register.";
+  renderList($("searchResults"), shown, empty);
 }
 
 async function checkin(residentId) {
@@ -626,6 +682,15 @@ document.addEventListener("click", (e) => {
 });
 
 mountCardSwipe({ onRight: (id) => checkin(id) });
+
+// A tile or a chip sets the filter; the pressed tile pressed again clears it.
+document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
+  b.addEventListener("click", () => setFilter(b.dataset.filter === state.filter ? "all" : b.dataset.filter));
+});
+$("stateFilter").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-filter]");
+  if (btn) setFilter(btn.dataset.filter);
+});
 
 $("tabCheckin").addEventListener("click",   () => selectTab("checkin"));
 $("tabAttention").addEventListener("click", () => selectTab("attention"));

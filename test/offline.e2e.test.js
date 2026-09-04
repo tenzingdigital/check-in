@@ -86,6 +86,19 @@ async function launch() {
   await page.waitForSelector("#app:not([hidden])");
   await page.waitForFunction(() => document.querySelectorAll("button.card").length > 0);
   await page.waitForFunction(() => document.getElementById("netState").textContent === "Online");
+
+  step("the header tiles filter the list");
+  // Nobody has checked in yet in this fixture, so Seen is the empty state.
+  await page.click('.stats button[data-filter="seen"]');
+  await page.waitForFunction(() => document.querySelector('.stats button[data-filter="seen"]').getAttribute("aria-pressed") === "true");
+  await page.waitForFunction(() => /Nobody has been seen yet today/.test(document.getElementById("searchResults").textContent));
+  await page.click('.stats button[data-filter="not_seen"]');
+  await page.waitForFunction(() => document.querySelector('#stateFilter button[data-filter="not_seen"]').getAttribute("aria-pressed") === "true");
+  const notYet = await page.locator("button.card .pill").allTextContents();
+  assert.ok(notYet.length > 0 && notYet.every((t) => /not yet/i.test(t)), `Not seen filter showed: ${notYet.slice(0, 3).join(", ")}`);
+  await page.click('.stats button[data-filter="not_seen"]');   // pressed again clears
+  await page.waitForFunction(() => document.querySelector('#stateFilter button[data-filter="all"]').getAttribute("aria-pressed") === "true");
+
   await ctx.setOffline(true);
   await page.waitForFunction(() => document.getElementById("netState").classList.contains("off"));
   await page.locator("button.card").first().click();
@@ -98,6 +111,12 @@ async function launch() {
   const seen = await page.evaluate(async () => (await fetch(`/api/residents?q=&limit=5&compliance=1`)).json());
   assert.ok(seen.some((r) => r.seen_today), "no resident seen today after the synced check-in");
   step("synced check-in satisfied the day");
+  // ...and the Seen tile now finds exactly that person.
+  await page.click('.stats button[data-filter="seen"]');
+  await page.waitForFunction(() => document.querySelectorAll("button.card").length === 1
+    && /seen today/i.test(document.querySelector("button.card .pill").textContent));
+  await page.click('.stats button[data-filter="seen"]');
+  step("Seen tile shows the synced resident");
 
   step("logout while offline, then reconnect: the server session must end");
   await ctx.setOffline(true);

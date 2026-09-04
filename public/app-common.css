@@ -46,7 +46,7 @@
   .brand { font-weight: 650; letter-spacing: -0.01em; margin-right: auto; }
   .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
   /* ---- filter chips ---- */
-  .chips { display: flex; gap: 8px; margin-top: 10px; }
+  .chips { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .chips button {
     padding: 8px 14px; border-radius: 999px;
     background: var(--surface); border: 1px solid var(--line);
@@ -91,6 +91,12 @@
   .stat.bad  b { color: var(--bad); }
   .stat.warn b { color: var(--warn); }
   .stat.ok   b { color: var(--ok); }
+  /* On the register the tiles are buttons that filter the list. Same box,
+     same type; the pressed one is ringed in the accent so the list below is
+     visibly "these residents". */
+  button.stat { text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  button.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.stat[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 
   /* ---- tabs ---- */
   nav.tabs {
