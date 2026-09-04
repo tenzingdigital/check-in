@@ -40,7 +40,9 @@ for (const f of ['public/index.html','public/checkin.html']) {
     if (/^https?:|^\/\//.test(m[1])) throw new Error(f+' loads '+m[1]+' from a third-party origin');
   }
 }
-new vm.Script(fs.readFileSync('public/app-common.js','utf8'));
+for (const f of ['public/app-common.js','public/offline.js','public/sw.js']) {
+  new vm.Script(fs.readFileSync(f,'utf8'), {filename: f});
+}
 console.log('front ends parse and load nothing from a CDN');
 " || fail=1
 

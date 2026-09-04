@@ -57,7 +57,7 @@ way, so no explained breach can be pushed off the list.
 | 1 | `app-common.css` keeps `.badge.due_soon/.overdue` and `.card.overdue/.due_soon` selectors, orphaned when the gate app's compliance UI was removed | Genuinely dead, zero behavioural risk. `checkin.html` redefines some same-named classes locally with identical values, so it is duplication, not conflict |
 | 2 | The purge-cascades-annotations path is asserted from the FK definition, not exercised | The FK is `on delete cascade` and the identical mechanism is exercised for real by the erasure test |
 | 3 | `tally` and `streak` in `v_resident_compliance` scan the whole register unbounded on every screen load | Fine at hut scale (~100 residents × 2555 days ≈ 255k rows), but the amplification is larger than it looks: a predicate cannot push into a grouped CTE, so even a single-resident refresh re-aggregates everything, and the header polls every 60s per terminal. **Bound both to a lookback window if the site grows** |
-| 4 | `record_checkin()` does not clear `closed_at` when a late correction lands on an already-closed day | No reachable trigger found — close-out never closes today. Register *content* stays correct; only the timestamp would mislead |
+| 4 | A late check-in landing on an already-closed day flips `presented` but leaves `closed_at` as it was | **Now reachable**, through `record_checkin_late()` (migration 010): an event synced after the nightly close-out corrects the day's content and the day stays closed. That is the intended reading — `closed_at` says when close-out ran, not when the row last changed — and the event's own `late_entry` / `recorded_at` carry the provenance |
 | 5 | `close_out_compliance_days()` resumes from the latest closed day **globally**, not per resident | A past day with zero rows is skipped forever. The realistic trigger is importing a resident with a backdated `registered_at` — see the "Data import" maintainer note in `README.md` |
 | 6 | `seed.sql`'s comment above the `gate_events` insert still describes `due_soon`/`overdue` states | Demo-only file, one-line fix whenever convenient |
 | 7 | `01_acceptance.sql` has a duplicate no-op `reset role;` and one test label using old "check event" prose | Cosmetic |
@@ -182,6 +182,34 @@ tells you to delete the variable after first login. Nothing enforces that
 deletion, and nothing forces a password change on first use.
 
 If this app ever holds more than one site, replace it with an invite flow.
+
+### 19a. Offline queue: what it cannot survive
+
+`public/offline.js` (see "Working offline" in `README.md`) keeps events
+recorded during an outage as ciphertext whose key lives in `sessionStorage`.
+Three consequences are accepted rather than solved:
+
+- **A closed tab loses the key.** Anything queued becomes unreadable on that
+  terminal and is shown as lost so it can be recorded from paper. The
+  alternative — keeping the key next to the data — would make the encryption
+  decorative.
+- **A reload mid-outage trusts the last profile the tab saw.** A session
+  revoked during the outage is not noticed until the link returns, at which
+  point the queue is refused with a 401 and kept. The data on the device was
+  already on the device; this does not widen it.
+- **The terminal clock dates the event.** Bounded by
+  `app_settings.late_entry_window_hours` and flagged, never silently trusted.
+
+### 19b. New logins had no tenant until migration 011
+
+009 backfilled every existing login into the default tenant and nothing
+attached new ones, so every account created since — Staff tab, CLI,
+first-admin bootstrap — had `tenant_id` null. Harmless today because nothing
+resolves a tenant per request yet, and invisible to the suite because a
+different test re-applied 009's backfill on every run. 011 adds a trigger that
+fills a null `tenant_id` with the default tenant at insert. The signup path,
+when it exists, must set `tenant_id` explicitly; the trigger fills only a
+null.
 
 ### 19. `lib/` and `routes/` have no linter and no type checking
 

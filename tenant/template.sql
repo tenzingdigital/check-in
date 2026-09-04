@@ -91,6 +91,33 @@ $$;
 
 --
 
+-- Name: assert_late_entry_window(timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.assert_late_entry_window(p_occurred_at timestamp with time zone) RETURNS void
+    LANGUAGE plpgsql STABLE
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_hours integer;
+begin
+  if p_occurred_at is null then
+    raise exception 'occurred_at is required' using errcode = '22023';
+  end if;
+  if p_occurred_at > now() + interval '5 minutes' then
+    raise exception 'occurred_at is in the future — check the terminal clock'
+      using errcode = '22023';
+  end if;
+  select late_entry_window_hours into v_hours from __TENANT__.app_settings where id;
+  if p_occurred_at < now() - make_interval(hours => v_hours) then
+    raise exception 'occurred_at is older than the %-hour late-entry window', v_hours
+      using errcode = '22023';
+  end if;
+end;
+$$;
+
+
+--
+
 -- Name: compliance_required(date, date, date, date, integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -151,6 +178,7 @@ CREATE TABLE __TENANT__.app_settings (
     absence_window_days integer DEFAULT 28 NOT NULL,
     absence_window_limit integer DEFAULT 10 NOT NULL,
     warn_after_consecutive_nights integer DEFAULT 3 NOT NULL,
+    late_entry_window_hours integer DEFAULT 48 NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -158,6 +186,7 @@ CREATE TABLE __TENANT__.app_settings (
     CONSTRAINT app_settings_due_soon_after_hour_check CHECK (((due_soon_after_hour >= 0) AND (due_soon_after_hour <= 23))),
     CONSTRAINT app_settings_event_retention_days_check CHECK (((event_retention_days >= 1) AND (event_retention_days <= 3650))),
     CONSTRAINT app_settings_id_check CHECK (id),
+    CONSTRAINT app_settings_late_entry_window_hours_check CHECK (((late_entry_window_hours >= 1) AND (late_entry_window_hours <= 168))),
     CONSTRAINT app_settings_warn_after_consecutive_nights_check CHECK (((warn_after_consecutive_nights >= 1) AND (warn_after_consecutive_nights <= 90)))
 );
 
@@ -497,6 +526,8 @@ begin
       select jsonb_agg(jsonb_build_object(
                'kind', e.kind,
                'occurred_at', e.occurred_at,
+               'recorded_at', e.recorded_at,
+               'late_entry', e.late_entry,
                'recorded_by', g.full_name
              ) order by e.occurred_at)
       from __TENANT__.gate_events e
@@ -506,6 +537,8 @@ begin
     'checkin_events', coalesce((
       select jsonb_agg(jsonb_build_object(
                'occurred_at', c.occurred_at,
+               'recorded_at', c.recorded_at,
+               'late_entry', c.late_entry,
                'recorded_by', g.full_name
              ) order by c.occurred_at)
       from __TENANT__.checkin_events c
@@ -665,6 +698,9 @@ CREATE TABLE __TENANT__.gate_events (
     guard_id uuid NOT NULL,
     kind text NOT NULL,
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    late_entry boolean DEFAULT false NOT NULL,
+    client_ref uuid,
     CONSTRAINT gate_events_kind_check CHECK ((kind = ANY (ARRAY['in'::text, 'out'::text])))
 );
 
@@ -770,6 +806,64 @@ $$;
 
 --
 
+-- Name: record_check_late(uuid, text, timestamp with time zone, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.record_check_late(p_resident_id uuid, p_direction text, p_occurred_at timestamp with time zone, p_client_ref uuid) RETURNS SETOF __TENANT__.v_resident_status
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_status text;
+  v_dup    boolean;
+begin
+  if not __TENANT__.is_staff() then
+    raise exception 'Not authorised to record check events' using errcode = '42501';
+  end if;
+  if p_direction not in ('in', 'out') then
+    raise exception 'direction must be ''in'' or ''out''' using errcode = '22023';
+  end if;
+  if p_client_ref is null then
+    raise exception 'client_ref is required for a late entry' using errcode = '22023';
+  end if;
+  perform __TENANT__.assert_late_entry_window(p_occurred_at);
+
+  -- Already replayed once: answer, record nothing.
+  if exists (select 1 from __TENANT__.gate_events where client_ref = p_client_ref) then
+    return query select * from __TENANT__.v_resident_status where id = p_resident_id;
+    return;
+  end if;
+
+  select status into v_status from __TENANT__.residents where id = p_resident_id;
+  if v_status is null then
+    raise exception 'Resident not found' using errcode = 'P0002';
+  end if;
+  if v_status <> 'active' then
+    raise exception 'Resident is not active and cannot be signed in or out'
+      using errcode = '23514';
+  end if;
+
+  -- The same 60-second double-tap rule as record_check(), measured against
+  -- the event's own time rather than the server clock.
+  select exists (
+    select 1 from __TENANT__.gate_events
+    where resident_id = p_resident_id
+      and kind = p_direction
+      and abs(extract(epoch from (occurred_at - p_occurred_at))) < 60
+  ) into v_dup;
+
+  if not v_dup then
+    insert into __TENANT__.gate_events (resident_id, guard_id, kind, occurred_at, recorded_at, late_entry, client_ref)
+    values (p_resident_id, auth.uid(), p_direction, p_occurred_at, now(), true, p_client_ref);
+  end if;
+
+  return query select * from __TENANT__.v_resident_status where id = p_resident_id;
+end;
+$$;
+
+
+--
+
 -- Name: record_checkin(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -777,13 +871,27 @@ CREATE FUNCTION __TENANT__.record_checkin(p_resident_id uuid) RETURNS __TENANT__
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
+begin
+  return __TENANT__.record_checkin_at(p_resident_id, now(), false, null);
+end;
+$$;
+
+
+--
+
+-- Name: record_checkin_at(uuid, timestamp with time zone, boolean, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid) RETURNS __TENANT__.daily_compliance
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
 declare
   v_tz     text;
   v_adult  integer;
-  v_now    timestamptz := now();
   v_day    date;
   v_res    __TENANT__.residents;
-  v_last   timestamptz;
+  v_dup    boolean;
   v_out    __TENANT__.daily_compliance;
 begin
   if not __TENANT__.is_staff() then
@@ -798,7 +906,7 @@ begin
     raise exception 'Resident not found' using errcode = 'P0002';
   end if;
 
-  v_day := (v_now at time zone v_tz)::date;
+  v_day := (p_at at time zone v_tz)::date;
 
   -- Must agree with compliance_required(), which treats p_day <= departed_on
   -- as still required. A departed resident's final day is a day they must
@@ -809,19 +917,38 @@ begin
     raise exception 'Resident is not active and cannot check in' using errcode = '23514';
   end if;
 
+  -- A replay of an event already recorded is answered with the row it made,
+  -- and records nothing. This is what lets the terminal retry a sync whose
+  -- response was lost.
+  if p_client_ref is not null and exists (
+    select 1 from __TENANT__.checkin_events where client_ref = p_client_ref
+  ) then
+    select dc.* into v_out from __TENANT__.daily_compliance dc
+    join __TENANT__.checkin_events e on e.resident_id = dc.resident_id
+    where e.client_ref = p_client_ref
+      and dc.compliance_date = (e.occurred_at at time zone v_tz)::date;
+    return v_out;
+  end if;
+
   -- Touchscreens double-fire. A repeat inside 60 seconds is one presentation.
   -- Scoped to the site-local day: a check-in at 23:59:30 followed by one at
   -- 00:00:10 is 40 seconds apart but a genuine new-day presentation, not a
   -- double tap, and must not be swallowed together with the previous day's row.
-  select max(occurred_at) into v_last
-  from __TENANT__.checkin_events
-  where resident_id = p_resident_id
-    and (occurred_at at time zone v_tz)::date = v_day;
+  select exists (
+    select 1 from __TENANT__.checkin_events
+    where resident_id = p_resident_id
+      and (occurred_at at time zone v_tz)::date = v_day
+      and abs(extract(epoch from (occurred_at - p_at))) < 60
+  ) into v_dup;
 
-  if v_last is null or v_last < v_now - interval '60 seconds' then
-    insert into __TENANT__.checkin_events (resident_id, guard_id, occurred_at)
-    values (p_resident_id, auth.uid(), v_now);
+  if not v_dup then
+    insert into __TENANT__.checkin_events (resident_id, guard_id, occurred_at, recorded_at, late_entry, client_ref)
+    values (p_resident_id, auth.uid(), p_at, now(), p_late, p_client_ref);
 
+    -- The on-conflict branch is also how a late check-in corrects a day that
+    -- close-out already wrote as missed: presented becomes true and
+    -- first_seen_at is set (least() ignores the null it had). closed_at is
+    -- left alone — the day stays closed, its content is now right.
     insert into __TENANT__.daily_compliance as dc
       (resident_id, compliance_date, required, presented, first_seen_at, checkin_count)
     values (
@@ -830,7 +957,7 @@ begin
         v_res.date_of_birth,
         (v_res.registered_at at time zone v_tz)::date,
         v_res.departed_on, v_day, v_adult),
-      true, v_now, 1)
+      true, p_at, 1)
     on conflict (resident_id, compliance_date) do update
       set presented     = true,
           first_seen_at = least(dc.first_seen_at, excluded.first_seen_at),
@@ -840,14 +967,32 @@ begin
   select * into v_out from __TENANT__.daily_compliance
   where resident_id = p_resident_id and compliance_date = v_day;
   if not found then
-    -- The insert/on-conflict above is unconditional whenever the dedupe guard
-    -- lets the branch run, and once a row exists for (resident_id, v_day) it
-    -- is never deleted. Reaching here means that invariant broke — surface it
-    -- loudly rather than hand the guard's screen a silent NULL.
-    raise exception 'record_checkin: no daily_compliance row for resident % on %; this is a bug',
+    raise exception 'record_checkin_at: no daily_compliance row for resident % on %; this is a bug',
       p_resident_id, v_day using errcode = 'XX000';
   end if;
   return v_out;
+end;
+$$;
+
+
+--
+
+-- Name: record_checkin_late(uuid, timestamp with time zone, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) RETURNS __TENANT__.daily_compliance
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if not __TENANT__.is_staff() then
+    raise exception 'Not authorised to record check-ins' using errcode = '42501';
+  end if;
+  if p_client_ref is null then
+    raise exception 'client_ref is required for a late entry' using errcode = '22023';
+  end if;
+  perform __TENANT__.assert_late_entry_window(p_occurred_at);
+  return __TENANT__.record_checkin_at(p_resident_id, p_occurred_at, true, p_client_ref);
 end;
 $$;
 
@@ -897,7 +1042,10 @@ CREATE TABLE __TENANT__.checkin_events (
     id bigint NOT NULL,
     resident_id uuid NOT NULL,
     guard_id uuid NOT NULL,
-    occurred_at timestamp with time zone DEFAULT now() NOT NULL
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    late_entry boolean DEFAULT false NOT NULL,
+    client_ref uuid
 );
 
 
@@ -988,7 +1136,9 @@ CREATE VIEW __TENANT__.v_check_log AS
     e.occurred_at,
     ((btrim(r.first_name) || ' '::text) || btrim(r.last_name)) AS resident_name,
     e.guard_id,
-    g.full_name AS guard_name
+    g.full_name AS guard_name,
+    e.late_entry,
+    e.recorded_at
    FROM ((__TENANT__.gate_events e
      JOIN __TENANT__.residents r ON ((r.id = e.resident_id)))
      JOIN __TENANT__.profiles g ON ((g.id = e.guard_id)))
@@ -1060,6 +1210,14 @@ ALTER TABLE ONLY __TENANT__.residents
 
 --
 
+-- Name: checkin_events_client_ref_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX checkin_events_client_ref_key ON __TENANT__.checkin_events USING btree (client_ref) WHERE (client_ref IS NOT NULL);
+
+
+--
+
 -- Name: checkin_events_resident_time_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1096,6 +1254,14 @@ CREATE INDEX daily_compliance_date_idx ON __TENANT__.daily_compliance USING btre
 --
 
 CREATE INDEX daily_compliance_open_idx ON __TENANT__.daily_compliance USING btree (compliance_date) WHERE (closed_at IS NULL);
+
+
+--
+
+-- Name: gate_events_client_ref_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX gate_events_client_ref_key ON __TENANT__.gate_events USING btree (client_ref) WHERE (client_ref IS NOT NULL);
 
 
 --

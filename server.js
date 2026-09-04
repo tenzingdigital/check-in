@@ -129,6 +129,7 @@ app.use('/api/residents', require('./routes/residents'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api', require('./routes/gate'));
 app.use('/api', require('./routes/checkins'));
+app.use('/api', require('./routes/sync'));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'No such endpoint' }));
 

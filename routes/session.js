@@ -47,14 +47,19 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
   const settings = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select site_name, local_timezone, adult_age_years, due_soon_after_hour,
-              event_retention_days, compliance_retention_days
+              event_retention_days, compliance_retention_days, late_entry_window_hours
          from public.app_settings limit 1`,
     );
     return rows[0] || null;
   });
 
+  // `id` is here for the offline queue: events recorded while the link was
+  // down are stored on the terminal with the id of the guard who recorded
+  // them, and only that guard's session replays them. The server still takes
+  // identity from the session when it does (Tao 6) — the id lets the terminal
+  // avoid handing one guard's events to another's login, not the reverse.
   res.json({
-    profile: { full_name: req.session.fullName, role: req.session.role },
+    profile: { id: req.session.userId, full_name: req.session.fullName, role: req.session.role },
     settings,
   });
 }));

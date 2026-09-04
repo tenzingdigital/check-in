@@ -48,6 +48,7 @@
         <span aria-current="page">Gate</span>
         <a href="/checkin.html">Daily register</a>
       </nav>
+      <span id="netState" class="net" hidden></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
     </div>
     <div class="stats">
@@ -58,6 +59,7 @@
 
   <main class="wrap">
     <div id="appError" class="alert" hidden></div>
+    <div id="syncNotice" class="alert warn" hidden></div>
 
     <nav class="tabs" role="tablist">
       <button role="tab" id="tabSearch" aria-selected="true"  aria-controls="panelSearch">Search</button>
@@ -123,6 +125,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="/app-common.js"></script>
+<script src="/offline.js"></script>
 
 <script>
 "use strict";
@@ -131,7 +134,8 @@
    State
    ====================================================================== */
 const state = {
-  profile:  null,   // { full_name, role }
+  profile:  null,   // { id, full_name, role }
+  userId:   null,   // the guard this session belongs to; queued events carry it
   settings: null,   // app_settings row
   selected: null,   // resident status row shown in the detail panel
   tab:      "search",
@@ -175,7 +179,9 @@ function residentCard(r, { clickable = true } = {}) {
         <span class="name">${esc(r.full_name)}</span>
         <span class="meta">${bits.join(" · ")}</span>
       </span>
-      <span class="pill ${r.presence === "in" ? "in" : "out"}">${r.presence === "in" ? "On site" : "Off site"}</span>
+      ${r.queued
+        ? `<span class="pill queued">Queued · ${r.presence === "in" ? "in" : "out"}</span>`
+        : `<span class="pill ${r.presence === "in" ? "in" : "out"}">${r.presence === "in" ? "On site" : "Off site"}</span>`}
     </${tag}>`;
 }
 
@@ -231,7 +237,7 @@ function renderLog(rows) {
       <span class="dir ${e.kind === "in" ? "in" : "out"}">${e.kind === "in" ? "IN" : "OUT"}</span>
       <span class="body">
         ${esc(e.resident_name)}
-        <span class="by">by ${esc(e.guard_name)}</span>
+        <span class="by">by ${esc(e.guard_name)}${e.late_entry ? " · recorded offline, synced later" : ""}</span>
       </span>
     </div>`).join("");
 }
@@ -244,7 +250,7 @@ async function refreshSummary() {
   // Header counts are non-critical: a failure here leaves the previous numbers
   // on screen rather than interrupting a guard mid-search. A 401 is the one
   // exception and is handled centrally by guarded().
-  const summary = await guarded(() => apiGet("/api/summary"), () => {});
+  const summary = await guarded(() => apiGet("/api/summary"), (err) => Offline.noteFailure(err));
   if (!summary) return;
   $("statOnSite").textContent = summary.on_site;
   $("statToday").textContent  = summary.events_today;
@@ -253,21 +259,31 @@ async function refreshSummary() {
 let searchToken = 0;
 async function runSearch(q) {
   const token = ++searchToken;
-  const box = $("searchResults");
-
   q = (q || "").trim();
 
-  // An empty box is no longer an empty list: the whole register loads by
-  // default, and typing narrows it down.
-  const rows = await guarded(
-    () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000`),
-    (err) => showError("Search failed: " + err.message),
-  );
-  if (token !== searchToken) return;       // a newer keystroke already won
+  // Online: the server's typo-tolerant search — and, when the box is empty,
+  // the whole register, which is also the copy kept for an outage. Offline:
+  // that encrypted copy, filtered here, with anything still queued laid over
+  // it so a swipe made a minute ago is still on the card.
+  let rows = null;
+  if (Offline.isOnline()) {
+    rows = await guarded(
+      () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000`),
+      (err) => { Offline.noteFailure(err); if (err.status !== 0) showError("Search failed: " + err.message); },
+    );
+    if (token !== searchToken) return;     // a newer keystroke already won
+    if (rows && !q) Offline.saveRegister("gate", rows);
+  }
+  if (!rows && !Offline.isOnline()) {
+    const cached = await Offline.loadRegister("gate");
+    if (token !== searchToken) return;
+    if (!cached) { showError("Offline, and this terminal holds no copy of the register yet."); return; }
+    rows = Offline.filterRows(cached.rows, q);
+  }
   if (!rows) return;
 
   showError("");
-  state.searchRows = rows;
+  state.searchRows = await Offline.overlay("gate", rows);
   state.searchQuery = q;
   renderSearch();
 }
@@ -304,13 +320,42 @@ async function record(residentId, direction, { fromSwipe = false } = {}) {
   state.busy = true;
   document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = true));
 
-  const row = await guarded(
-    () => apiPost("/api/gate-events", { resident_id: residentId, direction }),
-    (err) => {
+  // With no link, or when the request itself fails to reach the server, the
+  // event is queued on this terminal with its own timestamp and sent when
+  // the link returns (offline.js). Any other refusal is the database's and
+  // is shown as such — a queue must never hide "resident is not active".
+  let row = null;
+  let queue = !Offline.isOnline();
+  if (!queue) {
+    row = await guarded(
+      () => apiPost("/api/gate-events", { resident_id: residentId, direction }),
+      (err) => {
+        if (err.status === 0) { Offline.noteFailure(err); queue = true; return; }
+        toast("Not recorded: " + err.message, "err");
+        document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = false));
+      },
+    );
+  }
+  if (queue) {
+    const r = state.rows.get(residentId);
+    try {
+      await Offline.enqueue({
+        kind: "gate", resident_id: residentId, resident_name: r ? r.full_name : "",
+        direction, guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "",
+      });
+    } catch (err) {
+      state.busy = false;
       toast("Not recorded: " + err.message, "err");
       document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = false));
-    },
-  );
+      return;
+    }
+    state.busy = false;
+    toast(`${r ? r.full_name : "Resident"} signed ${direction.toUpperCase()} — queued until the connection returns`, "ok");
+    Offline.renderNet();
+    renderDetail(null);
+    runSearch($("q").value);
+    return;
+  }
 
   state.busy = false;
   if (!row) return;
@@ -471,15 +516,30 @@ async function enterApp() {
   // a password, not to be shown somebody else's app.
   if (resetTokenFromUrl()) return showLogin("");
 
+  // A logout made offline is finished here, once the link is back, before
+  // the cookie is asked who it belongs to.
+  if (Offline.isOnline()) await Offline.finishLogout();
+
   let session;
   try {
     session = await apiGet("/api/session");
+    Offline.rememberSession(session);
   } catch (err) {
-    return showLogin(err.status === 401 ? "" : err.message);
+    if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
+    // The server is unreachable. A tab that was already signed in carries on
+    // with the profile it last saw; the server re-checks the session the
+    // moment anything is sent. A tab with no such memory cannot log in
+    // offline — login is the one thing that needs the server.
+    Offline.noteFailure(err);
+    session = Offline.rememberedSession();
+    if (!session) {
+      return showLogin("Cannot reach the server, and this tab was not signed in before the connection dropped. Try again when it returns.");
+    }
   }
 
   const { profile, settings } = session;
   state.profile = profile;
+  state.userId = profile.id;
   state.settings = settings;
 
   $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
@@ -494,15 +554,27 @@ async function enterApp() {
   selectTab("search");
   refreshSummary();
   runSearch($("q").value);
+  Offline.syncNow();
 }
 
 function showLogin(message) {
   state.profile = null;
+  state.userId = null;
   $("app").hidden = true;
   $("login").hidden = false;
   $("loginError").hidden = !message;
   if (message) $("loginError").textContent = message;
   $("email").focus();
+  // Events recorded during an outage outlive a logout on purpose. Say so on
+  // the way back in, so the guard knows they are waiting rather than lost.
+  if (!message) {
+    Offline.list().then((items) => {
+      const n = items.filter((e) => !e.rejected).length;
+      if (!n || state.profile) return;
+      $("loginError").textContent = `${n} event${n === 1 ? "" : "s"} recorded offline ${n === 1 ? "is" : "are"} waiting to sync. Log in to send ${n === 1 ? "it" : "them"}.`;
+      $("loginError").hidden = false;
+    });
+  }
 }
 
 /* ========================================================================
@@ -512,11 +584,18 @@ function showLogin(message) {
 mountLogin({ onReady: enterApp });
 
 $("logoutBtn").addEventListener("click", async () => {
+  // Send whatever is still queued first. What cannot be sent — the link is
+  // down — stays encrypted on this terminal until the same guard logs in
+  // again; the copy of the register is cleared either way.
+  await Offline.syncNow();
+  const pending = await Offline.onLogout();
   await logout();
   $("q").value = "";
   $("searchResults").innerHTML = "";
   renderDetail(null);
-  showLogin();
+  showLogin(pending
+    ? `${pending} event${pending === 1 ? "" : "s"} recorded offline ${pending === 1 ? "is" : "are"} still waiting to sync. Log in again on this terminal to send ${pending === 1 ? "it" : "them"}.`
+    : "");
 });
 
 let searchTimer;
@@ -578,6 +657,20 @@ setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
 // deactivating the account mid-shift — returns the terminal to the login
 // screen instead of leaving a dead app on display.
 setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
+
+// Offline support: the service worker keeps this page loadable with no
+// connection, and the header pill, the sync notice and the periodic replay
+// of queued events are wired here. See offline.js.
+Offline.registerWorker();
+Offline.mountUI({
+  getUserId: () => state.userId,
+  onSynced: (s) => {
+    toast(`${s.sent} event${s.sent === 1 ? "" : "s"} recorded offline ${s.sent === 1 ? "has" : "have"} been sent`, "ok");
+    refreshSummary();
+    runSearch($("q").value);
+  },
+  onUnauthenticated: () => showLogin("Your session has ended. Log in again to send the events recorded offline."),
+});
 
 // Boot. enterApp() shows the login form itself if there is no session, so
 // there is no separate "do I have a token" check to make first.

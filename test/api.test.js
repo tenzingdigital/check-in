@@ -173,7 +173,7 @@ async function main() {
   // order", not "any subset can be replayed in any order". Re-point this at the
   // newest file whenever one is added.
   await test("a missing row makes the runner re-apply that migration, cleanly", async () => {
-    const target = "009_tenants.sql";
+    const target = "011_default_tenant_for_new_users.sql";
     await withOwner((c) => c.query(`delete from public.schema_migrations where name = $1`, [target]));
 
     const applied = await migrate({ log: () => {} });
@@ -231,6 +231,8 @@ async function main() {
     }
     const post = await api.fetch("/api/checkins", { method: "POST", body: { resident_id: guardId } });
     assert.equal(post.status, 401);
+    const sync = await api.fetch("/api/sync", { method: "POST", body: { events: [] } });
+    assert.equal(sync.status, 401, "the offline replay endpoint answered without a session");
   });
 
   await test("a wrong password is refused", async () => {
@@ -316,6 +318,101 @@ async function main() {
 
     const after = await api.fetch(`/api/residents/${resident.id}/compliance`);
     assert.equal(after.json.seen_today, true);
+  });
+
+  console.log("\n== offline sync ==");
+
+  // The terminal queues events while the link is down and replays them here.
+  // What the suite proves: the event lands dated when it HAPPENED and flagged
+  // as synced later; a replay of the same ref records nothing twice; one bad
+  // item does not take the batch down; and the bounds the database enforces
+  // reach the terminal as a reason it can show, never as a 500.
+  const syncResident = (await api.fetch("/api/residents?q=nowak")).json[0];
+  const ref = () => require("crypto").randomUUID();
+  const agoIso = (ms) => new Date(Date.now() - ms).toISOString();
+  const refs = { checkin: ref(), gate: ref() };
+
+  await test("queued events are replayed, dated when they happened, and flagged", async () => {
+    const occurred = agoIso(60_000);
+    const res = await api.fetch("/api/sync", {
+      method: "POST",
+      body: { events: [
+        { ref: refs.checkin, kind: "checkin", resident_id: syncResident.id, occurred_at: occurred },
+        { ref: refs.gate, kind: "gate", direction: "in", resident_id: syncResident.id, occurred_at: agoIso(90_000) },
+      ] },
+    });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.json.results.map((r) => r.status), ["ok", "ok"]);
+
+    const { rows } = await withOwner((c) => c.query(
+      `select late_entry, occurred_at, recorded_at from public.checkin_events where client_ref = $1`, [refs.checkin]));
+    assert.equal(rows.length, 1, "the check-in was not recorded");
+    assert.equal(rows[0].late_entry, true, "a synced event was not flagged");
+    assert.ok(Math.abs(new Date(rows[0].occurred_at) - new Date(occurred)) < 1000, "occurred_at is not the terminal's time");
+    assert.ok(new Date(rows[0].recorded_at) > new Date(rows[0].occurred_at), "recorded_at should be the later server time");
+
+    const after = await api.fetch(`/api/residents/${syncResident.id}/compliance`);
+    assert.equal(after.json.seen_today, true, "a synced check-in did not satisfy the day");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const log = await api.fetch(`/api/gate-events?date=${today}`);
+    const entry = log.json.find((e) => e.resident_id === syncResident.id && e.kind === "in");
+    assert.ok(entry, "the synced gate event is not in the log");
+    assert.equal(entry.late_entry, true, "the log does not show the event as synced later");
+  });
+
+  await test("replaying the same refs records nothing twice", async () => {
+    const res = await api.fetch("/api/sync", {
+      method: "POST",
+      body: { events: [
+        { ref: refs.checkin, kind: "checkin", resident_id: syncResident.id, occurred_at: agoIso(60_000) },
+        { ref: refs.gate, kind: "gate", direction: "in", resident_id: syncResident.id, occurred_at: agoIso(90_000) },
+      ] },
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.json.results.map((r) => r.status), ["ok", "ok"], "a replay must be answered ok so the terminal drops it");
+    const { rows } = await withOwner((c) => c.query(
+      `select (select count(*)::int from public.checkin_events where client_ref = $1) as c,
+              (select count(*)::int from public.gate_events    where client_ref = $2) as g`, [refs.checkin, refs.gate]));
+    assert.deepEqual(rows[0], { c: 1, g: 1 });
+  });
+
+  await test("one bad item is rejected with its reason; the rest of the batch still lands", async () => {
+    const good = ref();
+    const res = await api.fetch("/api/sync", {
+      method: "POST",
+      body: { events: [
+        { ref: ref(), kind: "checkin", resident_id: syncResident.id, occurred_at: agoIso(3 * 86_400_000) },
+        { ref: ref(), kind: "checkin", resident_id: syncResident.id, occurred_at: new Date(Date.now() + 3_600_000).toISOString() },
+        { ref: ref(), kind: "checkin", resident_id: "00000000-0000-4000-8000-000000000000", occurred_at: agoIso(1000) },
+        { ref: "not-a-uuid", kind: "gate", direction: "sideways", resident_id: syncResident.id, occurred_at: agoIso(1000) },
+        { ref: good, kind: "gate", direction: "out", resident_id: syncResident.id, occurred_at: agoIso(30_000) },
+      ] },
+    });
+    assert.equal(res.status, 200, res.text);
+    const [old, future, unknown, malformed, ok] = res.json.results;
+    assert.equal(old.status, "rejected");       assert.match(old.error, /window/);
+    assert.equal(future.status, "rejected");    assert.match(future.error, /future/);
+    assert.equal(unknown.status, "rejected");   assert.match(unknown.error, /Resident not found/);
+    assert.equal(malformed.status, "rejected"); assert.equal(malformed.ref, "not-a-uuid");
+    assert.equal(ok.status, "ok");
+    const { rows } = await withOwner((c) => c.query(
+      `select late_entry, kind from public.gate_events where client_ref = $1`, [good]));
+    assert.deepEqual(rows, [{ late_entry: true, kind: "out" }]);
+  });
+
+  await test("an oversized batch is refused outright", async () => {
+    const events = Array.from({ length: 201 }, () => ({ ref: ref(), kind: "checkin", resident_id: syncResident.id, occurred_at: agoIso(1000) }));
+    const res = await api.fetch("/api/sync", { method: "POST", body: { events } });
+    assert.equal(res.status, 400);
+    const shape = await api.fetch("/api/sync", { method: "POST", body: { events: "nope" } });
+    assert.equal(shape.status, 400);
+  });
+
+  await test("the session endpoint tells the terminal whose queue this is", async () => {
+    const res = await api.fetch("/api/session");
+    assert.equal(res.json.profile.id, guardId);
+    assert.equal(res.json.settings.late_entry_window_hours, 48);
   });
 
   await test("a malformed id is a 400, not a 500", async () => {
@@ -829,7 +926,7 @@ async function main() {
   });
 
   await test("the two apps are served", async () => {
-    for (const path of ["/", "/index.html", "/checkin.html", "/app-common.js", "/app-common.css"]) {
+    for (const path of ["/", "/index.html", "/checkin.html", "/app-common.js", "/app-common.css", "/offline.js", "/sw.js"]) {
       const res = await api.fetch(path);
       assert.equal(res.status, 200, `${path} answered ${res.status}`);
     }

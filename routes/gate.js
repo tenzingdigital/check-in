@@ -53,7 +53,8 @@ router.get('/gate-events', wrap(async (req, res) => {
     const { rows: log } = await client.query(
       `with s as (select local_timezone as tz from public.app_settings limit 1)
        select l.id, l.resident_id, l.kind, l.occurred_at,
-              l.resident_name, l.guard_id, l.guard_name
+              l.resident_name, l.guard_id, l.guard_name,
+              l.late_entry, l.recorded_at
          from public.v_check_log l, s
         where l.occurred_at >= ($1::date)::timestamp at time zone s.tz
           and l.occurred_at <  (($1::date) + 1)::timestamp at time zone s.tz

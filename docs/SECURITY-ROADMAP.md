@@ -158,6 +158,10 @@ polls so a stale close-out is a red banner on every terminal.
 
 ### F11. Multi-tenancy is half wired, and the half that is missing is the isolation
 
+*Update:* migration 011 closes one piece of this. Every login created after
+migration 009 had no `tenant_id` at all, which the tenancy resolver refuses;
+a trigger now assigns the default tenant when none is given.
+
 `public.tenants`, `tenant/template.sql` and `lib/tenancy.js` exist and are
 tested. But `database.js` `withIdentity()` does not yet set `search_path`, no
 request resolves a tenant, `handle_new_user()` still inserts into
@@ -327,6 +331,13 @@ dates. (ISO 5.18, 8.2)
 ---
 
 ## Phase 4 — Resilience: the unstable internet (two to three weeks, staged)
+
+**Status: stages A, B, C and E are built** (`public/sw.js`, `public/offline.js`,
+`routes/sync.js`, `migrations/010_offline_sync.sql`; "Working offline" in
+`README.md` states the limits). Stage D, the paper procedure, is a document
+still to write. Stage F, the router, is a purchase. The late-entry function
+is open to any staff member for their own offline queue, bounded by the
+window; a supervisor-only paper-entry path with a stated reason can reuse it.
 
 Each stage is safe on its own. Do them in order.
 

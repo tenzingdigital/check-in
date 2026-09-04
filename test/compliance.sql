@@ -693,3 +693,144 @@ select pg_temp.expect('erase_resident returns a non-null result',
   (:'erased')::boolean, true);
 select pg_temp.expect('erase_resident cascades: no register rows remain for the erased resident',
   (:'register_rows_after_erasure')::integer, 0);
+
+\echo ''
+\echo '=========== LATE ENTRY (OFFLINE SYNC) ==========='
+-- A terminal that lost its link queues events and replays them later through
+-- record_checkin_late() / record_check_late(). Four things must hold: the
+-- event lands on the day it HAPPENED (not the day it synced), it is flagged,
+-- a replay is a no-op, and the terminal clock is bounded.
+reset role;
+update public.app_settings set local_timezone = 'Europe/Dublin';
+select id as late_id from public.residents where last_name='Nowak' \gset
+delete from public.checkin_events   where resident_id = :'late_id';
+delete from public.gate_events      where resident_id = :'late_id';
+delete from public.daily_compliance where resident_id = :'late_id';
+
+select pg_temp.expect('late_entry_window_hours defaults to 48',
+  (select late_entry_window_hours from public.app_settings where id), 48);
+
+-- The event "happened" 25 hours ago: inside the window, on the previous
+-- site-local day. Close-out has already written that day as missed.
+select (now() - interval '25 hours') as late_ts \gset
+select ((:'late_ts'::timestamptz) at time zone 'Europe/Dublin')::date as late_day \gset
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
+values (:'late_id', :'late_day'::date, true, false, null, 0, now());
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- a synced check-in lands on the day it happened and corrects the closed row'
+with r as (
+  select public.record_checkin_late(:'late_id', :'late_ts'::timestamptz,
+                                    'aaaaaaaa-0000-4000-8000-000000000001') as rec
+)
+select (r.rec).compliance_date as day, (r.rec).presented as presented,
+       (r.rec).checkin_count as cnt, (r.rec).closed_at is not null as still_closed,
+       (r.rec).first_seen_at = :'late_ts'::timestamptz as seen_at_event_time
+from r \gset late1_
+
+select pg_temp.expect('late check-in: dated the day it happened, not today',
+  (:'late1_day')::date, (:'late_day')::date);
+select pg_temp.expect('late check-in: the missed day is now presented',
+  (:'late1_presented')::boolean, true);
+select pg_temp.expect('late check-in: checkin_count = 1',
+  (:'late1_cnt')::integer, 1);
+select pg_temp.expect('late check-in: the day stays closed',
+  (:'late1_still_closed')::boolean, true);
+select pg_temp.expect('late check-in: first_seen_at is the terminal time, not the sync time',
+  (:'late1_seen_at_event_time')::boolean, true);
+
+reset role;
+select late_entry, recorded_at >= occurred_at as recorded_after, guard_id::text as guard,
+       client_ref::text as ref
+from public.checkin_events where resident_id = :'late_id' \gset ev1_
+select pg_temp.expect('late check-in: event is flagged late_entry',
+  (:'ev1_late_entry')::boolean, true);
+select pg_temp.expect('late check-in: recorded_at is not before occurred_at',
+  (:'ev1_recorded_after')::boolean, true);
+select pg_temp.expect('late check-in: attributed to the session, never to an argument',
+  :'ev1_guard'::text, '11111111-1111-1111-1111-111111111111'::text);
+select pg_temp.expect('late check-in: client_ref stored',
+  :'ev1_ref'::text, 'aaaaaaaa-0000-4000-8000-000000000001'::text);
+
+\echo '--- replaying the same client_ref records nothing'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select (public.record_checkin_late(:'late_id', :'late_ts'::timestamptz,
+                                   'aaaaaaaa-0000-4000-8000-000000000001')).checkin_count as cnt \gset replay_
+reset role;
+select count(*) as n from public.checkin_events where resident_id = :'late_id' \gset replay_
+select pg_temp.expect('replay: still one event', (:'replay_n')::integer, 1);
+select pg_temp.expect('replay: checkin_count unchanged', (:'replay_cnt')::integer, 1);
+
+\echo '--- a second ref inside 60 seconds is a double tap, not a second presentation'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select (public.record_checkin_late(:'late_id', :'late_ts'::timestamptz + interval '20 seconds',
+                                   'aaaaaaaa-0000-4000-8000-000000000002')).checkin_count as cnt \gset dtap_
+reset role;
+select count(*) as n from public.checkin_events where resident_id = :'late_id' \gset dtap_
+select pg_temp.expect('double tap: still one event', (:'dtap_n')::integer, 1);
+
+\echo '--- the terminal clock is bounded'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.try('late check-in older than the window',
+  'select public.record_checkin_late(' || quote_literal(:'late_id') || ', now() - interval ''49 hours'', ''aaaaaaaa-0000-4000-8000-000000000003'')');
+select pg_temp.try('late check-in dated in the future',
+  'select public.record_checkin_late(' || quote_literal(:'late_id') || ', now() + interval ''10 minutes'', ''aaaaaaaa-0000-4000-8000-000000000004'')');
+select pg_temp.try('late check-in without a client_ref',
+  'select public.record_checkin_late(' || quote_literal(:'late_id') || ', now() - interval ''1 hour'', null)');
+reset role;
+select count(*) as n from public.checkin_events where resident_id = :'late_id' \gset bound_
+select pg_temp.expect('bounded: none of the refused calls recorded anything', (:'bound_n')::integer, 1);
+
+\echo '--- a gate event synced later is flagged and idempotent'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select presence as presence
+from public.record_check_late(:'late_id', 'in', now() - interval '2 hours',
+                              'bbbbbbbb-0000-4000-8000-000000000001') \gset gate1_
+select presence as presence
+from public.record_check_late(:'late_id', 'in', now() - interval '2 hours',
+                              'bbbbbbbb-0000-4000-8000-000000000001') \gset gate2_
+select count(*) as n from public.v_check_log where resident_id = :'late_id' and late_entry \gset gatelog_
+reset role;
+select count(*) as n, bool_and(late_entry) as all_late, bool_and(kind = 'in') as all_in
+from public.gate_events where resident_id = :'late_id' \gset gate_
+select pg_temp.expect('late gate event: presence is in', :'gate1_presence'::text, 'in'::text);
+select pg_temp.expect('late gate event: replay leaves one row', (:'gate_n')::integer, 1);
+select pg_temp.expect('late gate event: flagged late_entry', (:'gate_all_late')::boolean, true);
+select pg_temp.expect('late gate event: v_check_log shows the flag to staff', (:'gatelog_n')::integer, 1);
+
+\echo '--- a live check-in is still recorded as live'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select (public.record_checkin(:'late_id')).checkin_count as cnt \gset live_
+reset role;
+select late_entry, recorded_at = occurred_at as same_instant
+from public.checkin_events where resident_id = :'late_id' order by occurred_at desc limit 1 \gset live_
+select pg_temp.expect('live check-in: late_entry = false', (:'live_late_entry')::boolean, false);
+select pg_temp.expect('live check-in: recorded_at = occurred_at', (:'live_same_instant')::boolean, true);
+
+\echo '--- the inner function and the window check are not doors'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.try('guard calls record_checkin_at directly',
+  'select public.record_checkin_at(' || quote_literal(:'late_id') || ', now() - interval ''30 hours'', false, null)');
+select pg_temp.try('guard calls assert_late_entry_window directly',
+  'select public.assert_late_entry_window(now())');
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+select pg_temp.try('suspended account syncs a late check-in',
+  'select public.record_checkin_late(' || quote_literal(:'late_id') || ', now() - interval ''1 hour'', ''cccccccc-0000-4000-8000-000000000001'')');
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon syncs a late check-in',
+  'select public.record_checkin_late(' || quote_literal(:'late_id') || ', now() - interval ''1 hour'', ''cccccccc-0000-4000-8000-000000000002'')');
+select pg_temp.try('anon syncs a late gate event',
+  'select public.record_check_late(' || quote_literal(:'late_id') || ', ''in'', now() - interval ''1 hour'', ''cccccccc-0000-4000-8000-000000000003'')');
+reset role;
+select count(*) as n from public.checkin_events where resident_id = :'late_id' \gset closed_
+select pg_temp.expect('no side door recorded anything', (:'closed_n')::integer, 2);

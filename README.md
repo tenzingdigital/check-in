@@ -81,14 +81,18 @@ routes/
   residents.js          search, one resident's compliance, the 30-day strip
   gate.js               on-site summary, sign in/out, the day's movement log
   checkins.js           the register: check in, attention list, annotations
+  sync.js               replay of events a terminal recorded while offline
 migrations/             numbered SQL, applied in order, exactly once
   001_platform.sql      auth.users, auth.sessions, auth.uid(), the request roles
   002_schema.sql        tables, views, RPCs, row-level security, GDPR functions
+  010_offline_sync.sql  late-entry functions: bounded, flagged, idempotent
 public/                 the ONLY directory served publicly
   index.html            the gate app — Search and Log
   checkin.html          the check-in app — Check in and Attention
   app-common.css        styles shared by both front ends
   app-common.js         the API client and helpers shared by both
+  offline.js            encrypted register copy, event queue, replay — see "Working offline"
+  sw.js                 service worker: keeps the two pages loadable with no connection
 test/
   api.test.js           the HTTP suite
   acceptance.sql        the authorisation model
@@ -470,6 +474,11 @@ thirty-line *stub* of the Supabase objects the schema depends on. That stub is
 now `001_platform.sql` — the real file, the one Render applies. The suite is no
 longer testing an approximation of production, it is testing production.
 
+`./test/e2e.sh` is optional and not part of `check.sh`: it drives the offline
+path in a real Chromium — cut the network, record, reload, reconnect, sync —
+which neither suite above can reach. It needs Playwright, installed with
+`npm install --no-save playwright` so the app's three dependencies stay three.
+
 `api.sh` builds the same cluster, boots the service against it, and drives it
 over HTTP the way a browser does. That suite exists because replacing PostgREST
 and GoTrue with four hundred lines of our own is the largest new risk in this
@@ -577,9 +586,74 @@ served CSP matches the served HTML.
 - **Photos on the register.** Would make visual verification stronger, and would
   also turn this into a system holding biometric-adjacent data. Worth doing
   deliberately, with a DPIA, not by default.
-- **Offline queueing.** A hut with flaky wifi would benefit, but it means
-  holding resident names in `localStorage` on a shared terminal. If you add it,
-  encrypt the queue and clear it on logout.
+- **Offline login.** The pages load and record with no connection (see
+  "Working offline"), but logging IN needs the server: a password is verified
+  there and nowhere else. A terminal that was not signed in when the link
+  dropped waits for it to return.
+
+### Working offline
+
+The centre's internet drops for minutes to hours at a time, and a guard at
+the door cannot wait for it. Both pages therefore keep working through an
+outage and catch up when it ends. In plain terms:
+
+1. **The pages themselves load with no connection.** `public/sw.js` is a
+   service worker, a small script the browser keeps that serves the two HTML
+   files, the stylesheet and the scripts from its own cache when the network
+   fails. It caches nothing else: every request to `/api` is left alone, which
+   is also how the page notices it is offline.
+2. **The register is still on screen.** Each time a page loads the full list
+   while online, `public/offline.js` keeps an encrypted copy on the terminal.
+   Offline, search runs against that copy (plain name matching; the server's
+   typo tolerance needs the server).
+3. **Sign-ins, sign-outs and check-ins are queued, not lost.** A tap made
+   while offline is stored on the terminal with the time it happened and a
+   random reference, and the card shows *Queued*. The header pill turns amber
+   and counts what is waiting.
+4. **When the link returns, the queue is sent** to `POST /api/sync`, which
+   records each event through `record_check_late()` or
+   `record_checkin_late()` (`migrations/010_offline_sync.sql`). Those date the
+   event to when it happened — a check-in at 23:50 that syncs at 00:10
+   satisfies *yesterday*, not today — mark it `late_entry = true` with the
+   server time in `recorded_at`, and treat a repeated reference as already
+   done, so a retry can never double-record. The gate log and the resident
+   export show which events were synced later.
+
+**What is stored on the terminal, and how.** The register copy and the queue
+are AES-GCM ciphertext in the browser's IndexedDB. The key is held in
+`sessionStorage`, which survives a reload and is discarded when the tab is
+closed — so a browser profile lifted off a stolen terminal holds ciphertext
+and no key. The register copy is cleared on logout. The queue is cleared once
+everything in it has been sent; if something is still waiting at logout it is
+deliberately kept, encrypted, and the login screen says so.
+
+**The limits, stated plainly:**
+
+- **Keep the tab open during an outage.** Closing it discards the key, so
+  anything still queued becomes unreadable on that terminal. The header pill
+  says so while anything is waiting, and the app then shows what was lost so
+  it can be recorded from the paper sheet. Do not reboot a terminal mid-outage.
+- **The session must still be valid when the queue is sent.** Sessions last
+  12 hours; an outage longer than the rest of the shift means the guard logs
+  in again and the queue is sent then. Only the guard who recorded an event
+  can send it — the terminal will not hand one guard's events to another's
+  login, and the server would attribute them to the session regardless.
+- **A reload during an outage** carries on with the profile the tab last
+  saw. A tab that was never signed in cannot log in until the link returns.
+- **Terminals cannot see each other's queued events.** Two doors both offline
+  show two different pictures until both sync. The Attention tab and the
+  header counts need the server and say so.
+- **The terminal's clock is trusted for a late entry, within bounds.** The
+  server refuses anything dated in the future or older than
+  `app_settings.late_entry_window_hours` (default 48). Keep terminal clocks
+  set automatically.
+- **A rejected event is never silently dropped.** If the server refuses one
+  for good — the resident departed meanwhile, the window passed — it stays on
+  screen with the reason until somebody dismisses it.
+
+For an outage that outlasts these limits, the fallback is the paper sheet and
+a supervisor entering it afterwards. That path, and a 4G failover router, are
+in `docs/SECURITY-ROADMAP.md`.
 
 **Backdated departures.** `required` is written once per day by close-out and
 nothing recomputes it. If a supervisor learns on Friday that a resident left

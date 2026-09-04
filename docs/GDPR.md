@@ -159,6 +159,25 @@ page source carried a publishable key (harmless by design, but a credential
 that identified the project to anyone who looked); now the page holds nothing,
 and the session is an `HttpOnly` cookie the JavaScript cannot read.
 
+### Data held on the terminal during an outage
+
+Since the offline work (`README.md`, "Working offline") each terminal keeps
+an encrypted copy of the register it last loaded — names, identity numbers
+and today's status, never dates of birth, which no staff-facing endpoint
+returns — and an encrypted queue of events recorded while the link was down.
+Both are AES-GCM ciphertext in the browser's storage; the key is discarded
+when the tab closes; the register copy is cleared at logout; the queue is
+cleared once sent. This is a new location for personal data and belongs in
+the ROPA and the DPIA as such: the terminal is now a device that holds
+resident data at rest, briefly, under the centre's physical control. The
+mitigations are the encryption, the short life of the key, and the physical
+controls on the terminal itself (kiosk mode, a locked hut).
+
+Events synced later carry `late_entry = true` and the server time in
+`recorded_at` alongside the terminal's `occurred_at`, so the register never
+presents a synced event as if it had been recorded live. Both appear in the
+Art. 15 export.
+
 ---
 
 ## Data subject rights

@@ -218,6 +218,30 @@
   .logrow .by { display: block; font-size: 12px; color: var(--muted); }
 
   .row { display: flex; gap: 10px; align-items: center; }
+
+  /* ---- connectivity (offline.js) ---- */
+  /* Amber, not red, when offline: the terminal is still recording, to itself.
+     The one thing a guard must not do during an outage is close the tab, and
+     the pill says so while anything is queued. */
+  .net {
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+    padding: 6px 10px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--line); color: var(--muted);
+  }
+  .net.off     { background: var(--warn); border-color: transparent; color: #2b1d00; }
+  .net.syncing { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .pill.queued {
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  }
+  .alert.warn {
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+    color: #ffe9b3;
+  }
+  .synclist { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .synclist .row { justify-content: space-between; align-items: flex-start; font-size: 13px; color: var(--text); }
+  .synclist .btn.ghost { padding: 8px 10px; font-size: 13px; flex: none; }
   .empty { text-align: center; color: var(--muted); padding: 36px 16px; }
   .hint { color: var(--muted); font-size: 13px; }
 
