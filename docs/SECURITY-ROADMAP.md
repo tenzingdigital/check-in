@@ -270,22 +270,23 @@ red banner when close-out is more than a day behind. (ISO 8.16; fixes F10)
 This phase is where "adding staff on mobile isn't great" gets fixed, and where
 the DPA's promises become true.
 
-**2.1 Resident management.** `POST /api/residents`, `PATCH` extended to name,
-date of birth and `departed_on`, all under the existing `residents_supervisor`
-policy so the database still decides. A supervisor-only "Residents" tab in the
-check-in app: add, edit, mark departed with a date. Date of birth is entered
-once and never displayed again outside the edit form. (fixes F4)
+**2.1 Resident management.** *Done, 4 September:* `POST /api/residents`,
+`GET /api/residents/:id/record`, and `PATCH` extended to name, date of birth,
+ID and departure, all under the existing `residents_supervisor` policy so the
+database still decides. The Residents tab on `public/admin.html`: add, edit,
+mark departed with a last day on site, reactivate. Date of birth is entered
+once and shown only in the edit sheet. Covered by five HTTP assertions and
+the browser test. (fixes F4)
 
 **2.2 Export and erase.** `GET /api/residents/:id/export` returning the JSON,
 and `DELETE /api/residents/:id` taking a reason and requiring the resident's
 full name typed back. Admin only, enforced by the functions themselves. Two
 buttons on the detail panel, visible to admins. (fixes F3)
 
-**2.3 Staff management that works on a phone.** The current Staff tab
-(`public/index.html`) asks an administrator to type a twelve-character initial
-password on a phone keyboard, hand it over in person, and later reset it
-through a browser `prompt()`. The card row packs a select and two buttons into
-a flex row with no wrap, so on a narrow screen they overflow. Change it to:
+**2.3 Staff management that works on a phone.** *Partly done:* the Staff
+tab has moved out of the gate app to `public/admin.html`, where the form is
+labelled and stacks on a phone and the card actions get a row of their own.
+Still to do is the part that removes typing passwords for other people:
 
 - **Invite by email, no initial password.** `admin_create_staff()` already
   creates the account; drop the password parameter and let `auth.create_user()`

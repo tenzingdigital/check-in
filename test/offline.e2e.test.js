@@ -142,6 +142,33 @@ async function launch() {
     await sup.click("#idSave");
     await sup.waitForFunction(() => /IRP IRP1234567/.test(document.querySelector("#detail .idline").textContent));
     assert.equal(await sup.locator("#idForm").count(), 0, "the editor should close after saving");
+
+    step("the Admin page: a supervisor adds a resident and marks them departed");
+    assert.equal(await sup.locator("#adminLink").isHidden(), false, "the Admin link should show for a supervisor");
+    await sup.goto(BASE + "/admin.html");
+    await sup.waitForSelector("#panelResidents:not([hidden])");
+    await sup.waitForFunction(() => document.querySelectorAll("#residentList button.card").length > 0);
+    assert.equal(await sup.locator("#tabStaff").isHidden(), true, "Staff must be hidden from a supervisor");
+    await sup.click("#showAdd");
+    await sup.fill("#afFirst", "Zelda");
+    await sup.fill("#afLast", "Testperson");
+    await sup.fill("#afDob", "1992-03-04");
+    await sup.click('#addForm .seg button[data-type="TRC"]');
+    await sup.fill("#afNumber", "trc55555");
+    await sup.click("#afSave");
+    await sup.waitForFunction(() => [...document.querySelectorAll("#residentList .name")].some((e) => e.textContent === "Zelda Testperson"));
+    await sup.fill("#q", "testperson");
+    await sup.waitForFunction(() => document.querySelectorAll("#residentList button.card").length === 1);
+    await sup.locator("#residentList button.card").first().click();
+    await sup.waitForSelector("#detail:not([hidden])");
+    assert.equal(await sup.inputValue("#efDob"), "1992-03-04", "the edit sheet should carry the date of birth");
+    sup.once("dialog", (d) => d.accept());
+    await sup.click("#depart");
+    await sup.waitForFunction(() => document.querySelector('#statusFilter button[data-status="departed"]').getAttribute("aria-pressed") === "true");
+    await sup.waitForFunction(() => [...document.querySelectorAll("#residentList .pill")].some((e) => /departed/i.test(e.textContent)));
+    step("departed resident shows under the Departed view");
+    await sup.goto(BASE + "/checkin.html");
+    await sup.waitForSelector("#app:not([hidden])");
     // Back to the guard for the remaining steps.
     await sup.evaluate(() => fetch("/api/session", { method: "DELETE" }));
     await sup.close();

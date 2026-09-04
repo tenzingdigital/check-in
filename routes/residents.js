@@ -14,11 +14,53 @@
 const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
-const { HttpError, uuidParam, intParam } = require('../lib/api');
+const { HttpError, uuidParam, intParam, dateParam } = require('../lib/api');
 
 const router = express.Router();
 
 const STRIP_DAYS = 30;
+
+/* --------------------------------------------------------------------------
+   Validation for the fields a supervisor may write
+   ------------------------------------------------------------------------ */
+
+function nameParam(value, field) {
+  const v = String(value || '').trim();
+  if (!v || v.length > 80) throw new HttpError(400, `${field} is required (up to 80 characters)`);
+  return v;
+}
+
+// A date of birth: well-formed, a real calendar date, after 1900, not in the
+// future. The table constraint says the same; checking here turns a typo into
+// a message rather than a constraint name.
+function dobParam(value) {
+  const v = dateParam(value, 'Date of birth');
+  const d = new Date(v + 'T00:00:00Z');
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) throw new HttpError(400, 'Date of birth is not a real date');
+  if (v <= '1900-01-01') throw new HttpError(400, 'Date of birth must be after 1900');
+  if (v > new Date().toISOString().slice(0, 10)) throw new HttpError(400, 'Date of birth cannot be in the future');
+  return v;
+}
+
+// TRC/IRP: both or neither, matching the residents_id_pair constraint.
+function idParams(body) {
+  const hasType = Object.prototype.hasOwnProperty.call(body, 'id_type');
+  const hasNumber = Object.prototype.hasOwnProperty.call(body, 'id_number');
+  if (!hasType && !hasNumber) return null;                         // not mentioned: leave alone
+  const idType = body.id_type === null ? null : String(body.id_type || '').trim().toUpperCase();
+  // Upper-cased: the card prints it that way, and search_key is built from it.
+  const idNumber = body.id_number === null ? null : String(body.id_number || '').trim().toUpperCase();
+  if (!idType && !idNumber) return { idType: null, idNumber: null };  // clearing
+  if (idType !== 'TRC' && idType !== 'IRP') throw new HttpError(400, 'ID type must be TRC or IRP');
+  if (!idNumber || idNumber.length > 40) throw new HttpError(400, 'Enter the number printed on the card');
+  return { idType, idNumber };
+}
+
+// The row policy refuses a guard's write with 42501. Say so in words.
+function supervisorOnly(err) {
+  if (err && err.code === '42501') return new HttpError(403, 'Only a supervisor or admin can manage residents');
+  return err;
+}
 
 // GET /api/residents?q=&limit=&compliance=1
 //
@@ -31,11 +73,14 @@ router.get('/', wrap(async (req, res) => {
   const q = String(req.query.q || '').trim();
   const limit = intParam(req.query.limit, 20, 1000);
   const wantCompliance = req.query.compliance === '1';
+  // departed=1 includes residents who have left — the admin page's Departed
+  // view. The gate and the register never ask for it.
+  const includeDeparted = req.query.departed === '1';
 
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: found } = await client.query(
-      'select * from public.search_residents($1, false, $2)',
-      [q, limit],
+      'select * from public.search_residents($1, $2, $3)',
+      [q, includeDeparted, limit],
     );
     if (!wantCompliance || found.length === 0) return found;
 
@@ -93,47 +138,105 @@ router.get('/:id/days', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-// PATCH /api/residents/:id — record the TRC/IRP shown at sign-in.
+// POST /api/residents — add a resident to the register.
 //
-// Authorisation is the row policy, not this handler: `residents_supervisor`
-// allows the write only for is_supervisor(), which covers supervisor and
-// admin. A guard's update matches no rows, so they get a 403 without this
-// file knowing anything about roles.
-router.patch('/:id', wrap(async (req, res) => {
+// Authorisation is the residents_supervisor row policy: a guard's insert is
+// refused by the database with 42501, which becomes a 403 here. The
+// registering user is auth.uid(), never an argument.
+router.post('/', wrap(async (req, res) => {
   const body = req.body || {};
-  const hasType = Object.prototype.hasOwnProperty.call(body, 'id_type');
-  const hasNumber = Object.prototype.hasOwnProperty.call(body, 'id_number');
-  if (!hasType && !hasNumber) throw new HttpError(400, 'Nothing to change');
-
-  const idType = body.id_type === null ? null : String(body.id_type || '').trim().toUpperCase();
-  const idNumber = body.id_number === null ? null : String(body.id_number || '').trim();
-
-  // Both or neither, matching the constraint. Clearing one clears both.
-  const clearing = !idType && !idNumber;
-  if (!clearing) {
-    if (idType !== 'TRC' && idType !== 'IRP') {
-      throw new HttpError(400, "ID type must be TRC or IRP");
-    }
-    if (!idNumber || idNumber.length > 40) {
-      throw new HttpError(400, 'Enter the number printed on the card');
-    }
-  }
+  const first = nameParam(body.first_name, 'First name');
+  const last = nameParam(body.last_name, 'Last name');
+  const dob = dobParam(body.date_of_birth);
+  const id = idParams(body) || { idType: null, idNumber: null };
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `update public.residents
-          set id_type = $2, id_number = $3
-        where id = $1
-        returning id`,
-      [uuidParam(req.params.id, 'resident id'),
-       clearing ? null : idType,
-       clearing ? null : idNumber],
+      `insert into public.residents (first_name, last_name, date_of_birth, id_type, id_number, registered_by)
+       values ($1, $2, $3, $4, $5, auth.uid())
+       returning id`,
+      [first, last, dob, id.idType, id.idNumber],
+    );
+    return rows[0];
+  }).catch((err) => { throw supervisorOnly(err); });
+
+  res.status(201).json({ id: row.id });
+}));
+
+// GET /api/residents/:id/record — the row as a supervisor edits it. This is
+// the ONE endpoint that returns a date of birth, and only to a role the row
+// policy lets read the residents table; a guard gets 404, because for them
+// the row does not exist.
+router.get('/:id/record', wrap(async (req, res) => {
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select id, first_name, last_name, date_of_birth, id_type, id_number,
+              status, departed_on, registered_at
+         from public.residents where id = $1`,
+      [uuidParam(req.params.id, 'resident id')],
     );
     return rows[0];
   });
+  if (!row) throw new HttpError(404, 'No such resident, or not authorised');
+  res.json(row);
+}));
+
+// PATCH /api/residents/:id — change a resident's details.
+//
+// Any of: first_name, last_name, date_of_birth, id_type + id_number (both or
+// neither), status with departed_on. Authorisation is the row policy, not
+// this handler: `residents_supervisor` allows the write only for
+// is_supervisor(), which covers supervisor and admin. A guard's update
+// matches no rows, so they get a 403 without this file knowing anything
+// about roles.
+//
+// Departure: status 'departed' needs a departed_on date (today if none is
+// given), which is the last day the daily rule applies — see
+// departed_on_matches_status in migrations/002. Setting it before the next
+// nightly close-out is what stops a departed resident collecting breaches.
+// Reactivating clears the date.
+router.patch('/:id', wrap(async (req, res) => {
+  const body = req.body || {};
+  const sets = [];
+  const args = [uuidParam(req.params.id, 'resident id')];
+  const set = (col, val) => { args.push(val); sets.push(`${col} = $${args.length}`); };
+
+  if (Object.prototype.hasOwnProperty.call(body, 'first_name')) set('first_name', nameParam(body.first_name, 'First name'));
+  if (Object.prototype.hasOwnProperty.call(body, 'last_name')) set('last_name', nameParam(body.last_name, 'Last name'));
+  if (Object.prototype.hasOwnProperty.call(body, 'date_of_birth')) set('date_of_birth', dobParam(body.date_of_birth));
+
+  const id = idParams(body);
+  if (id) { set('id_type', id.idType); set('id_number', id.idNumber); }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'status')) {
+    const status = String(body.status || '');
+    if (status === 'departed') {
+      const on = body.departed_on ? dateParam(body.departed_on, 'Departure date') : null;
+      set('status', 'departed');
+      if (on) set('departed_on', on);
+      else sets.push('departed_on = public.site_today()');
+    } else if (status === 'active') {
+      set('status', 'active');
+      set('departed_on', null);
+    } else {
+      throw new HttpError(400, "status must be 'active' or 'departed'");
+    }
+  }
+
+  if (!sets.length) throw new HttpError(400, 'Nothing to change');
+
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `update public.residents set ${sets.join(', ')}
+        where id = $1
+        returning id, first_name, last_name, id_type, id_number, status, departed_on`,
+      args,
+    );
+    return rows[0];
+  }).catch((err) => { throw supervisorOnly(err); });
 
   if (!row) throw new HttpError(403, 'Only a supervisor or admin can change resident details');
-  res.json({ ok: true, id_type: clearing ? null : idType, id_number: clearing ? null : idNumber });
+  res.json({ ok: true, ...row });
 }));
 
 module.exports = router;

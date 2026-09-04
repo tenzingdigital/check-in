@@ -113,6 +113,7 @@
       <nav class="viewswitch" aria-label="App view">
         <a href="/index.html">Gate</a>
         <span aria-current="page">Daily register</span>
+        <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
       <span id="netState" class="net" hidden></span>
       <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
@@ -654,6 +655,7 @@ async function enterApp() {
 
   $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
+  $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
 
   $("login").hidden = true;
   $("app").hidden = false;

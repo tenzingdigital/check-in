@@ -160,13 +160,12 @@ slides the first card a few pixels with "swipe right to sign in" — or a
 subtle chevron on the card's edge would surface it. Keep the tap path as the
 canonical one.
 
-### P1.7 The Staff tab is in the wrong app
+### P1.7 The Staff tab is in the wrong app — *done the same afternoon*
 
-Administration lives inside the gate app's tab row, so it is one tap from a
-guard's working screen (hidden for guards, but present for the admin who is
-also covering the door). Move Staff, and the coming Residents and Settings
-screens, to an Admin area reached from the header, and keep the two working
-apps for working.
+Administration lived inside the gate app's tab row, one tap from a guard's
+working screen. It now lives on an Admin page reached from the header
+(`public/admin.html`), with Residents for supervisors and Staff for admins,
+and the two working apps are left for working. Settings will join it there.
 
 ### P1.8 Password reset through `prompt()`
 

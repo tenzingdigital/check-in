@@ -824,6 +824,91 @@ async function main() {
     assert.equal((await fresh.fetch("/api/summary")).status, 401);
   });
 
+  console.log("\n== resident management ==");
+
+  // The admin page's Residents tab. Authorisation is the residents_supervisor
+  // row policy; what this proves is that the routes neither add a way around
+  // it nor lose its refusals, and that departure does what the register
+  // needs it to do.
+  // The revocation tests above ended every session the guard held; log the
+  // guard client back in so the "guard cannot" probes are a guard, not anon.
+  assert.equal((await api.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } })).status, 200);
+
+  const supC = client(base);
+  await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, [
+    "sup2@hut.example", PASSWORD, "Sam Supervisor", "supervisor",
+  ]));
+  assert.equal((await supC.fetch("/api/session", { method: "POST", body: { email: "sup2@hut.example", password: PASSWORD } })).status, 200);
+  let newId;
+
+  await test("a supervisor adds a resident, and the guard then finds them", async () => {
+    const res = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Testy", last_name: "Newcomer", date_of_birth: "1990-06-15", id_type: "trc", id_number: "trc9999" },
+    });
+    assert.equal(res.status, 201, res.text);
+    newId = res.json.id;
+    const found = await api.fetch("/api/residents?q=newcomer");
+    assert.ok(found.json.some((r) => r.id === newId), "the guard cannot find the new resident");
+    assert.equal(found.json.find((r) => r.id === newId).id_number, "TRC9999", "the ID was not upper-cased");
+  });
+
+  await test("a guard cannot add, read for edit, or change a resident", async () => {
+    const add = await api.fetch("/api/residents", { method: "POST", body: { first_name: "Nope", last_name: "Never", date_of_birth: "1990-01-01" } });
+    assert.equal(add.status, 403, `guard add answered ${add.status}`);
+    const rec = await api.fetch(`/api/residents/${newId}/record`);
+    assert.equal(rec.status, 404, "a guard could read a date of birth through /record");
+    const edit = await api.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { last_name: "Hacked" } });
+    assert.equal(edit.status, 403, `guard edit answered ${edit.status}`);
+  });
+
+  await test("bad input is a message, not a constraint name", async () => {
+    for (const [body, re] of [
+      [{ first_name: "", last_name: "X", date_of_birth: "1990-01-01" }, /First name/],
+      [{ first_name: "A", last_name: "B", date_of_birth: "2999-01-01" }, /future/],
+      [{ first_name: "A", last_name: "B", date_of_birth: "1990-02-30" }, /real date/],
+      [{ first_name: "A", last_name: "B", date_of_birth: "1990-01-01", id_type: "XYZ", id_number: "1" }, /TRC or IRP/],
+    ]) {
+      const res = await supC.fetch("/api/residents", { method: "POST", body });
+      assert.equal(res.status, 400, JSON.stringify(body));
+      assert.match(res.json.error, re);
+    }
+  });
+
+  await test("the edit record carries the date of birth for a supervisor, and edits stick", async () => {
+    const rec = await supC.fetch(`/api/residents/${newId}/record`);
+    assert.equal(rec.status, 200);
+    assert.equal(rec.json.date_of_birth, "1990-06-15");
+    const edit = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { last_name: "Newcomer-Smith", date_of_birth: "1991-06-15", id_type: null, id_number: null } });
+    assert.equal(edit.status, 200, edit.text);
+    const after = await supC.fetch(`/api/residents/${newId}/record`);
+    assert.equal(after.json.last_name, "Newcomer-Smith");
+    assert.equal(after.json.date_of_birth, "1991-06-15");
+    assert.equal(after.json.id_number, null, "clearing the ID did not clear it");
+  });
+
+  await test("departing a resident stops the gate; reactivating restores it", async () => {
+    const dep = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { status: "departed" } });
+    assert.equal(dep.status, 200, dep.text);
+    assert.equal(dep.json.status, "departed");
+    assert.match(String(dep.json.departed_on), /^\d{4}-\d{2}-\d{2}$/, "departed_on should default to the site's today");
+
+    const gate = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: newId, direction: "in" } });
+    assert.equal(gate.status, 400);
+    assert.match(gate.json.error, /not active/);
+
+    const active = await api.fetch("/api/residents?q=newcomer");
+    assert.ok(!active.json.some((r) => r.id === newId), "a departed resident still shows in the working list");
+    const all = await supC.fetch("/api/residents?q=newcomer&departed=1");
+    assert.ok(all.json.some((r) => r.id === newId), "the Departed view does not show them");
+
+    const back = await supC.fetch(`/api/residents/${newId}`, { method: "PATCH", body: { status: "active" } });
+    assert.equal(back.status, 200);
+    assert.equal(back.json.departed_on, null);
+    const gate2 = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: newId, direction: "in" } });
+    assert.equal(gate2.status, 200, "reactivated resident cannot be signed in");
+  });
+
   console.log("\n== staff management ==");
 
   // The admin's Staff tab. Authorisation lives in the database — the create
@@ -963,7 +1048,7 @@ async function main() {
   });
 
   await test("the two apps are served", async () => {
-    for (const path of ["/", "/index.html", "/checkin.html", "/app-common.js", "/app-common.css", "/offline.js", "/sw.js"]) {
+    for (const path of ["/", "/index.html", "/checkin.html", "/admin.html", "/app-common.js", "/app-common.css", "/offline.js", "/sw.js"]) {
       const res = await api.fetch(path);
       assert.equal(res.status, 200, `${path} answered ${res.status}`);
     }
@@ -1000,10 +1085,13 @@ async function main() {
     assert.ok(!/cdn\.jsdelivr\.net|supabase/.test(csp), "CSP still names a third-party origin");
     assert.match(csp, /frame-ancestors 'none'/);
 
-      const crypto = require("crypto");
-    for (const m of res.text.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
-      const hash = crypto.createHash("sha256").update(m[1], "utf8").digest("base64");
-      assert.ok(csp.includes(`'sha256-${hash}'`), "an inline script in index.html is not hashed into the CSP");
+    const crypto = require("crypto");
+    for (const page of ["/index.html", "/checkin.html", "/admin.html"]) {
+      const html = (await api.fetch(page)).text;
+      for (const m of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
+        const hash = crypto.createHash("sha256").update(m[1], "utf8").digest("base64");
+        assert.ok(csp.includes(`'sha256-${hash}'`), `an inline script in ${page} is not hashed into the CSP`);
+      }
     }
   });
 

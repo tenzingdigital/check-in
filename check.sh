@@ -28,7 +28,7 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 step "JavaScript parses"
 node -e "
 const fs=require('fs'),vm=require('vm');
-for (const f of ['public/index.html','public/checkin.html']) {
+for (const f of ['public/index.html','public/checkin.html','public/admin.html']) {
   const h=fs.readFileSync(f,'utf8');
   const inline=[...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)];
   if (!inline.length) throw new Error(f+' has no inline script — the CSP hashes would be empty');

@@ -90,6 +90,7 @@ migrations/             numbered SQL, applied in order, exactly once
 public/                 the ONLY directory served publicly
   index.html            the gate app — Search and Log
   checkin.html          the check-in app — the register, filtered by its tiles
+  admin.html            the organisation's page — residents (supervisors) and staff (admins)
   app-common.css        styles shared by both front ends
   app-common.js         the API client and helpers shared by both
   offline.js            encrypted register copy, event queue, replay — see "Working offline"
@@ -329,20 +330,32 @@ so the link points at your own domain rather than the host Render answers on.
 > before you have staff who are not you.
 
 Two other routes exist and always have: an admin can reset anyone's password
-from the **Staff** tab, and `node staff.js passwd <email>` works from a shell.
+from the **Admin** page, and `node staff.js passwd <email>` works from a shell.
 The reset link is the only one of the three that helps the *last remaining
 admin*, who has nobody above them to do it.
 
-### 4. Add the rest of the staff
+### 4. Add the rest of the staff, and the residents
 
-Once you can log in as an admin, the gate app grows a **Staff** tab (admins
-only). It lists every account and lets you add one (name, email, role, initial
-password), change a role, reset a password, and disable or re-enable access —
-no shell needed. Disabling and password resets end the account's open sessions
-immediately, the same as the CLI below. The tab is hidden from guards and
-supervisors, and the database refuses each of those operations for them
-regardless: creation and resets go through admin-gated `SECURITY DEFINER`
-functions, and profile updates through the admin-only row policy.
+Once you can log in as an admin, the header of either app shows an **Admin**
+link (supervisors see it too). `admin.html` is the organisation's page, kept
+out of the two working apps:
+
+- **Residents** (supervisors and admins): the register itself. Add a
+  resident (name, date of birth, TRC/IRP if known), correct their details,
+  and mark them departed with their last day on site — or reactivate them.
+  The date of birth is entered here and never shown anywhere else. An Active
+  / Departed switch shows who has left. Set the departure date before the
+  next nightly close-out, or the days after it are recorded as missed.
+- **Staff** (admins only): every account, with add (name, email, role,
+  initial password), change role, reset password, and disable or re-enable.
+  Disabling and password resets end the account's open sessions
+  immediately, the same as the CLI below.
+
+Visibility is presentation, not security: the database refuses each of those
+operations for anyone else regardless. Resident writes go through the
+`residents_supervisor` row policy, staff creation and resets through
+admin-gated `SECURITY DEFINER` functions, and profile updates through the
+admin-only row policy. A guard who opens the page is told it is not for them.
 
 The same operations are also available as a CLI. Run it from Render
 → your service → **Shell** if your plan has one, or from your own machine

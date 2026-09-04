@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<title>Hut Check-In — Admin</title>
+
+<!--
+  Hut Check-In — the admin page. No build step, no framework, no CDN.
+
+  Organisation work, kept out of the two working apps: the register of
+  residents (add, correct, mark departed) for supervisors and admins, and
+  staff accounts for admins. Everything here is a plain form over the same
+  API the working apps use, and every write is decided by the database — the
+  residents_supervisor row policy and the admin-gated staff functions — not by
+  which tab is visible. See routes/residents.js and routes/staff.js.
+-->
+
+<link rel="stylesheet" href="/app-common.css">
+<style>
+  .formcard {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 14px 16px; margin-top: 12px; display: grid; gap: 10px;
+  }
+  .formcard h2 { margin: 0; font-size: 16px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; padding: 11px 8px; border-radius: 10px;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-weight: 650;
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #041025; }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  label.lbl { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px 2px; }
+  input.field.upper { text-transform: uppercase; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .toolbar .field { flex: 1; }
+  .btn.small { padding: 12px 14px; font-size: 15px; flex: none; }
+  .danger { color: var(--bad); }
+  .btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
+  .pill.departed { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
+  .notice { padding: 14px 16px; }
+  /* Staff cards on a phone: the actions get a row of their own. */
+  @media (max-width: 600px) {
+    .card.staff { flex-wrap: wrap; }
+    .card.staff .who { flex: 1 1 60%; }
+    .card.staff .actions-row { flex: 1 1 100%; display: flex; gap: 6px; }
+    .card.staff .actions-row .btn.ghost { flex: 1; padding: 10px 8px; font-size: 14px; }
+    .card.staff .actions-row select { flex: 1; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ========================= LOGIN ========================= -->
+<section id="login" class="login" hidden>
+  <h1>Hut Check-In — Admin</h1>
+  <p>Supervisor or administrator sign-in required.</p>
+  <div id="loginError" class="alert" hidden></div>
+  <form id="loginForm" autocomplete="on">
+    <input id="email" class="field" type="email" placeholder="Email" autocomplete="username" required>
+    <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button id="loginBtn" class="btn" type="submit">Log in</button>
+  </form>
+</section>
+
+<!-- ========================= APP ========================= -->
+<div id="app" hidden>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <span id="siteName">Security Hut</span>
+        <small id="guardName">&nbsp;</small>
+      </div>
+      <nav class="viewswitch" aria-label="App view">
+        <a href="/index.html">Gate</a>
+        <a href="/checkin.html">Daily register</a>
+        <span aria-current="page">Admin</span>
+      </nav>
+      <span id="netState" class="net" hidden></span>
+      <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="appError" class="alert" hidden></div>
+    <div id="syncNotice" class="alert warn" hidden></div>
+
+    <!-- A guard has nothing to do here; say so rather than show empty panels. -->
+    <div id="notForYou" class="formcard notice" hidden>
+      <h2>This area is for supervisors and administrators.</h2>
+      <p class="hint" style="margin:0">Residents are managed by supervisors; staff accounts by administrators.
+        <a href="/checkin.html">Back to the daily register</a>.</p>
+    </div>
+
+    <nav class="tabs" role="tablist" id="adminTabs" hidden>
+      <button role="tab" id="tabResidents" aria-selected="true"  aria-controls="panelResidents">Residents</button>
+      <button role="tab" id="tabStaff"     aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
+    </nav>
+
+    <!-- ---- residents (supervisors and admins) ---- -->
+    <section id="panelResidents" role="tabpanel" aria-labelledby="tabResidents" hidden>
+      <div class="toolbar">
+        <input id="q" class="field" type="search" placeholder="Find a resident…"
+               autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+        <button class="btn small primary-in" id="showAdd" type="button">Add</button>
+      </div>
+      <nav class="chips" id="statusFilter" aria-label="Filter by status">
+        <button type="button" data-status="active"   aria-pressed="true">Active</button>
+        <button type="button" data-status="departed" aria-pressed="false">Departed</button>
+      </nav>
+
+      <form id="addForm" class="formcard" autocomplete="off" hidden>
+        <h2>Add a resident</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="afFirst">First name</label><input id="afFirst" class="field" type="text" required maxlength="80"></div>
+          <div><label class="lbl" for="afLast">Last name</label><input id="afLast" class="field" type="text" required maxlength="80"></div>
+        </div>
+        <div>
+          <label class="lbl" for="afDob">Date of birth</label>
+          <input id="afDob" class="field" type="date" required>
+          <p class="hint" style="margin:4px 2px 0">Used only to apply the adult rule. Never shown to guards.</p>
+        </div>
+        <div>
+          <label class="lbl">ID card (optional)</label>
+          <div class="seg" role="group" aria-label="ID type">
+            <button type="button" data-type="" aria-pressed="true">None yet</button>
+            <button type="button" data-type="TRC" aria-pressed="false">TRC</button>
+            <button type="button" data-type="IRP" aria-pressed="false">IRP</button>
+          </div>
+          <input id="afNumber" class="field upper" type="text" placeholder="Number as printed on the card" maxlength="40" style="margin-top:8px" hidden>
+        </div>
+        <div class="actions">
+          <button class="btn primary-in" id="afSave" type="submit">Add to register</button>
+          <button class="btn ghost" id="afCancel" type="button">Cancel</button>
+        </div>
+      </form>
+
+      <div id="residentList" class="list"></div>
+    </section>
+
+    <!-- ---- staff (admins only; the database refuses every operation below
+         for a non-admin regardless of what is visible) ---- -->
+    <section id="panelStaff" role="tabpanel" aria-labelledby="tabStaff" hidden>
+      <form id="staffForm" class="formcard" autocomplete="off">
+        <h2>Add a staff account</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="sfName">Full name</label><input id="sfName" class="field" type="text" required></div>
+          <div><label class="lbl" for="sfRole">Role</label>
+            <select id="sfRole" class="field">
+              <option value="guard">guard</option>
+              <option value="supervisor">supervisor</option>
+              <option value="admin">admin</option>
+            </select></div>
+        </div>
+        <div class="grid2">
+          <div><label class="lbl" for="sfEmail">Email</label><input id="sfEmail" class="field" type="email" required></div>
+          <div><label class="lbl" for="sfPassword">Initial password (min 12)</label>
+            <input id="sfPassword" class="field" type="password" minlength="12" required autocomplete="new-password"></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary-in" id="sfAdd" type="submit">Add account</button>
+        </div>
+        <p class="hint" style="margin:0">
+          Hand the initial password over in person and reset it if it is ever shared further.
+          <b>admin</b> manages staff and residents, <b>supervisor</b> manages residents,
+          <b>guard</b> signs residents in and out and records check-ins.
+        </p>
+      </form>
+      <div id="staffList" class="list"></div>
+    </section>
+
+    <!-- ---- resident edit sheet ---- -->
+    <div id="detail" class="detail" hidden></div>
+  </main>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/app-common.js"></script>
+<script src="/offline.js"></script>
+
+<script>
+"use strict";
+
+/* ========================================================================
+   State
+   ====================================================================== */
+const state = {
+  profile:  null,
+  userId:   null,
+  settings: null,
+  tab:      "residents",
+  status:   "active",    // Active | Departed view
+  rows:     new Map(),
+  selected: null,
+  addType:  "",
+};
+
+const canResidents = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
+const canStaff = () => !!state.profile && state.profile.role === "admin";
+
+function todayISODate() {
+  const n = new Date();
+  const p = (v) => String(v).padStart(2, "0");
+  return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+}
+
+/* ========================================================================
+   Residents
+   ====================================================================== */
+
+// Lists never carry a date of birth (Tao 3 / data minimisation): the card
+// shows age and the ID, and the date is fetched into the edit sheet only.
+function residentCard(r) {
+  const bits = [`age ${r.age_years}`];
+  bits.push(r.id_number ? `${esc(r.id_type)} ${esc(r.id_number)}` : "no ID recorded");
+  const departed = r.status === "departed";
+  return `
+    <button class="card" data-id="${esc(r.id)}" type="button">
+      <span class="who">
+        <span class="name">${esc(r.full_name)}</span>
+        <span class="meta">${bits.join(" · ")}</span>
+      </span>
+      <span class="pill ${departed ? "departed" : "in"}">${departed ? "Departed" : "Active"}</span>
+    </button>`;
+}
+
+let searchToken = 0;
+async function loadResidents() {
+  const token = ++searchToken;
+  const q = $("q").value.trim();
+  const box = $("residentList");
+  if (!box.querySelector("button.card")) box.innerHTML = '<p class="empty">Loading the register…</p>';
+
+  const rows = await guarded(
+    () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000&departed=1`),
+    (err) => { Offline.noteFailure(err); showError("Could not load residents: " + err.message); },
+  );
+  if (token !== searchToken || !rows) return;
+  showError("");
+
+  state.rows.clear();
+  rows.forEach((r) => state.rows.set(r.id, r));
+  const shown = rows.filter((r) => (state.status === "departed") === (r.status === "departed"));
+  const counts = { active: rows.filter((r) => r.status !== "departed").length, departed: rows.filter((r) => r.status === "departed").length };
+  document.querySelectorAll("#statusFilter button").forEach((b) => {
+    const st = b.dataset.status;
+    b.textContent = `${st === "active" ? "Active" : "Departed"} (${counts[st]})`;
+    b.setAttribute("aria-pressed", String(st === state.status));
+  });
+  box.innerHTML = shown.length
+    ? shown.map(residentCard).join("")
+    : `<p class="empty">${q ? `No resident matching “${esc(q)}”.` : state.status === "departed" ? "Nobody has departed." : "No residents on the register yet. Tap Add."}</p>`;
+}
+
+/* ---- add ---- */
+function setAddType(t) {
+  state.addType = t;
+  document.querySelectorAll("#addForm .seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.type === t)));
+  $("afNumber").hidden = !t;
+  if (t) $("afNumber").focus();
+}
+
+$("showAdd").addEventListener("click", () => {
+  $("addForm").hidden = false;
+  renderDetail(null);
+  $("afDob").max = todayISODate();
+  $("afFirst").focus();
+});
+$("afCancel").addEventListener("click", () => { $("addForm").reset(); setAddType(""); $("addForm").hidden = true; });
+document.querySelectorAll("#addForm .seg button").forEach((b) => b.addEventListener("click", () => setAddType(b.dataset.type)));
+
+$("addForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    first_name: $("afFirst").value.trim(),
+    last_name:  $("afLast").value.trim(),
+    date_of_birth: $("afDob").value,
+  };
+  if (state.addType) { body.id_type = state.addType; body.id_number = $("afNumber").value.trim().toUpperCase(); }
+  $("afSave").disabled = true;
+  const out = await guarded(() => apiPost("/api/residents", body), (err) => toast("Not added: " + err.message, "err"));
+  $("afSave").disabled = false;
+  if (!out) return;
+  toast(`${body.first_name} ${body.last_name} added to the register`, "ok");
+  $("addForm").reset(); setAddType(""); $("addForm").hidden = true;
+  state.status = "active";
+  loadResidents();
+});
+
+/* ---- edit sheet ---- */
+async function openResident(id) {
+  const summary = state.rows.get(id);
+  const rec = await guarded(() => apiGet(`/api/residents/${id}/record`), (err) => toast("Could not open: " + err.message, "err"));
+  if (!rec) return;
+  renderDetail(rec, summary);
+}
+
+function renderDetail(rec, summary) {
+  state.selected = rec;
+  const el = $("detail");
+  if (!rec) { el.hidden = true; el.innerHTML = ""; return; }
+  $("addForm").hidden = true;
+  const departed = rec.status === "departed";
+  const type = rec.id_type || "";
+
+  el.innerHTML = `
+    <h2>${esc(rec.first_name)} ${esc(rec.last_name)}</h2>
+    <div class="sub">${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
+
+    <form id="editForm" class="formcard" autocomplete="off" style="margin-top:14px">
+      <div class="grid2">
+        <div><label class="lbl" for="efFirst">First name</label><input id="efFirst" class="field" type="text" required maxlength="80" value="${esc(rec.first_name)}"></div>
+        <div><label class="lbl" for="efLast">Last name</label><input id="efLast" class="field" type="text" required maxlength="80" value="${esc(rec.last_name)}"></div>
+      </div>
+      <div>
+        <label class="lbl" for="efDob">Date of birth</label>
+        <input id="efDob" class="field" type="date" required value="${esc(rec.date_of_birth)}" max="${todayISODate()}">
+      </div>
+      <div>
+        <label class="lbl">ID card</label>
+        <div class="seg" role="group" aria-label="ID type">
+          <button type="button" data-type="" aria-pressed="${type === ""}">None</button>
+          <button type="button" data-type="TRC" aria-pressed="${type === "TRC"}">TRC</button>
+          <button type="button" data-type="IRP" aria-pressed="${type === "IRP"}">IRP</button>
+        </div>
+        <input id="efNumber" class="field upper" type="text" placeholder="Number as printed on the card" maxlength="40"
+               style="margin-top:8px" value="${esc(rec.id_number || "")}" ${type ? "" : "hidden"}>
+      </div>
+      <div class="actions">
+        <button class="btn primary-in" id="efSave" type="submit">Save changes</button>
+        <button class="btn ghost" id="closeDetail" type="button">Close</button>
+      </div>
+    </form>
+
+    <div class="formcard">
+      ${departed ? `
+        <h2>Reactivate</h2>
+        <p class="hint" style="margin:0">Puts ${esc(rec.first_name)} back on the daily register from today.</p>
+        <div class="actions"><button class="btn wide" id="reactivate" type="button">Reactivate</button></div>
+      ` : `
+        <h2 class="danger">Mark as departed</h2>
+        <p class="hint" style="margin:0">The daily rule stops applying after the date given. Set it before the next
+          nightly close-out, or the days after it are recorded as missed.</p>
+        <label class="lbl" for="efDeparted">Last day on site</label>
+        <input id="efDeparted" class="field" type="date" value="${todayISODate()}" max="${todayISODate()}">
+        <div class="actions"><button class="btn wide danger-ghost" id="depart" type="button">Mark as departed</button></div>
+      `}
+    </div>`;
+  el.hidden = false;
+
+  let idType = type;
+  el.querySelectorAll("#editForm .seg button").forEach((b) => b.addEventListener("click", () => {
+    idType = b.dataset.type;
+    el.querySelectorAll("#editForm .seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    $("efNumber").hidden = !idType;
+    if (idType) $("efNumber").focus();
+  }));
+  $("closeDetail").onclick = () => renderDetail(null);
+
+  $("editForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+      first_name: $("efFirst").value.trim(),
+      last_name:  $("efLast").value.trim(),
+      date_of_birth: $("efDob").value,
+      id_type: idType || null,
+      id_number: idType ? $("efNumber").value.trim().toUpperCase() : null,
+    };
+    $("efSave").disabled = true;
+    const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, body), (err) => toast("Not saved: " + err.message, "err"));
+    $("efSave").disabled = false;
+    if (!out) return;
+    toast("Saved", "ok");
+    renderDetail(null);
+    loadResidents();
+  });
+
+  const depart = $("depart");
+  if (depart) depart.onclick = async () => {
+    const on = $("efDeparted").value;
+    if (!on) { toast("Enter the last day on site", "err"); return; }
+    if (!confirm(`Mark ${rec.first_name} ${rec.last_name} as departed on ${on}? The daily rule stops applying after that date.`)) return;
+    const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { status: "departed", departed_on: on }), (err) => toast("Not changed: " + err.message, "err"));
+    if (!out) return;
+    toast(`${rec.first_name} ${rec.last_name} marked as departed`, "ok");
+    renderDetail(null);
+    state.status = "departed";
+    loadResidents();
+  };
+  const react = $("reactivate");
+  if (react) react.onclick = async () => {
+    const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { status: "active" }), (err) => toast("Not changed: " + err.message, "err"));
+    if (!out) return;
+    toast(`${rec.first_name} ${rec.last_name} is active again`, "ok");
+    renderDetail(null);
+    state.status = "active";
+    loadResidents();
+  };
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/* ========================================================================
+   Staff (admins only)
+   ====================================================================== */
+
+// Visibility is presentation, not security: every operation below is
+// refused by the database for anyone but an admin — the create/reset
+// functions re-check is_admin() themselves, and the profiles_admin_all
+// policy makes a non-admin's update match no rows.
+const staffRows = new Map();
+
+function staffCard(s) {
+  const meta = [
+    esc(s.email),
+    s.last_sign_in_at ? `last login ${ago(s.last_sign_in_at)}` : "never logged in",
+  ].join(" · ");
+  const roleOptions = ["guard", "supervisor", "admin"]
+    .map((r) => `<option value="${r}" ${r === s.role ? "selected" : ""}>${r}</option>`)
+    .join("");
+  return `
+    <div class="card staff">
+      <span class="who">
+        <span class="name">${esc(s.full_name)}</span>
+        <span class="meta">${meta}</span>
+      </span>
+      <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
+      <span class="actions-row">
+        <select class="field sRole" data-sid="${esc(s.id)}" style="width:auto;padding:8px 10px" aria-label="Role for ${esc(s.full_name)}">${roleOptions}</select>
+        <button class="btn ghost sPw"  data-sid="${esc(s.id)}" type="button">Reset&nbsp;password</button>
+        <button class="btn ghost sTgl" data-sid="${esc(s.id)}" type="button">${s.active ? "Disable" : "Enable"}</button>
+      </span>
+    </div>`;
+}
+
+async function loadStaff() {
+  const rows = await guarded(
+    () => apiGet("/api/staff"),
+    (err) => showError("Could not load staff: " + err.message),
+  );
+  if (!rows) return;
+  showError("");
+  staffRows.clear();
+  rows.forEach((s) => staffRows.set(s.id, s));
+  $("staffList").innerHTML = rows.length
+    ? rows.map(staffCard).join("")
+    : `<p class="empty">No staff accounts.</p>`;
+}
+
+$("staffForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    full_name: $("sfName").value.trim(),
+    email:     $("sfEmail").value.trim(),
+    role:      $("sfRole").value,
+    password:  $("sfPassword").value,
+  };
+  $("sfAdd").disabled = true;
+  const out = await guarded(
+    () => apiPost("/api/staff", body),
+    (err) => toast("Not created: " + err.message, "err"),
+  );
+  $("sfAdd").disabled = false;
+  if (!out) return;
+  toast(`${body.full_name} added as ${body.role}`, "ok");
+  $("staffForm").reset();
+  loadStaff();
+});
+
+$("staffList").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-sid]");
+  if (!btn) return;
+  const s = staffRows.get(btn.dataset.sid);
+  if (!s) return;
+
+  if (btn.classList.contains("sTgl")) {
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/active`, { active: !s.active }),
+      (err) => toast(err.message, "err"),
+    );
+    if (out) {
+      toast(`${s.full_name} ${out.active ? "enabled" : "disabled"}`, "ok");
+      loadStaff();
+    }
+  } else if (btn.classList.contains("sPw")) {
+    const pw = prompt(`New password for ${s.full_name} (min 12 characters):`);
+    if (pw === null) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/password`, { password: pw }),
+      (err) => toast("Not changed: " + err.message, "err"),
+    );
+    if (out) toast(`Password changed — ${s.full_name} is logged out everywhere.`, "ok");
+  }
+});
+
+$("staffList").addEventListener("change", async (e) => {
+  const sel = e.target.closest("select[data-sid]");
+  if (!sel) return;
+  const s = staffRows.get(sel.dataset.sid);
+  if (!s) return;
+  const out = await guarded(
+    () => apiPost(`/api/staff/${s.id}/role`, { role: sel.value }),
+    (err) => { toast(err.message, "err"); sel.value = s.role; },
+  );
+  if (out) {
+    toast(`${s.full_name} is now ${out.role}`, "ok");
+    loadStaff();
+  }
+});
+
+/* ========================================================================
+   Tabs, session, wiring
+   ====================================================================== */
+function selectTab(name) {
+  state.tab = name;
+  for (const t of ["residents", "staff"]) {
+    const cap = t[0].toUpperCase() + t.slice(1);
+    $("tab" + cap).setAttribute("aria-selected", String(t === name));
+    $("panel" + cap).hidden = t !== name;
+  }
+  renderDetail(null);
+  if (name === "residents") loadResidents();
+  if (name === "staff") loadStaff();
+}
+
+async function enterApp() {
+  if (Offline.isOnline()) await Offline.finishLogout();
+  let session;
+  try {
+    session = await apiGet("/api/session");
+    Offline.rememberSession(session);
+  } catch (err) {
+    if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
+    Offline.noteFailure(err);
+    return showLogin("The admin page needs a connection. Try again when it returns.");
+  }
+
+  const { profile, settings } = session;
+  state.profile = profile;
+  state.userId = profile.id;
+  state.settings = settings;
+  $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
+  if (settings?.site_name) $("siteName").textContent = settings.site_name;
+
+  $("login").hidden = true;
+  $("app").hidden = false;
+
+  if (!canResidents()) {
+    $("notForYou").hidden = false;
+    $("adminTabs").hidden = true;
+    $("panelResidents").hidden = true;
+    $("panelStaff").hidden = true;
+    return;
+  }
+  $("notForYou").hidden = true;
+  $("adminTabs").hidden = false;
+  $("tabStaff").hidden = !canStaff();
+  selectTab("residents");
+}
+
+function showLogin(message) {
+  state.profile = null;
+  state.userId = null;
+  $("app").hidden = true;
+  $("login").hidden = false;
+  $("loginError").hidden = !message;
+  if (message) $("loginError").textContent = message;
+  $("email").focus();
+}
+
+mountLogin({ onReady: enterApp });
+
+$("logoutBtn").addEventListener("click", async () => {
+  await Offline.onLogout();
+  await logout();
+  showLogin("");
+});
+
+let searchTimer;
+$("q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadResidents, 220); });
+$("statusFilter").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-status]");
+  if (!btn) return;
+  state.status = btn.dataset.status;
+  renderDetail(null);
+  loadResidents();
+});
+$("residentList").addEventListener("click", (e) => {
+  const card = e.target.closest("button.card");
+  if (card) openResident(card.dataset.id);
+});
+$("tabResidents").addEventListener("click", () => selectTab("residents"));
+$("tabStaff").addEventListener("click", () => selectTab("staff"));
+
+setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
+
+Offline.registerWorker();
+Offline.mountUI({ getUserId: () => state.userId });
+
+enterApp();
+</script>
+</body>
+</html>
