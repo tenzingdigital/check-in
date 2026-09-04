@@ -218,7 +218,7 @@ function todayISODate() {
 // shows age and the ID, and the date is fetched into the edit sheet only.
 function residentCard(r) {
   const bits = [`age ${r.age_years}`];
-  bits.push(r.id_number ? `${esc(r.id_type)} ${esc(r.id_number)}` : "no ID recorded");
+  bits.push(r.has_id ? "ID recorded" : "no ID recorded");
   const departed = r.status === "departed";
   return `
     <button class="card" data-id="${esc(r.id)}" type="button">

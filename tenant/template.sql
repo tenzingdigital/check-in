@@ -377,6 +377,48 @@ $$;
 
 --
 
+-- Name: audit_row(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.audit_row() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_old jsonb;
+  v_new jsonb;
+  v_id  text;
+begin
+  if tg_op = 'DELETE' then
+    v_id := old.id::text;
+    -- A residents DELETE is an erasure: keep no copy of what was erased.
+    if tg_table_name <> 'residents' then v_old := to_jsonb(old); end if;
+  elsif tg_op = 'INSERT' then
+    v_id := new.id::text;
+    v_new := to_jsonb(new);
+  else
+    v_id := new.id::text;
+    v_old := to_jsonb(old);
+    v_new := to_jsonb(new);
+  end if;
+
+  -- Derived and noisy columns add nothing to "what changed".
+  v_old := v_old - 'search_key' - 'updated_at';
+  v_new := v_new - 'search_key' - 'updated_at';
+  if tg_op = 'UPDATE' and v_old = v_new then
+    return new;
+  end if;
+
+  insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, old_row, new_row)
+  values (auth.uid(), tg_table_name, v_id, lower(tg_op), v_old, v_new);
+
+  return coalesce(new, old);
+end;
+$$;
+
+
+--
+
 -- Name: close_out_compliance_days(date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -457,6 +499,28 @@ $$;
 
 --
 
+-- Name: erase_audit_rows(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.erase_audit_rows(p_resident_id uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_n integer;
+begin
+  if not __TENANT__.is_admin() then
+    raise exception 'Only an admin may erase a resident' using errcode = '42501';
+  end if;
+  delete from __TENANT__.admin_audit
+   where table_name = 'residents' and row_id = p_resident_id::text;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
 -- Name: erase_resident(uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -467,6 +531,7 @@ CREATE FUNCTION __TENANT__.erase_resident(p_resident_id uuid, p_reason text DEFA
 declare
   v_events   integer;
   v_register integer;
+  v_audit    integer;
   v_digest   text;
 begin
   if not __TENANT__.is_admin() then
@@ -485,8 +550,12 @@ begin
 
   v_digest := encode(digest(p_resident_id::text, 'sha256'), 'hex');
 
-  -- Cascades to gate_events, checkin_events, daily_compliance, and (via
-  -- daily_compliance) compliance_annotations.
+  -- The audit rows carry the name and date of birth the erasure is removing.
+  -- They go first, as the owner (this function is invoker-rights, so an
+  -- admin's own DELETE would be refused by RLS): a definer helper does it.
+  v_audit := __TENANT__.erase_audit_rows(p_resident_id);
+
+  -- Cascades to gate_events, checkin_events, daily_compliance.
   delete from __TENANT__.residents where id = p_resident_id;
 
   insert into __TENANT__.erasure_log (resident_digest, events_removed, reason, performed_by)
@@ -496,6 +565,7 @@ begin
     'erased', true,
     'events_removed', v_events,
     'register_rows_removed', v_register,
+    'audit_rows_removed', v_audit,
     'digest', v_digest
   );
 end;
@@ -553,6 +623,22 @@ begin
                'checkins', dc.checkin_count
              ) order by dc.compliance_date)
       from __TENANT__.daily_compliance dc where dc.resident_id = r.id
+    ), '[]'::jsonb),
+    -- Every change an administrator made to this record, and every export
+    -- of it. Art. 15 is "everything held about me"; that includes who
+    -- edited it and when.
+    'changes', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'at', a.at,
+               'action', a.action,
+               'by', p.full_name,
+               'before', a.old_row,
+               'after', a.new_row,
+               'note', a.note
+             ) order by a.at)
+      from __TENANT__.admin_audit a
+      left join __TENANT__.profiles p on p.id = a.actor_id
+      where a.table_name = 'residents' and a.row_id = r.id::text
     ), '[]'::jsonb)
   )
   into v_out
@@ -629,6 +715,47 @@ $$;
 
 --
 
+-- Name: note_disclosure(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.note_disclosure(p_resident_id uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if not __TENANT__.is_admin() then
+    raise exception 'Only an admin may export a resident record' using errcode = '42501';
+  end if;
+  if length(coalesce(btrim(p_reason), '')) = 0 then
+    raise exception 'A reason for the export is required' using errcode = '22023';
+  end if;
+  insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, note)
+  values (auth.uid(), 'residents', p_resident_id::text, 'export', btrim(p_reason));
+end;
+$$;
+
+
+--
+
+-- Name: purge_expired_audit(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_expired_audit() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_days integer; v_n integer;
+begin
+  select compliance_retention_days into v_days from __TENANT__.app_settings where id;
+  delete from __TENANT__.admin_audit where at < now() - make_interval(days => v_days);
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
 -- Name: purge_expired_checkin_events(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -683,6 +810,24 @@ begin
   delete from __TENANT__.gate_events where occurred_at < now() - make_interval(days => v_days);
   get diagnostics v_deleted = row_count;
   return v_deleted;
+end;
+$$;
+
+
+--
+
+-- Name: purge_expired_job_runs(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_expired_job_runs() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_n integer;
+begin
+  delete from __TENANT__.job_runs where ran_at < now() - interval '90 days';
+  get diagnostics v_n = row_count;
+  return v_n;
 end;
 $$;
 
@@ -1035,6 +1180,40 @@ $$;
 
 --
 
+-- Name: admin_audit; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.admin_audit (
+    id bigint NOT NULL,
+    at timestamp with time zone DEFAULT now() NOT NULL,
+    actor_id uuid,
+    table_name text NOT NULL,
+    row_id text NOT NULL,
+    action text NOT NULL,
+    old_row jsonb,
+    new_row jsonb,
+    note text,
+    CONSTRAINT admin_audit_action_check CHECK ((action = ANY (ARRAY['insert'::text, 'update'::text, 'delete'::text, 'export'::text])))
+);
+
+
+--
+
+-- Name: admin_audit_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.admin_audit ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME __TENANT__.admin_audit_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+
 -- Name: checkin_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1111,6 +1290,35 @@ ALTER TABLE __TENANT__.gate_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
 
 --
 
+-- Name: job_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.job_runs (
+    id bigint NOT NULL,
+    job text NOT NULL,
+    ran_at timestamp with time zone DEFAULT now() NOT NULL,
+    ok boolean NOT NULL,
+    result text
+);
+
+
+--
+
+-- Name: job_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.job_runs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME __TENANT__.job_runs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+
 -- Name: profiles; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1143,6 +1351,42 @@ CREATE VIEW __TENANT__.v_check_log AS
      JOIN __TENANT__.residents r ON ((r.id = e.resident_id)))
      JOIN __TENANT__.profiles g ON ((g.id = e.guard_id)))
   WHERE __TENANT__.is_staff();
+
+
+--
+
+-- Name: v_system_health; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW __TENANT__.v_system_health AS
+ SELECT ( SELECT max(daily_compliance.compliance_date) AS max
+           FROM __TENANT__.daily_compliance
+          WHERE (daily_compliance.closed_at IS NOT NULL)) AS last_closed_day,
+    __TENANT__.site_today() AS site_today,
+    ( SELECT max(job_runs.ran_at) AS max
+           FROM __TENANT__.job_runs
+          WHERE ((job_runs.job = 'close-out-compliance-days'::text) AND job_runs.ok)) AS last_close_out_run,
+    ( SELECT max(job_runs.ran_at) AS max
+           FROM __TENANT__.job_runs
+          WHERE job_runs.ok) AS last_job_run,
+    ( SELECT (count(*))::integer AS count
+           FROM __TENANT__.job_runs
+          WHERE ((NOT job_runs.ok) AND (job_runs.ran_at > (now() - '2 days'::interval)))) AS recent_failures,
+    COALESCE((( SELECT max(daily_compliance.compliance_date) AS max
+           FROM __TENANT__.daily_compliance
+          WHERE (daily_compliance.closed_at IS NOT NULL)) < (__TENANT__.site_today() - 1)), (EXISTS ( SELECT 1
+           FROM __TENANT__.daily_compliance
+          WHERE (daily_compliance.compliance_date < (__TENANT__.site_today() - 1))))) AS close_out_behind
+  WHERE __TENANT__.is_staff();
+
+
+--
+
+-- Name: admin_audit admin_audit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.admin_audit
+    ADD CONSTRAINT admin_audit_pkey PRIMARY KEY (id);
 
 
 --
@@ -1192,6 +1436,15 @@ ALTER TABLE ONLY __TENANT__.gate_events
 
 --
 
+-- Name: job_runs job_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.job_runs
+    ADD CONSTRAINT job_runs_pkey PRIMARY KEY (id);
+
+
+--
+
 -- Name: profiles profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1206,6 +1459,22 @@ ALTER TABLE ONLY __TENANT__.profiles
 
 ALTER TABLE ONLY __TENANT__.residents
     ADD CONSTRAINT residents_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: admin_audit_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX admin_audit_at_idx ON __TENANT__.admin_audit USING btree (at);
+
+
+--
+
+-- Name: admin_audit_row_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX admin_audit_row_idx ON __TENANT__.admin_audit USING btree (table_name, row_id);
 
 
 --
@@ -1282,6 +1551,14 @@ CREATE INDEX gate_events_time_idx ON __TENANT__.gate_events USING btree (occurre
 
 --
 
+-- Name: job_runs_job_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX job_runs_job_idx ON __TENANT__.job_runs USING btree (job, ran_at DESC);
+
+
+--
+
 -- Name: residents_search_key_trgm_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1298,10 +1575,43 @@ CREATE INDEX residents_status_idx ON __TENANT__.residents USING btree (status);
 
 --
 
+-- Name: app_settings app_settings_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER app_settings_audit AFTER UPDATE ON __TENANT__.app_settings FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: profiles profiles_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER profiles_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.profiles FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: residents residents_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER residents_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
 -- Name: residents residents_touch_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER residents_touch_updated_at BEFORE UPDATE ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
+
+
+--
+
+-- Name: admin_audit admin_audit_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.admin_audit
+    ADD CONSTRAINT admin_audit_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
 
 
 --
@@ -1374,6 +1684,21 @@ ALTER TABLE ONLY __TENANT__.profiles
 
 ALTER TABLE ONLY __TENANT__.residents
     ADD CONSTRAINT residents_registered_by_fkey FOREIGN KEY (registered_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: admin_audit; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.admin_audit ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: admin_audit admin_audit_admin_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY admin_audit_admin_read ON __TENANT__.admin_audit FOR SELECT USING (__TENANT__.is_admin());
 
 
 --
@@ -1488,14 +1813,6 @@ CREATE POLICY profiles_admin_all ON __TENANT__.profiles USING (__TENANT__.is_adm
 --
 
 CREATE POLICY profiles_read ON __TENANT__.profiles FOR SELECT USING ((__TENANT__.is_staff() OR (id = auth.uid())));
-
-
---
-
--- Name: profiles profiles_update_self; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY profiles_update_self ON __TENANT__.profiles FOR UPDATE USING ((id = auth.uid())) WITH CHECK (((id = auth.uid()) AND (role = __TENANT__.my_role()) AND active));
 
 
 --

@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const mail = require('../lib/mail');
+const auth = require('../lib/auth');
 const { HttpError } = require('../lib/api');
 
 const router = express.Router();
@@ -45,6 +46,15 @@ function baseUrl(req) {
 // POST /api/password-reset  { email }
 router.post('/', wrap(async (req, res) => {
   const email = String((req.body || {}).email || '').trim();
+
+  // Per-IP, on the same eight-in-five-minutes counter as login. Each request
+  // costs a database call and possibly an email; without this a single
+  // address could fire thousands. The account-level gap in
+  // auth.create_password_reset() still caps the emails per person.
+  if (auth.lockedOut('password-reset', req.ip)) {
+    return res.status(429).json({ error: 'Too many requests. Wait five minutes and try again.' });
+  }
+  auth.noteFailure('password-reset', req.ip);
 
   // Answer before doing anything expensive if the input is obviously not an
   // address. Still a 200: a 400 here would leak that the format check ran.

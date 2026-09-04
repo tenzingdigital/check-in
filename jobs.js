@@ -32,7 +32,24 @@ const JOBS = [
   ["purge-expired-sessions", "select auth.purge_expired_sessions()"],
   ["purge-expired-password-resets", "select auth.purge_expired_password_resets()"],
   ["expire-lapsed-trials", "select public.expire_lapsed_trials()"],
+  ["purge-expired-login-events", "select auth.purge_expired_login_events()"],
+  ["purge-expired-audit", "select public.purge_expired_audit()"],
+  ["purge-expired-job-runs", "select public.purge_expired_job_runs()"],
 ];
+
+// Every run leaves a row, so v_system_health can say when close-out last
+// succeeded and a terminal can show a banner when it is late. A failure to
+// record the row is logged, never fatal.
+async function record(name, ok, result) {
+  try {
+    await withOwner((client) => client.query(
+      "insert into public.job_runs (job, ok, result) values ($1, $2, $3)",
+      [name, ok, String(result ?? "").slice(0, 500)],
+    ));
+  } catch (err) {
+    console.error(`[jobs] could not record ${name}: ${err.message}`);
+  }
+}
 
 async function main() {
   let failed = 0;
@@ -43,12 +60,14 @@ async function main() {
       const result = await withOwner((client) => client.query(sql));
       const value = Object.values(result.rows[0] ?? {})[0];
       console.log(`[jobs] ${name}: ok (${value ?? "done"}) in ${Date.now() - started}ms`);
+      await record(name, true, value);
     } catch (err) {
       // Keep going. These jobs are independent, and a failure in one purge
       // must not stop close-out from running — the register is the thing that
       // matters, retention is the thing that can wait a day.
       failed += 1;
       console.error(`[jobs] ${name}: FAILED — ${err.message}`);
+      await record(name, false, err.message);
     }
   }
 

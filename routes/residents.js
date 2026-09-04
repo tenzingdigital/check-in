@@ -78,10 +78,16 @@ router.get('/', wrap(async (req, res) => {
   const includeDeparted = req.query.departed === '1';
 
   const rows = await db.withIdentity(req.session.userId, async (client) => {
+    // Lists never carry the identity number (DPA Annex II: it is shown on a
+    // detail view, never in a list). has_id tells the admin page whether
+    // there is one to show; the number itself comes from /:id/compliance or
+    // /:id/record. Searching BY number still works — search_key holds it.
     const { rows: found } = await client.query(
-      'select * from public.search_residents($1, $2, $3)',
+      `select v.*, (v.id_number is not null) as has_id
+         from public.search_residents($1, $2, $3) v`,
       [q, includeDeparted, limit],
     );
+    for (const r of found) { delete r.id_number; delete r.id_type; }
     if (!wantCompliance || found.length === 0) return found;
 
     const { rows: comp } = await client.query(

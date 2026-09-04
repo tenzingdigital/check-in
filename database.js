@@ -11,6 +11,7 @@ try { require('dotenv').config(); } catch (_) { /* env comes from the host */ }
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { Pool, types } = require('pg');
 
 // A Postgres DATE is a calendar day, and it stays one on the way out: the
@@ -192,19 +193,31 @@ async function migrate({ withOwner: owner = withOwner, log = console.log } = {})
         name text PRIMARY KEY,
         applied_at timestamptz NOT NULL DEFAULT now()
       )`);
-      const { rows } = await client.query('SELECT name FROM schema_migrations');
-      const done = new Set(rows.map(r => r.name));
+      // The checksum of each file as applied. An applied file that later
+      // changes on disk is the one mistake this runner cannot repair — it
+      // will never re-run it — so the least it can do is say so, loudly, at
+      // every boot until somebody writes the change as a new migration.
+      await client.query('ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum text');
+      const { rows } = await client.query('SELECT name, checksum FROM schema_migrations');
+      const done = new Map(rows.map(r => [r.name, r.checksum]));
 
+      const drifted = [];
       const applied = [];
       for (const f of files) {
-        if (done.has(f)) continue;
         const sql = fs.readFileSync(path.join(dir, f), 'utf8');
+        const sum = crypto.createHash('sha256').update(sql, 'utf8').digest('hex');
+        if (done.has(f)) {
+          const recorded = done.get(f);
+          if (recorded && recorded !== sum) drifted.push(f);
+          else if (!recorded) await client.query('UPDATE schema_migrations SET checksum = $2 WHERE name = $1', [f, sum]);
+          continue;
+        }
         // One transaction per migration: a file that fails part-way leaves
         // nothing behind. That is why the .sql files carry no BEGIN/COMMIT.
         await client.query('BEGIN');
         try {
           await client.query(sql);
-          await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [f]);
+          await client.query('INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)', [f, sum]);
           await client.query('COMMIT');
         } catch (err) {
           await client.query('ROLLBACK').catch(() => {});
@@ -214,6 +227,11 @@ async function migrate({ withOwner: owner = withOwner, log = console.log } = {})
         log(`[migrate] applied ${f}`);
       }
       if (applied.length === 0) log(`[migrate] up to date (${files.length} migrations)`);
+      for (const f of drifted) {
+        log(`[migrate] WARNING: ${f} has changed since it was applied. The database does NOT have this change. `
+          + 'Write it as a new numbered migration; never edit an applied one.');
+      }
+      migrate.drifted = drifted;
       return applied;
     } finally {
       await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]).catch(() => {});

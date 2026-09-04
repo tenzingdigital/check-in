@@ -397,6 +397,20 @@ update public.profiles set active = false where id =
   (select id from auth.users where lower(email) = 'gina@hut.example');
 ```
 
+### 4b. What is on the record
+
+Three things are written that nobody types:
+
+- **`admin_audit`** — every change a supervisor or admin makes to a resident,
+  a staff account or the settings, with the row before and after, and every
+  export of a resident's record with the reason given. Admins can read it;
+  nobody can edit it. It is included in a resident's Art. 15 export and
+  removed by their erasure.
+- **`auth.login_events`** — every sign-in attempt, its outcome, the IP and
+  the browser, for 90 days. Only the service can read it; use psql.
+- **`job_runs`** — one row per nightly job per run. The register page shows
+  a red banner on every terminal when the close-out is behind.
+
 ### 5. Check the nightly job is running
 
 Four maintenance functions used to be scheduled with `pg_cron` inside Supabase.

@@ -130,6 +130,7 @@
   <main class="wrap">
     <div id="appError" class="alert" hidden></div>
     <div id="syncNotice" class="alert warn" hidden></div>
+    <div id="healthNotice" class="alert" hidden></div>
 
     <!-- One list, one filter. The three tiles above are the filter; the line
          under the search box says which is on and offers the way back. The
@@ -386,6 +387,25 @@ function refreshSummary() {
     : false;
   tone($("statOpenBreach").parentElement, breaches > 0 ? "bad" : "ok");
   tone($("statNotSeen").parentElement, notSeen === 0 ? "ok" : pastCutoff ? "warn" : "neutral");
+}
+
+// The register only proves who was missed if the nightly close-out runs. If
+// it stops, the register looks exactly like one where nobody was missed —
+// so every terminal checks, and says so in red. Polled with the list.
+async function checkHealth() {
+  const h = await guarded(() => apiGet("/api/session/health"), (err) => Offline.noteFailure(err));
+  const box = $("healthNotice");
+  if (!h) return;
+  if (h.close_out_behind) {
+    const last = h.last_closed_day ? `The last day closed was ${h.last_closed_day}.` : "No day has been closed yet.";
+    box.innerHTML = `<b>The nightly close-out has not run.</b> ${last} Missed days are not being recorded until it does — tell the administrator to check the <code>hut-nightly</code> job on Render.`;
+    box.hidden = false;
+  } else if (h.recent_failures > 0) {
+    box.innerHTML = `<b>A maintenance job failed in the last two days.</b> The register is still being closed out; tell the administrator to check the <code>hut-nightly</code> job on Render.`;
+    box.hidden = false;
+  } else {
+    box.hidden = true;
+  }
 }
 
 function tone(tile, t) {
@@ -663,6 +683,7 @@ async function enterApp() {
   $("q").focus();
   refreshSummary();
   runSearch($("q").value);
+  checkHealth();
   Offline.syncNow();
 }
 
@@ -742,6 +763,7 @@ document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
 // Periodic refresh so a terminal left open overnight does not show stale
 // counts or a stale list.
 setInterval(() => { if (state.profile) runSearch($("q").value); }, 60000);
+setInterval(() => { if (state.profile && Offline.isOnline()) checkHealth(); }, 300000);
 
 // Any request that comes back 401 — an expired session, or a supervisor
 // deactivating the account mid-shift — returns the terminal to the login

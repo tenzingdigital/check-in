@@ -150,6 +150,12 @@ a divergence there is exactly the sort of thing that bites when you move
 between the codebases. The property was worth having, so the fix is to add it
 to **both** apps, not to re-diverge this one.
 
+*Restored, 4 September 2026:* `schema_migrations.checksum` is back. Each
+applied file's SHA-256 is recorded, and a file that later differs on disk is
+warned about at every boot in capitals, with the instruction to write the
+change as a new migration. The HTTP suite alters a recorded checksum and
+asserts the warning fires.
+
 ### 17. The suites now run as a non-superuser — keep it that way
 
 `test/cluster.sh` connects as `hutapp`, an ordinary role that owns the database,
@@ -241,6 +247,23 @@ heavy query, not four; and the list, once shown, stays on screen while the
 next one is fetched. The code-side change that would cut the query itself is
 carried item 3 above — bounding the `tally`, `streak` and `window_tally`
 scans to the retention window.
+
+### 19e. What migration 012 changed about who is on the record
+
+Administrators' changes to residents, profiles and settings are now in
+`admin_audit`, with the row before and after; an export of a resident's
+record is noted there with the reason given; every login attempt and its
+outcome is in `auth.login_events` for 90 days (which makes the privacy notice
+true); each nightly job leaves a `job_runs` row, and `v_system_health` turns
+a late close-out into a red banner on every register terminal. A staff member
+can no longer rename themselves. Erasure removes the audit rows that carried
+the erased person's details.
+
+Two things to know. The audit of a residents row includes the date of birth
+before and after a change; it is admin-readable only, and dies with the
+register retention. And `job_runs` is written by `jobs.js` on the owner
+connection, so a cron job that never runs leaves no row — which is exactly
+what `close_out_behind` detects from the register itself.
 
 ### 19b. New logins had no tenant until migration 011
 

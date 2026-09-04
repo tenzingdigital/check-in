@@ -16,6 +16,7 @@ router.post('/', wrap(async (req, res) => {
   const ip = req.ip;
 
   if (auth.lockedOut(email, ip)) {
+    await auth.noteLocked(email, { ip, userAgent: req.get('user-agent') });
     return res.status(429).json({ error: 'Too many attempts. Wait five minutes and try again.' });
   }
 
@@ -62,6 +63,18 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
     profile: { id: req.session.userId, full_name: req.session.fullName, role: req.session.role },
     settings,
   });
+}));
+
+// GET /api/session/health — is the register being kept up? Every terminal
+// polls this with its summary refresh and shows a banner when the nightly
+// close-out is behind, because a register that has stopped recording who
+// was missed looks exactly like a register where nobody was missed.
+router.get('/health', auth.requireSession, wrap(async (req, res) => {
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query('select * from public.v_system_health');
+    return rows[0] || null;
+  });
+  res.json(row || {});
 }));
 
 module.exports = router;

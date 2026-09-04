@@ -225,40 +225,40 @@ promise in section 9 also needs a written procedure behind it.
 | 0.2 | Fix the README migration paragraph, or restore checksums (0.7). | F9 | `README.md` |
 | 0.3 | GitHub Actions: `postgresql-16` plus Node 22, run `npm test` and `npm audit --omit=dev --audit-level=high` on every push and pull request. Branch protection on `main` requiring it. | F8 | `.github/workflows/check.yml` |
 | 0.4 | `npm audit fix` for the three moderate findings; commit the lockfile. | F8 | `package-lock.json` |
-| 0.5 | Strip `id_type` and `id_number` from the list endpoint. Add an HTTP assertion that `/api/residents` never carries `id_number`, the same shape as the existing date-of-birth test. | F12 | `routes/residents.js`, `test/api.test.js` |
+| 0.5 | *Done.* Strip `id_type` and `id_number` from the list endpoint. Add an HTTP assertion that `/api/residents` never carries `id_number`, the same shape as the existing date-of-birth test. | F12 | `routes/residents.js`, `test/api.test.js` |
 | 0.6 | Turn on Render failure notifications for `hut-nightly`. Dashboard setting, five minutes. | F10 | Render |
-| 0.7 | Restore the per-migration checksum with a loud warning at boot, in this repo and the scheduler together. | F9 | `database.js` |
-| 0.8 | Per-IP throttle on `POST /api/password-reset`, reusing the login lockout map. | F14 | `routes/password-reset.js` |
+| 0.7 | *Done.* Restore the per-migration checksum with a loud warning at boot, in this repo and the scheduler together. | F9 | `database.js` |
+| 0.8 | *Done.* Per-IP throttle on `POST /api/password-reset`, reusing the login lockout map. | F14 | `routes/password-reset.js` |
 | 0.9 | Move inline `style=""` attributes to the stylesheet, drop `'unsafe-inline'` from `style-src`, add the header set to the static site. | F14 | both HTML files, `lib/security.js`, `render.yaml` |
 
 ---
 
 ## Phase 1 — Audit trail and logging (one week)
 
-**1.1 `admin_audit` table.** Append-only, written by triggers on `profiles`,
+**1.1 `admin_audit` table.** *Done, 4 September (migration 012).* Append-only, written by triggers on `profiles`,
 `residents` and `app_settings`: who (`auth.uid()`), when, table, row id, old
 row and new row as JSON. Admin-read-only via RLS; no update or delete policy
 for anyone; purged on the compliance retention schedule. Include it in
 `export_resident_record()` so a subject-access export shows every edit to that
 person's record. About forty lines of SQL and five assertions. (ISO 8.15, 5.33)
 
-**1.2 Persisted login log.** `auth.login_events` with outcome, email as typed,
+**1.2 Persisted login log.** *Done, 4 September (`auth.login_events`, 90 days).* `auth.login_events` with outcome, email as typed,
 IP, user agent, timestamp. One insert per attempt is cheap next to the 250 ms
 bcrypt already spent, so the amplification worry in known issue 14 does not
 apply. Retain 90 days, which makes the privacy notice true, and gives the
 lockout a durable counter if the service is ever scaled. (ISO 8.15; fixes F2)
 
-**1.3 Log disclosures.** The export route from Phase 2 writes a row saying who
+**1.3 Log disclosures.** *Done for the function (`note_disclosure`); the export route in 2.2 calls it.* The export route from Phase 2 writes a row saying who
 exported whom, when, and a stated reason. An export is the single most
 sensitive read in the system. (GDPR Art. 30, ISO 5.34)
 
-**1.4 Freeze attribution.** `profiles_update_self` in `migrations/002` still
+**1.4 Freeze attribution.** *Half done: the self-rename policy is gone. Name snapshots on events are still open.* `profiles_update_self` in `migrations/002` still
 lets any user change their own `full_name`, and every log view joins to
 `profiles` for the name. No route exposes it today, so this is defence in
 depth: restrict the policy to admins, and add `guard_name` snapshots to the
 event tables so a rename can never rewrite history. (ISO 8.15)
 
-**1.5 Health view.** `v_system_health` exposing the latest closed compliance
+**1.5 Health view.** *Done, 4 September (`v_system_health`, `job_runs`, banner on the register).* `v_system_health` exposing the latest closed compliance
 day and the last successful run of each job (write a `job_runs` row from
 `jobs.js`). The check-in app's 60-second summary refresh reads it and shows a
 red banner when close-out is more than a day behind. (ISO 8.16; fixes F10)

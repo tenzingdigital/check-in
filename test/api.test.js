@@ -310,6 +310,10 @@ async function main() {
       assert.equal(res.status, 200);
       assert.ok(!/date_of_birth/.test(res.text), `${path} leaked date_of_birth`);
     }
+    // DPA Annex II: identity numbers are never in a list.
+    const list = await api.fetch("/api/residents?q=&limit=1000&compliance=1");
+    assert.ok(!/id_number/.test(list.text), "the list carries id_number");
+    assert.ok(list.json.every((r) => typeof r.has_id === "boolean"), "has_id missing from the list");
   });
 
   await test("a gate event is recorded and attributed", async () => {
@@ -850,7 +854,12 @@ async function main() {
     newId = res.json.id;
     const found = await api.fetch("/api/residents?q=newcomer");
     assert.ok(found.json.some((r) => r.id === newId), "the guard cannot find the new resident");
-    assert.equal(found.json.find((r) => r.id === newId).id_number, "TRC9999", "the ID was not upper-cased");
+    assert.equal(found.json.find((r) => r.id === newId).has_id, true);
+    const rec = await supC.fetch(`/api/residents/${newId}/record`);
+    assert.equal(rec.json.id_number, "TRC9999", "the ID was not upper-cased");
+    // and the number is searchable even though lists never show it
+    const byNumber = await api.fetch("/api/residents?q=trc9999");
+    assert.ok(byNumber.json.some((r) => r.id === newId), "search by ID number stopped working");
   });
 
   await test("a guard cannot add, read for edit, or change a resident", async () => {
@@ -909,6 +918,79 @@ async function main() {
     assert.equal(gate2.status, 200, "reactivated resident cannot be signed in");
   });
 
+  console.log("\n== audit trail ==");
+
+  await test("a supervisor's edit is on the record, with before and after", async () => {
+    const supId = (await withOwner((c) => c.query(`select id from auth.users where email = 'sup2@hut.example'`))).rows[0].id;
+    const { rows } = await withOwner((c) => c.query(
+      `select actor_id, action, old_row->>'last_name' as before, new_row->>'last_name' as after
+         from public.admin_audit where table_name = 'residents' and row_id = $1 order by at`, [newId]));
+    assert.ok(rows.length >= 2, `expected an insert and updates, found ${rows.length}`);
+    assert.equal(rows[0].action, "insert");
+    assert.equal(rows[0].actor_id, supId, "the insert is not attributed to the supervisor");
+    const rename = rows.find((r) => r.after === "Newcomer-Smith");
+    assert.ok(rename, "the rename is not in the audit");
+    assert.equal(rename.before, "Newcomer");
+  });
+
+  await test("a guard cannot read the audit; an admin can", async () => {
+    const asGuard = await withIdentity(guardId, (c) => c.query(`select count(*)::int as n from public.admin_audit`));
+    assert.equal(asGuard.rows[0].n, 0);
+    const adminId = (await withOwner((c) => c.query(`select id from auth.users where email = 'head@hut.example'`))).rows[0]?.id;
+    if (adminId) {
+      const asAdmin = await withIdentity(adminId, (c) => c.query(`select count(*)::int as n from public.admin_audit`));
+      assert.ok(asAdmin.rows[0].n > 0);
+    }
+  });
+
+  await test("a staff member can no longer rename themselves", async () => {
+    const { rows } = await withIdentity(guardId, (c) => c.query(
+      `update public.profiles set full_name = 'Somebody Else' where id = auth.uid() returning id`));
+    assert.equal(rows.length, 0, "the self-rename policy is still in place");
+  });
+
+  await test("every login attempt is on the record, with its outcome", async () => {
+    const probe = client(base);
+    await probe.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: "wrong-wrong-wrong" } });
+    await probe.fetch("/api/session", { method: "POST", body: { email: "ghost@hut.example", password: "wrong-wrong-wrong" } });
+    await probe.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
+    const { rows } = await withOwner((c) => c.query(
+      `select outcome, email from auth.login_events order by id desc limit 3`));
+    assert.deepEqual(rows.map((r) => r.outcome).reverse(), ["bad_password", "unknown_email", "ok"]);
+    assert.ok(rows.every((r) => r.email), "email not recorded");
+    const fromGuard = await withIdentity(guardId, (c) => c.query(`select count(*) from auth.login_events`).then(() => "readable", (e) => e.code));
+    assert.equal(fromGuard, "42501", "a request role can read login events");
+  });
+
+  await test("the reset endpoint is throttled per IP", async () => {
+    const probe = client(base);
+    let last;
+    for (let i = 0; i < 9; i += 1) {
+      last = await probe.fetch("/api/password-reset", { method: "POST", body: { email: `nobody${i}@hut.example` } });
+    }
+    assert.equal(last.status, 429, "the ninth reset request in five minutes was not refused");
+  });
+
+  await test("the health view says whether close-out is behind", async () => {
+    const res = await api.fetch("/api/session/health");
+    assert.equal(res.status, 200, res.text);
+    assert.equal(typeof res.json.close_out_behind, "boolean");
+    assert.ok(res.json.site_today, "site_today missing");
+    await withOwner((c) => c.query(`insert into public.job_runs (job, ok, result) values ('close-out-compliance-days', true, '0')`));
+    const after = await api.fetch("/api/session/health");
+    assert.ok(after.json.last_close_out_run, "a recorded run is not reported");
+  });
+
+  await test("an applied migration edited on disk is shouted about at boot", async () => {
+    await withOwner((c) => c.query(`update public.schema_migrations set checksum = 'not-the-real-one' where name = '001_platform.sql'`));
+    const lines = [];
+    await migrate({ log: (l) => lines.push(l) });
+    assert.ok(lines.some((l) => /WARNING: 001_platform.sql has changed/.test(l)), "no drift warning");
+    // put it back so later boots in this cluster are quiet
+    const real = require("crypto").createHash("sha256").update(require("fs").readFileSync(require("path").join(__dirname, "..", "migrations", "001_platform.sql"), "utf8"), "utf8").digest("hex");
+    await withOwner((c) => c.query(`update public.schema_migrations set checksum = $1 where name = '001_platform.sql'`, [real]));
+  });
+
   console.log("\n== staff management ==");
 
   // The admin's Staff tab. Authorisation lives in the database — the create
@@ -938,6 +1020,24 @@ async function main() {
     assert.equal(newLogin.status, 200, "the created account could not log in");
     const who = await fresh.fetch("/api/session");
     assert.equal(who.json.profile.role, "supervisor");
+  });
+
+  await test("export carries the change history; erasure removes it", async () => {
+    const adminId = (await withOwner((c) => c.query(`select id from auth.users where email = 'head@hut.example'`))).rows[0].id;
+    const exported = await withIdentity(adminId, (c) => c.query(`select public.export_resident_record($1) as e`, [newId]));
+    const changes = exported.rows[0].e.changes;
+    assert.ok(Array.isArray(changes) && changes.length >= 2, "export has no change history");
+    await withIdentity(adminId, (c) => c.query(`select public.note_disclosure($1, 'subject access request')`, [newId]));
+    const noted = await withOwner((c) => c.query(`select count(*)::int as n from public.admin_audit where action = 'export' and row_id = $1`, [newId]));
+    assert.equal(noted.rows[0].n, 1, "the export was not noted");
+    const refused = await withIdentity(guardId, (c) => c.query(`select public.note_disclosure($1, 'x')`, [newId]).then(() => "allowed", (e) => e.code));
+    assert.equal(refused, "42501", "a guard could note a disclosure");
+
+    await withIdentity(adminId, (c) => c.query(`select public.erase_resident($1, 'test')`, [newId]));
+    const left = await withOwner((c) => c.query(
+      `select action, old_row, new_row, note from public.admin_audit where table_name = 'residents' and row_id = $1`, [newId]));
+    assert.ok(left.rows.every((r) => r.action === "delete" && r.old_row === null && r.new_row === null),
+      `identifying audit rows survived erasure: ${JSON.stringify(left.rows).slice(0, 200)}`);
   });
 
   await test("a guard cannot create, promote or disable anyone", async () => {
