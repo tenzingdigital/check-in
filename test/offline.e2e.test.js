@@ -75,7 +75,9 @@ async function launch() {
   await ctx.setOffline(false);
   await page.waitForFunction(() => /been sent/.test(document.getElementById("toast").textContent), null, { timeout: 40000 });
   await page.waitForFunction(() => document.getElementById("netState").textContent === "Online");
-  const today = new Date().toISOString().slice(0, 10);
+  // The log is per SITE day (Europe/Dublin in the seed): between 23:00 and
+  // 00:00 UTC in summer that is not the UTC date.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Dublin", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const log = await page.evaluate(async (d) => (await fetch(`/api/gate-events?date=${d}`)).json(), today);
   const entry = log.find((e) => e.resident_name === name && e.kind === "in");
   assert.ok(entry, "synced event missing from the log");
