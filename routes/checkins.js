@@ -12,7 +12,7 @@ const MAX_ATTENTION = 200;
 router.get('/attention', wrap(async (req, res) => {
   const limit = intParam(req.query.limit, MAX_ATTENTION, MAX_ATTENTION);
   const rows = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows: list } = await client.query('select * from public.attention_list($1)', [limit]);
+    const { rows: list } = await client.query('select * from attention_list($1)', [limit]);
     return list;
   });
   res.json(rows);
@@ -28,11 +28,11 @@ router.get('/attention', wrap(async (req, res) => {
 router.get('/checkin-summary', wrap(async (req, res) => {
   const out = await db.withIdentity(req.session.userId, async (client) => {
     const [attention, counts] = await Promise.all([
-      client.query('select * from public.attention_list($1)', [MAX_ATTENTION]),
+      client.query('select * from attention_list($1)', [MAX_ATTENTION]),
       client.query(
         `select count(*) filter (where seen_today)::integer as seen_today,
                 count(*) filter (where required_today and not seen_today)::integer as not_seen
-           from public.v_resident_compliance`,
+           from v_resident_compliance`,
       ),
     ]);
     return {
@@ -49,7 +49,7 @@ router.post('/checkins', wrap(async (req, res) => {
   const body = req.body || {};
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'select * from public.record_checkin($1)',
+      'select * from record_checkin($1)',
       [uuidParam(body.resident_id, 'resident_id')],
     );
     return rows[0];

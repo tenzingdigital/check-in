@@ -51,8 +51,8 @@ async function listBuildings(client) {
                        'id', o.room_id, 'floor', o.floor, 'number', o.room, 'capacity', o.capacity,
                        'sort', o.room_sort, 'occupants', o.occupants, 'on_site', o.on_site, 'residents', o.residents)
                      order by o.room_sort, o.floor, o.room)
-                from public.v_room_occupancy o where o.building_id = b.id), '[]'::jsonb) as rooms
-       from public.buildings b
+                from v_room_occupancy o where o.building_id = b.id), '[]'::jsonb) as rooms
+       from buildings b
       order by b.sort, b.name`,
   );
   return rows;
@@ -69,8 +69,8 @@ router.post('/buildings', wrap(async (req, res) => {
   const sort = int(body.sort, 'Order', 0, 1000, null);
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `insert into public.buildings (name, sort)
-       values ($1, coalesce($2, (select coalesce(max(sort), 0) + 10 from public.buildings)))
+      `insert into buildings (name, sort)
+       values ($1, coalesce($2, (select coalesce(max(sort), 0) + 10 from buildings)))
        returning id, name, sort`,
       [name, sort],
     );
@@ -89,7 +89,7 @@ router.patch('/buildings/:id', wrap(async (req, res) => {
   if (!sets.length) throw new HttpError(400, 'Nothing to change');
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `update public.buildings set ${sets.join(', ')} where id = $1 returning id, name, sort`, args);
+      `update buildings set ${sets.join(', ')} where id = $1 returning id, name, sort`, args);
     return rows[0];
   }).catch((err) => { throw supervisorOnly(err); });
   if (!row) throw new HttpError(403, 'Only a supervisor or admin can change buildings');
@@ -100,10 +100,10 @@ router.delete('/buildings/:id', wrap(async (req, res) => {
   const id = uuidParam(req.params.id, 'building id');
   const out = await db.withIdentity(req.session.userId, async (client) => {
     const occupied = await client.query(
-      `select count(*)::int as n from public.residents r join public.rooms rm on rm.id = r.room_id
+      `select count(*)::int as n from residents r join rooms rm on rm.id = r.room_id
         where rm.building_id = $1 and r.status = 'active'`, [id]);
     if (occupied.rows[0].n > 0) throw new HttpError(409, `${occupied.rows[0].n} resident(s) still live in this building. Move them first.`);
-    const { rowCount } = await client.query(`delete from public.buildings where id = $1`, [id]);
+    const { rowCount } = await client.query(`delete from buildings where id = $1`, [id]);
     return rowCount;
   }).catch((err) => { throw supervisorOnly(err); });
   if (!out) throw new HttpError(404, 'No such building');
@@ -126,8 +126,8 @@ router.post('/buildings/:id/rooms', wrap(async (req, res) => {
     const created = [];
     for (const r of rooms) {
       const { rows } = await client.query(
-        `insert into public.rooms (building_id, floor, number, capacity, sort)
-         values ($1, $2, $3, $4, (select coalesce(max(sort), 0) + 10 from public.rooms where building_id = $1))
+        `insert into rooms (building_id, floor, number, capacity, sort)
+         values ($1, $2, $3, $4, (select coalesce(max(sort), 0) + 10 from rooms where building_id = $1))
          on conflict (building_id, floor, number) do update set capacity = excluded.capacity
          returning id, floor, number, capacity, sort`,
         [buildingId, r.floor, r.number, r.capacity],
@@ -152,7 +152,7 @@ router.patch('/rooms/:id', wrap(async (req, res) => {
   if (!sets.length) throw new HttpError(400, 'Nothing to change');
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `update public.rooms set ${sets.join(', ')} where id = $1 returning id, building_id, floor, number, capacity, sort`, args);
+      `update rooms set ${sets.join(', ')} where id = $1 returning id, building_id, floor, number, capacity, sort`, args);
     return rows[0];
   }).catch((err) => { throw supervisorOnly(err); });
   if (!row) throw new HttpError(403, 'Only a supervisor or admin can change rooms');
@@ -163,9 +163,9 @@ router.delete('/rooms/:id', wrap(async (req, res) => {
   const id = uuidParam(req.params.id, 'room id');
   const out = await db.withIdentity(req.session.userId, async (client) => {
     const occupied = await client.query(
-      `select count(*)::int as n from public.residents where room_id = $1 and status = 'active'`, [id]);
+      `select count(*)::int as n from residents where room_id = $1 and status = 'active'`, [id]);
     if (occupied.rows[0].n > 0) throw new HttpError(409, `${occupied.rows[0].n} resident(s) still live in this room. Move them first.`);
-    const { rowCount } = await client.query(`delete from public.rooms where id = $1`, [id]);
+    const { rowCount } = await client.query(`delete from rooms where id = $1`, [id]);
     return rowCount;
   }).catch((err) => { throw supervisorOnly(err); });
   if (!out) throw new HttpError(404, 'No such room');

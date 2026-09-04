@@ -2465,5 +2465,593 @@ CREATE POLICY rooms_supervisor ON __TENANT__.rooms USING (__TENANT__.is_supervis
 
 
 --
--- PostgreSQL database dump complete
+
+-- Name: FUNCTION admin_create_staff(p_email text, p_password text, p_full_name text, p_role text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.admin_create_staff(p_email text, p_password text, p_full_name text, p_role text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.admin_create_staff(p_email text, p_password text, p_full_name text, p_role text) TO anon;
+GRANT ALL ON FUNCTION __TENANT__.admin_create_staff(p_email text, p_password text, p_full_name text, p_role text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.admin_create_staff(p_email text, p_password text, p_full_name text, p_role text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION admin_invite_staff(p_email text, p_full_name text, p_role text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.admin_invite_staff(p_email text, p_full_name text, p_role text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.admin_invite_staff(p_email text, p_full_name text, p_role text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.admin_invite_staff(p_email text, p_full_name text, p_role text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION admin_set_staff_password(p_user_id uuid, p_password text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.admin_set_staff_password(p_user_id uuid, p_password text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.admin_set_staff_password(p_user_id uuid, p_password text) TO anon;
+GRANT ALL ON FUNCTION __TENANT__.admin_set_staff_password(p_user_id uuid, p_password text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.admin_set_staff_password(p_user_id uuid, p_password text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION assert_late_entry_window(p_occurred_at timestamp with time zone); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.assert_late_entry_window(p_occurred_at timestamp with time zone) FROM PUBLIC;
+
+
+--
+
+-- Name: FUNCTION compliance_required(p_dob date, p_registered_on date, p_departed_on date, p_day date, p_adult_age integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.compliance_required(p_dob date, p_registered_on date, p_departed_on date, p_day date, p_adult_age integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.compliance_required(p_dob date, p_registered_on date, p_departed_on date, p_day date, p_adult_age integer) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.compliance_required(p_dob date, p_registered_on date, p_departed_on date, p_day date, p_adult_age integer) TO service_role;
+
+
+--
+
+-- Name: FUNCTION is_staff(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION __TENANT__.is_staff() TO anon;
+GRANT ALL ON FUNCTION __TENANT__.is_staff() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.is_staff() TO service_role;
+
+
+--
+
+-- Name: FUNCTION site_today(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.site_today() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.site_today() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.site_today() TO service_role;
+
+
+--
+
+-- Name: TABLE app_settings; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.app_settings TO anon;
+GRANT ALL ON TABLE __TENANT__.app_settings TO authenticated;
+GRANT ALL ON TABLE __TENANT__.app_settings TO service_role;
+
+
+--
+
+-- Name: TABLE daily_compliance; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.daily_compliance TO anon;
+GRANT ALL ON TABLE __TENANT__.daily_compliance TO authenticated;
+GRANT ALL ON TABLE __TENANT__.daily_compliance TO service_role;
+
+
+--
+
+-- Name: TABLE residents; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.residents TO anon;
+GRANT ALL ON TABLE __TENANT__.residents TO authenticated;
+GRANT ALL ON TABLE __TENANT__.residents TO service_role;
+
+
+--
+
+-- Name: TABLE v_resident_compliance; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.v_resident_compliance TO authenticated;
+GRANT ALL ON TABLE __TENANT__.v_resident_compliance TO service_role;
+
+
+--
+
+-- Name: FUNCTION attention_list(max_results integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.attention_list(max_results integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.attention_list(max_results integer) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.attention_list(max_results integer) TO service_role;
+
+
+--
+
+-- Name: FUNCTION audit_row(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.audit_row() FROM PUBLIC;
+
+
+--
+
+-- Name: FUNCTION close_out_compliance_days(p_through date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) TO service_role;
+
+
+--
+
+-- Name: TABLE roll_calls; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.roll_calls TO service_role;
+GRANT SELECT ON TABLE __TENANT__.roll_calls TO authenticated;
+
+
+--
+
+-- Name: FUNCTION end_roll_call(p_id uuid, p_at timestamp with time zone); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone) TO service_role;
+
+
+--
+
+-- Name: FUNCTION erase_audit_rows(p_resident_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.erase_audit_rows(p_resident_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.erase_audit_rows(p_resident_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.erase_audit_rows(p_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION erase_resident(p_resident_id uuid, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.erase_resident(p_resident_id uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.erase_resident(p_resident_id uuid, p_reason text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.erase_resident(p_resident_id uuid, p_reason text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION export_resident_record(p_resident_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.export_resident_record(p_resident_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.export_resident_record(p_resident_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.export_resident_record(p_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION hut_summary(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.hut_summary() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.hut_summary() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.hut_summary() TO service_role;
+
+
+--
+
+-- Name: FUNCTION is_admin(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION __TENANT__.is_admin() TO anon;
+GRANT ALL ON FUNCTION __TENANT__.is_admin() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.is_admin() TO service_role;
+
+
+--
+
+-- Name: FUNCTION is_supervisor(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION __TENANT__.is_supervisor() TO anon;
+GRANT ALL ON FUNCTION __TENANT__.is_supervisor() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.is_supervisor() TO service_role;
+
+
+--
+
+-- Name: FUNCTION join_household(p_resident_id uuid, p_with_resident_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: TABLE roll_call_marks; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.roll_call_marks TO service_role;
+GRANT SELECT ON TABLE __TENANT__.roll_call_marks TO authenticated;
+
+
+--
+
+-- Name: FUNCTION mark_roll_call(p_roll_call_id uuid, p_resident_id uuid, p_client_ref uuid, p_at timestamp with time zone); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.mark_roll_call(p_roll_call_id uuid, p_resident_id uuid, p_client_ref uuid, p_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.mark_roll_call(p_roll_call_id uuid, p_resident_id uuid, p_client_ref uuid, p_at timestamp with time zone) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.mark_roll_call(p_roll_call_id uuid, p_resident_id uuid, p_client_ref uuid, p_at timestamp with time zone) TO service_role;
+
+
+--
+
+-- Name: FUNCTION my_role(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION __TENANT__.my_role() TO anon;
+GRANT ALL ON FUNCTION __TENANT__.my_role() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.my_role() TO service_role;
+
+
+--
+
+-- Name: FUNCTION note_disclosure(p_resident_id uuid, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.note_disclosure(p_resident_id uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.note_disclosure(p_resident_id uuid, p_reason text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.note_disclosure(p_resident_id uuid, p_reason text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION note_report(p_report text, p_reason text, p_from date, p_to date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.note_report(p_report text, p_reason text, p_from date, p_to date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.note_report(p_report text, p_reason text, p_from date, p_to date) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.note_report(p_report text, p_reason text, p_from date, p_to date) TO service_role;
+
+
+--
+
+-- Name: FUNCTION prune_empty_households(); Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON FUNCTION __TENANT__.prune_empty_households() TO anon;
+GRANT ALL ON FUNCTION __TENANT__.prune_empty_households() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.prune_empty_households() TO service_role;
+
+
+--
+
+-- Name: FUNCTION purge_expired_audit(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_audit() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_audit() TO service_role;
+
+
+--
+
+-- Name: FUNCTION purge_expired_checkin_events(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_checkin_events() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_checkin_events() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_checkin_events() TO service_role;
+
+
+--
+
+-- Name: FUNCTION purge_expired_compliance(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_compliance() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_compliance() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_compliance() TO service_role;
+
+
+--
+
+-- Name: FUNCTION purge_expired_gate_events(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_gate_events() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_gate_events() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_gate_events() TO service_role;
+
+
+--
+
+-- Name: FUNCTION purge_expired_job_runs(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_job_runs() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_job_runs() TO service_role;
+
+
+--
+
+-- Name: FUNCTION purge_expired_roll_calls(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_roll_calls() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_roll_calls() TO service_role;
+
+
+--
+
+-- Name: TABLE gate_events; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.gate_events TO anon;
+GRANT ALL ON TABLE __TENANT__.gate_events TO authenticated;
+GRANT ALL ON TABLE __TENANT__.gate_events TO service_role;
+
+
+--
+
+-- Name: TABLE v_resident_status; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.v_resident_status TO authenticated;
+GRANT ALL ON TABLE __TENANT__.v_resident_status TO service_role;
+
+
+--
+
+-- Name: FUNCTION record_check(p_resident_id uuid, p_direction text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_check(p_resident_id uuid, p_direction text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_check(p_resident_id uuid, p_direction text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_check(p_resident_id uuid, p_direction text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION record_check_late(p_resident_id uuid, p_direction text, p_occurred_at timestamp with time zone, p_client_ref uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_check_late(p_resident_id uuid, p_direction text, p_occurred_at timestamp with time zone, p_client_ref uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_check_late(p_resident_id uuid, p_direction text, p_occurred_at timestamp with time zone, p_client_ref uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_check_late(p_resident_id uuid, p_direction text, p_occurred_at timestamp with time zone, p_client_ref uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION record_checkin(p_resident_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_checkin(p_resident_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_checkin(p_resident_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_checkin(p_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid) FROM PUBLIC;
+
+
+--
+
+-- Name: FUNCTION record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION search_residents(q text, include_departed boolean, max_results integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boolean, max_results integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boolean, max_results integer) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boolean, max_results integer) TO service_role;
+
+
+--
+
+-- Name: FUNCTION start_roll_call(p_id uuid, p_kind text, p_started_at timestamp with time zone); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.start_roll_call(p_id uuid, p_kind text, p_started_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.start_roll_call(p_id uuid, p_kind text, p_started_at timestamp with time zone) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.start_roll_call(p_id uuid, p_kind text, p_started_at timestamp with time zone) TO service_role;
+
+
+--
+
+-- Name: TABLE admin_audit; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE ON TABLE __TENANT__.admin_audit TO authenticated;
+GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE ON TABLE __TENANT__.admin_audit TO service_role;
+
+
+--
+
+-- Name: SEQUENCE admin_audit_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.admin_audit_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.admin_audit_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.admin_audit_id_seq TO service_role;
+
+
+--
+
+-- Name: TABLE buildings; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.buildings TO authenticated;
+GRANT ALL ON TABLE __TENANT__.buildings TO service_role;
+
+
+--
+
+-- Name: TABLE checkin_events; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.checkin_events TO anon;
+GRANT ALL ON TABLE __TENANT__.checkin_events TO authenticated;
+GRANT ALL ON TABLE __TENANT__.checkin_events TO service_role;
+
+
+--
+
+-- Name: SEQUENCE checkin_events_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.checkin_events_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.checkin_events_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.checkin_events_id_seq TO service_role;
+
+
+--
+
+-- Name: TABLE erasure_log; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.erasure_log TO anon;
+GRANT ALL ON TABLE __TENANT__.erasure_log TO authenticated;
+GRANT ALL ON TABLE __TENANT__.erasure_log TO service_role;
+
+
+--
+
+-- Name: SEQUENCE erasure_log_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.erasure_log_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.erasure_log_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.erasure_log_id_seq TO service_role;
+
+
+--
+
+-- Name: SEQUENCE gate_events_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.gate_events_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.gate_events_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.gate_events_id_seq TO service_role;
+
+
+--
+
+-- Name: TABLE households; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.households TO authenticated;
+GRANT ALL ON TABLE __TENANT__.households TO service_role;
+
+
+--
+
+-- Name: SEQUENCE job_runs_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO service_role;
+
+
+--
+
+-- Name: TABLE profiles; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.profiles TO anon;
+GRANT ALL ON TABLE __TENANT__.profiles TO authenticated;
+GRANT ALL ON TABLE __TENANT__.profiles TO service_role;
+
+
+--
+
+-- Name: TABLE rooms; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.rooms TO authenticated;
+GRANT ALL ON TABLE __TENANT__.rooms TO service_role;
+
+
+--
+
+-- Name: TABLE v_check_log; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.v_check_log TO authenticated;
+GRANT ALL ON TABLE __TENANT__.v_check_log TO service_role;
+
+
+--
+
+-- Name: TABLE v_resident_room; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.v_resident_room TO authenticated;
+GRANT ALL ON TABLE __TENANT__.v_resident_room TO service_role;
+
+
+--
+
+-- Name: TABLE v_evacuation_list; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.v_evacuation_list TO authenticated;
+GRANT ALL ON TABLE __TENANT__.v_evacuation_list TO service_role;
+
+
+--
+
+-- Name: TABLE v_room_occupancy; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.v_room_occupancy TO authenticated;
+GRANT ALL ON TABLE __TENANT__.v_room_occupancy TO service_role;
+
+
+--
+
+-- Name: TABLE v_system_health; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.v_system_health TO authenticated;
+GRANT ALL ON TABLE __TENANT__.v_system_health TO service_role;
+
+
 --

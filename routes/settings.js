@@ -32,7 +32,7 @@ const COLUMNS = {
 
 router.get('/', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows } = await client.query(`select ${Object.keys(COLUMNS).join(', ')}, updated_at from public.app_settings limit 1`);
+    const { rows } = await client.query(`select ${Object.keys(COLUMNS).join(', ')}, updated_at from app_settings limit 1`);
     return rows[0] || null;
   });
   res.json(row || {});
@@ -68,7 +68,7 @@ router.patch('/', wrap(async (req, res) => {
       catch (_) { throw new HttpError(400, 'Unknown timezone. Use a name like Europe/Dublin.'); }
     }
     const { rows } = await client.query(
-      `update public.app_settings set ${sets.join(', ')}, updated_at = now() where id returning ${Object.keys(COLUMNS).join(', ')}, updated_at`,
+      `update app_settings set ${sets.join(', ')}, updated_at = now() where id returning ${Object.keys(COLUMNS).join(', ')}, updated_at`,
       args,
     );
     return rows[0];

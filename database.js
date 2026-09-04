@@ -119,6 +119,8 @@ async function withTransaction(fn) {
 // The only two roles a request may run as. Spelled as constants because
 // `SET LOCAL ROLE` cannot be parameterised — the value is interpolated into
 // SQL, so it must never be able to come from a request.
+const tenancy = require('./lib/tenancy');
+
 const ROLE_ANON = 'anon';
 const ROLE_AUTHENTICATED = 'authenticated';
 
@@ -139,14 +141,40 @@ const ROLE_AUTHENTICATED = 'authenticated';
 // SET LOCAL lasts only to the end of THIS transaction, which is what makes it
 // safe on a pooled connection reused across users. There is no code path here
 // that issues a session-level SET.
+//
+// Since migration 020 the transaction is also bound to the user's TENANT:
+// search_path is set to their centre's schema before the role is switched
+// (the lookup reads auth.users and public.tenants, which the request roles
+// cannot). Every unqualified name a route uses — residents, record_check(),
+// v_resident_compliance — then resolves inside that schema and nowhere else,
+// and a name that does not exist there raises rather than returns. See
+// docs/MULTI-TENANCY.md.
 function withIdentity(userId, fn) {
   return withTransaction(async (client) => {
+    if (userId) {
+      const tenant = await tenancy.schemaForUser(client, userId);
+      if (tenant.status === 'suspended' || tenant.status === 'closed') {
+        const err = new Error("This centre's account is not active");
+        err.status = 403;
+        throw err;
+      }
+      await client.query('SELECT set_config($1, $2, true)', ['search_path', tenancy.searchPath(tenant.schema)]);
+    }
     await client.query(`SET LOCAL ROLE ${userId ? ROLE_AUTHENTICATED : ROLE_ANON}`);
     if (userId) {
       // set_config(..., true) is the function form of SET LOCAL, and unlike
       // SET it takes parameters — so the user id is bound, never interpolated.
       await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', String(userId)]);
     }
+    return fn(client);
+  });
+}
+
+// Run fn as the owner inside one tenant's schema: the nightly jobs and the
+// provisioning API. The schema comes from lib/tenancy.js, never from input.
+async function withOwnerIn(schema, fn) {
+  return withTransaction(async (client) => {
+    await client.query('SELECT set_config($1, $2, true)', ['search_path', tenancy.searchPath(schema)]);
     return fn(client);
   });
 }
@@ -248,4 +276,4 @@ async function migrate({ withOwner: owner = withOwner, log = console.log } = {})
 
 async function closePool() { await pool.end(); }
 
-module.exports = { query, withTransaction, withIdentity, withOwner, migrate, closePool, pool };
+module.exports = { query, withTransaction, withIdentity, withOwner, withOwnerIn, migrate, closePool, pool };

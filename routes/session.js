@@ -50,7 +50,7 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
       `select site_name, local_timezone, adult_age_years, due_soon_after_hour,
               event_retention_days, compliance_retention_days, late_entry_window_hours,
               idle_lock_minutes, feature_buildings, feature_evacuation, feature_households
-         from public.app_settings limit 1`,
+         from app_settings limit 1`,
     );
     return rows[0] || null;
   });
@@ -61,7 +61,7 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
   // identity from the session when it does (Tao 6) — the id lets the terminal
   // avoid handing one guard's events to another's login, not the reverse.
   res.json({
-    profile: { id: req.session.userId, full_name: req.session.fullName, role: req.session.role },
+    profile: { id: req.session.userId, full_name: req.session.fullName, role: req.session.role, platform_admin: req.session.platformAdmin === true },
     settings,
   });
 }));
@@ -72,7 +72,7 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
 // was missed looks exactly like a register where nobody was missed.
 router.get('/health', auth.requireSession, wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows } = await client.query('select * from public.v_system_health');
+    const { rows } = await client.query('select * from v_system_health');
     return rows[0] || null;
   });
   res.json(row || {});

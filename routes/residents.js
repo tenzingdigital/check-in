@@ -3,7 +3,7 @@
 // Every handler is a thin wrapper: parse the request, call the same view or RPC
 // the browser used to call directly through PostgREST before this app left
 // Supabase, return the rows. There is deliberately no authorisation logic here
-// — the `where public.is_staff()` in each view and the role checks inside each
+// — the `where is_staff()` in each view and the role checks inside each
 // SECURITY DEFINER function are the things deciding what a caller may see, and
 // they run inside withIdentity().
 //
@@ -103,7 +103,7 @@ router.get('/', wrap(async (req, res) => {
     // /:id/record. Searching BY number still works — search_key holds it.
     const { rows: found } = await client.query(
       `select v.*, (v.id_number is not null) as has_id
-         from public.search_residents($1, $2, $3) v`,
+         from search_residents($1, $2, $3) v`,
       [q, includeDeparted, limit],
     );
     for (const r of found) { delete r.id_number; delete r.id_type; }
@@ -112,7 +112,7 @@ router.get('/', wrap(async (req, res) => {
     const { rows: rooms } = await client.query(
       `select id, room_id, building_id, building, floor, room, room_label, evac_need,
               household_id, household_size, household_label
-         from public.v_resident_room where id = any($1::uuid[])`,
+         from v_resident_room where id = any($1::uuid[])`,
       [found.map(r => r.id)],
     );
     const roomById = new Map(rooms.map(r => [r.id, r]));
@@ -132,7 +132,7 @@ router.get('/', wrap(async (req, res) => {
               open_breaches, consecutive_missed, absent_in_window,
               absence_window_days, absence_window_limit,
               warn_after_consecutive_nights, last_seen_on
-         from public.v_resident_compliance
+         from v_resident_compliance
         where id = any($1::uuid[])`,
       [found.map(r => r.id)],
     );
@@ -151,7 +151,7 @@ router.get('/:id/compliance', wrap(async (req, res) => {
               seen_today, checkins_today, open_breaches, consecutive_missed,
               absent_in_window, absence_window_days, absence_window_limit,
               warn_after_consecutive_nights, last_seen_on, state
-         from public.v_resident_compliance where id = $1`,
+         from v_resident_compliance where id = $1`,
       [uuidParam(req.params.id, 'resident id')],
     );
     return rows[0];
@@ -163,15 +163,15 @@ router.get('/:id/compliance', wrap(async (req, res) => {
 
 // GET /api/residents/:id/days — the 30-day strip under the detail panel.
 //
-// The window is anchored to public.site_today() on the server rather than to
+// The window is anchored to site_today() on the server rather than to
 // the terminal's clock, so the strip lines up with the register.
 router.get('/:id/days', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: days } = await client.query(
       `select compliance_date, required, presented
-         from public.daily_compliance
+         from daily_compliance
         where resident_id = $1
-          and compliance_date >= (public.site_today() - ($2::integer - 1))
+          and compliance_date >= (site_today() - ($2::integer - 1))
         order by compliance_date`,
       [uuidParam(req.params.id, 'resident id'), STRIP_DAYS],
     );
@@ -197,7 +197,7 @@ router.post('/', wrap(async (req, res) => {
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `insert into public.residents (first_name, last_name, date_of_birth, id_type, id_number, room_id, evac_need, registered_by)
+      `insert into residents (first_name, last_name, date_of_birth, id_type, id_number, room_id, evac_need, registered_by)
        values ($1, $2, $3, $4, $5, $6, $7, auth.uid())
        returning id`,
       [first, last, dob, id.idType, id.idNumber, roomId, evac],
@@ -217,7 +217,7 @@ router.get('/:id/record', wrap(async (req, res) => {
     const { rows } = await client.query(
       `select id, first_name, last_name, date_of_birth, id_type, id_number,
               status, departed_on, registered_at, room_id, evac_need, household_id
-         from public.residents where id = $1`,
+         from residents where id = $1`,
       [uuidParam(req.params.id, 'resident id')],
     );
     return rows[0];
@@ -231,10 +231,10 @@ router.get('/:id/household', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select v.id, v.full_name, v.is_adult, v.presence, x.room_label
-         from public.v_resident_room me
-         join public.residents m on m.household_id = me.household_id and m.status = 'active'
-         join public.v_resident_status v on v.id = m.id
-         left join public.v_resident_room x on x.id = m.id
+         from v_resident_room me
+         join residents m on m.household_id = me.household_id and m.status = 'active'
+         join v_resident_status v on v.id = m.id
+         left join v_resident_room x on x.id = m.id
         where me.id = $1 and me.household_id is not null
         order by v.is_adult desc, v.last_name, v.first_name`,
       [uuidParam(req.params.id, 'resident id')],
@@ -288,7 +288,7 @@ router.patch('/:id', wrap(async (req, res) => {
       const on = body.departed_on ? dateParam(body.departed_on, 'Departure date') : null;
       set('status', 'departed');
       if (on) set('departed_on', on);
-      else sets.push('departed_on = public.site_today()');
+      else sets.push('departed_on = site_today()');
     } else if (status === 'active') {
       set('status', 'active');
       set('departed_on', null);
@@ -301,13 +301,13 @@ router.patch('/:id', wrap(async (req, res) => {
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `update public.residents set ${sets.join(', ')}
+      `update residents set ${sets.join(', ')}
         where id = $1
         returning id, first_name, last_name, id_type, id_number, status, departed_on, room_id, evac_need, household_id`,
       args,
     );
     if (rows[0] && householdWith) {
-      const { rows: h } = await client.query(`select public.join_household($1, $2) as household_id`, [rows[0].id, householdWith]);
+      const { rows: h } = await client.query(`select join_household($1, $2) as household_id`, [rows[0].id, householdWith]);
       rows[0].household_id = h[0].household_id;
     }
     return rows[0];
@@ -328,8 +328,8 @@ router.get('/:id/export', wrap(async (req, res) => {
   if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
 
   const out = await db.withIdentity(req.session.userId, async (client) => {
-    await client.query('select public.note_disclosure($1, $2)', [id, reason]);
-    const { rows } = await client.query('select public.export_resident_record($1) as record', [id]);
+    await client.query('select note_disclosure($1, $2)', [id, reason]);
+    const { rows } = await client.query('select export_resident_record($1) as record', [id]);
     return rows[0].record;
   }).catch((err) => { throw err.code === '42501' ? new HttpError(403, 'Only an administrator can export a record') : err; });
 
@@ -351,11 +351,11 @@ router.delete('/:id', wrap(async (req, res) => {
   if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the erasure (up to 200 characters)');
 
   const result = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows } = await client.query('select first_name, last_name from public.residents where id = $1', [id]);
+    const { rows } = await client.query('select first_name, last_name from residents where id = $1', [id]);
     if (!rows[0]) throw new HttpError(404, 'No such resident, or not authorised');
     const full = `${rows[0].first_name} ${rows[0].last_name}`.trim().toLowerCase().replace(/\s+/g, ' ');
     if (typed !== full) throw new HttpError(400, "The name typed does not match the resident's name");
-    const { rows: out } = await client.query('select public.erase_resident($1, $2) as r', [id, reason]);
+    const { rows: out } = await client.query('select erase_resident($1, $2) as r', [id, reason]);
     return out[0].r;
   }).catch((err) => { throw err.code === '42501' ? new HttpError(403, 'Only an administrator can erase a resident') : err; });
 

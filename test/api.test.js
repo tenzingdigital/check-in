@@ -650,6 +650,164 @@ async function main() {
       "a closed tenant with no closed_at was accepted");
   });
 
+  console.log("\n== tenancy isolation (migration 020) ==");
+
+  // A second centre, provisioned the way routes/tenants.js does it, with its
+  // own admin and guard. Every request they make must run inside t_harbour
+  // and see nothing of the legacy tenant in public — and vice versa.
+  const tenancyLib = require("../lib/tenancy");
+  let harbourId, harbourAdmin, harbourGuard, harbourResident;
+  const hAdmin = client(base), hGuard = client(base);
+  // The revocation section above ended the legacy guard's session; start a fresh one.
+  assert.equal((await api.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } })).status, 200);
+  await test("a second centre is provisioned with its own staff", async () => {
+    await withOwner(async (c) => {
+      await c.query(`delete from public.tenants where slug = 'harbour'`).catch(() => {});
+      await c.query(`drop schema if exists t_harbour cascade`);
+      const { rows } = await c.query(
+        `insert into public.tenants (name, slug, status, terms_accepted_at, terms_version)
+         values ('Harbour House', 'harbour', 'active', now(), 'test') returning id`);
+      harbourId = rows[0].id;
+      await tenancyLib.provisionSchema(c, "harbour", { siteName: "Harbour House" });
+      harbourAdmin = (await c.query(`select auth.create_user($1, $2, $3, $4, $5) as id`,
+        ["hadmin@harbour.example", PASSWORD, "Harbour Admin", "admin", harbourId])).rows[0].id;
+      harbourGuard = (await c.query(`select auth.create_user($1, $2, $3, $4, $5) as id`,
+        ["hguard@harbour.example", PASSWORD, "Harbour Guard", "guard", harbourId])).rows[0].id;
+    });
+    const inTenant = await withOwner((c) => c.query(`select role from t_harbour.profiles where id = $1`, [harbourAdmin]));
+    assert.equal(inTenant.rows[0]?.role, "admin", "the new admin's profile is not in the tenant schema");
+    const inPublic = await withOwner((c) => c.query(`select 1 from public.profiles where id = $1`, [harbourAdmin]));
+    assert.equal(inPublic.rowCount, 0, "the new admin's profile leaked into public");
+    assert.equal((await hAdmin.fetch("/api/session", { method: "POST", body: { email: "hadmin@harbour.example", password: PASSWORD } })).status, 200);
+    assert.equal((await hGuard.fetch("/api/session", { method: "POST", body: { email: "hguard@harbour.example", password: PASSWORD } })).status, 200);
+    const who = await hAdmin.fetch("/api/session");
+    assert.equal(who.json.settings.site_name, "Harbour House", "the session reads the tenant's own settings");
+  });
+
+  await test("each centre lists only its own residents and staff", async () => {
+    const made = await hAdmin.fetch("/api/residents", { method: "POST", body: { first_name: "Hana", last_name: "Harbourside", date_of_birth: "1988-02-02" } });
+    assert.equal(made.status, 201, made.text);
+    harbourResident = made.json.id;
+    const where = await withOwner((c) => c.query(
+      `select (select count(*)::int from t_harbour.residents where id = $1) as tenant,
+              (select count(*)::int from public.residents where id = $1) as legacy`, [harbourResident]));
+    assert.deepEqual(where.rows[0], { tenant: 1, legacy: 0 }, "the resident landed in the wrong schema");
+
+    const theirs = await hGuard.fetch("/api/residents?q=&limit=1000");
+    assert.equal(theirs.json.length, 1, "the harbour guard sees residents that are not theirs");
+    assert.equal(theirs.json[0].id, harbourResident);
+    const ours = await api.fetch("/api/residents?q=harbourside&limit=10");
+    assert.equal(ours.json.length, 0, "the legacy guard can see a harbour resident");
+
+    const staff = await hAdmin.fetch("/api/staff");
+    assert.deepEqual(staff.json.map((s) => s.email).sort(), ["hadmin@harbour.example", "hguard@harbour.example"], "the staff list crossed tenants");
+  });
+
+  await test("a harbour admin cannot read, change, export or erase a legacy resident", async () => {
+    const { rows } = await withOwner((c) => c.query(`select id from public.residents where status = 'active' limit 1`));
+    const legacyId = rows[0].id;
+    for (const path of [`/api/residents/${legacyId}/record`, `/api/residents/${legacyId}/compliance`, `/api/residents/${legacyId}/export?reason=test`, `/api/residents/${legacyId}/household`]) {
+      const res = await hAdmin.fetch(path);
+      // A refusal of any shape is fine (404 from the route, 400 from the tenant's
+      // own function raising "Resident not found"); a 200 with data is not.
+      assert.ok(res.status >= 400 || (res.status === 200 && Array.isArray(res.json) && res.json.length === 0), `${path} answered ${res.status}: ${res.text.slice(0, 80)}`);
+    }
+    const patch = await hAdmin.fetch(`/api/residents/${legacyId}`, { method: "PATCH", body: { first_name: "Hijacked" } });
+    assert.ok([403, 404].includes(patch.status), `PATCH answered ${patch.status}`);
+    const erase = await hAdmin.fetch(`/api/residents/${legacyId}`, { method: "DELETE", body: { reason: "test", confirm_name: "x" } });
+    assert.ok(erase.status >= 400, `DELETE answered ${erase.status}`);
+    const still = await withOwner((c) => c.query(`select first_name from public.residents where id = $1`, [legacyId]));
+    assert.equal(still.rowCount, 1);
+    assert.notEqual(still.rows[0].first_name, "Hijacked");
+    const checkin = await hGuard.fetch("/api/checkins", { method: "POST", body: { resident_id: legacyId } });
+    assert.ok(checkin.status >= 400, "a harbour guard recorded a check-in for a legacy resident");
+  });
+
+  await test("events recorded in a centre stay in that centre, online and via sync", async () => {
+    const before = (await withOwner((c) => c.query(`select count(*)::int as n from public.checkin_events`))).rows[0].n;
+    const live = await hGuard.fetch("/api/checkins", { method: "POST", body: { resident_id: harbourResident } });
+    assert.equal(live.status, 200, live.text);
+    const synced = await hGuard.fetch("/api/sync", { method: "POST", body: { events: [
+      { ref: ref(), kind: "gate", direction: "in", resident_id: harbourResident, occurred_at: agoIso(120) },
+    ] } });
+    assert.equal(synced.json.results[0].status, "ok", synced.text);
+    const after = (await withOwner((c) => c.query(`select count(*)::int as n from public.checkin_events`))).rows[0].n;
+    assert.equal(after, before, "a harbour check-in reached the legacy schema");
+    const theirs = await withOwner((c) => c.query(
+      `select (select count(*)::int from t_harbour.checkin_events) as checkins,
+              (select count(*)::int from t_harbour.gate_events) as gates`));
+    assert.deepEqual(theirs.rows[0], { checkins: 1, gates: 1 });
+  });
+
+  await test("an invited staff member joins the inviter's centre", async () => {
+    const res = await hAdmin.fetch("/api/staff", { method: "POST", body: { email: "hsup@harbour.example", full_name: "Harbour Super", role: "supervisor" } });
+    assert.equal(res.status, 201, res.text);
+    const { rows } = await withOwner((c) => c.query(
+      `select u.tenant_id = $2 as right_tenant,
+              exists (select 1 from t_harbour.profiles p where p.id = u.id) as in_tenant,
+              exists (select 1 from public.profiles p where p.id = u.id) as in_public
+         from auth.users u where u.id = $1`, [res.json.id, harbourId]));
+    assert.deepEqual(rows[0], { right_tenant: true, in_tenant: true, in_public: false });
+  });
+
+  await test("settings, buildings and reports are per centre", async () => {
+    const set = await hAdmin.fetch("/api/settings", { method: "PATCH", body: { feature_buildings: true, site_name: "Harbour House" } });
+    assert.equal(set.status, 200, set.text);
+    const legacy = await withOwner((c) => c.query(`select feature_buildings from public.app_settings`));
+    assert.equal(legacy.rows[0].feature_buildings, false, "a harbour setting changed the legacy site");
+    const b = await hAdmin.fetch("/api/buildings", { method: "POST", body: { name: "Pier" } });
+    assert.equal(b.status, 201, b.text);
+    const legacyB = await api.fetch("/api/buildings");
+    assert.ok(!legacyB.json.some((x) => x.name === "Pier"), "a harbour building is visible to the legacy site");
+    const rep = await hAdmin.fetch("/api/reports/attendance?from=2026-01-01&to=2026-12-31&reason=test&format=json");
+    assert.equal(rep.status, 200, rep.text);
+    assert.deepEqual(rep.json.rows.map((r) => r.resident), ["Hana Harbourside"]);
+  });
+
+  await test("only a platform admin can list, create and close centres", async () => {
+    assert.equal((await api.fetch("/api/tenants")).status, 403);
+    assert.equal((await hAdmin.fetch("/api/tenants")).status, 403);
+    await withOwner((c) => c.query(`update auth.users set platform_admin = true where id = $1`, [guardId]));
+    // A new login picks up the flag on the next request.
+    const list = await api.fetch("/api/tenants");
+    assert.equal(list.status, 200, list.text);
+    const harbour = list.json.find((t) => t.slug === "harbour");
+    assert.equal(harbour.residents, 1);
+    assert.equal(harbour.staff, 3);
+    assert.equal(list.json.find((t) => t.slug === "default").schema, "public");
+
+    const bad = await api.fetch("/api/tenants", { method: "POST", body: { name: "X", slug: "public", admin_name: "A", admin_email: "a@b.c" } });
+    assert.equal(bad.status, 400);
+    const made = await api.fetch("/api/tenants", { method: "POST", body: { name: "Seaview", slug: "seaview", admin_name: "Sea Admin", admin_email: "seaadmin@seaview.example" } });
+    assert.equal(made.status, 201, made.text);
+    assert.equal(made.json.schema, "t_seaview");
+    assert.equal(made.json.admin.delivered, false);
+    assert.match(made.json.admin.link, /\?reset=/);
+    const seaProfile = await withOwner((c) => c.query(`select role from t_seaview.profiles where id = $1`, [made.json.admin.id]));
+    assert.equal(seaProfile.rows[0]?.role, "admin");
+
+    const wrong = await api.fetch(`/api/tenants/${made.json.id}`, { method: "DELETE", body: { confirm_slug: "nope" } });
+    assert.equal(wrong.status, 400);
+    const closed = await api.fetch(`/api/tenants/${made.json.id}`, { method: "DELETE", body: { confirm_slug: "seaview" } });
+    assert.equal(closed.status, 200, closed.text);
+    const gone = await withOwner((c) => c.query(`select 1 from pg_namespace where nspname = 't_seaview'`));
+    assert.equal(gone.rowCount, 0, "the closed centre's schema still exists");
+    const status = await withOwner((c) => c.query(`select status from public.tenants where id = $1`, [made.json.id]));
+    assert.equal(status.rows[0].status, "closed");
+    const fresh = client(base);
+    const loginAfter = await fresh.fetch("/api/session", { method: "POST", body: { email: "seaadmin@seaview.example", password: PASSWORD } });
+    assert.equal(loginAfter.status, 401, "a closed centre's login still works");
+    await withOwner((c) => c.query(`update auth.users set platform_admin = false where id = $1`, [guardId]));
+  });
+
+  await test("a suspended centre is refused at the door", async () => {
+    await withOwner((c) => c.query(`update public.tenants set status = 'suspended' where id = $1`, [harbourId]));
+    const res = await hGuard.fetch("/api/residents?q=&limit=10");
+    assert.equal(res.status, 403, res.text);
+    await withOwner((c) => c.query(`update public.tenants set status = 'active' where id = $1`, [harbourId]));
+    assert.equal((await hGuard.fetch("/api/residents?q=&limit=10")).status, 200);
+  });
+
   console.log("\n== IPAS alignment ==");
 
   // The revocation block above changed the password, which ends every session

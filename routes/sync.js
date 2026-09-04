@@ -102,19 +102,19 @@ router.post('/sync', wrap(async (req, res) => {
     try {
       await db.withIdentity(req.session.userId, async (client) => {
         if (item.kind === 'rollcall_start') {
-          await client.query('select public.start_roll_call($1, $2, $3)', [item.rollCallId, item.rcKind, item.occurredAt]);
+          await client.query('select start_roll_call($1, $2, $3)', [item.rollCallId, item.rcKind, item.occurredAt]);
         } else if (item.kind === 'rollcall_mark') {
-          await client.query('select public.mark_roll_call($1, $2, $3, $4)', [item.rollCallId, item.residentId, item.ref, item.occurredAt]);
+          await client.query('select mark_roll_call($1, $2, $3, $4)', [item.rollCallId, item.residentId, item.ref, item.occurredAt]);
         } else if (item.kind === 'rollcall_end') {
-          await client.query('select public.end_roll_call($1, $2)', [item.rollCallId, item.occurredAt]);
+          await client.query('select end_roll_call($1, $2)', [item.rollCallId, item.occurredAt]);
         } else if (item.kind === 'checkin') {
           await client.query(
-            'select * from public.record_checkin_late($1, $2, $3)',
+            'select * from record_checkin_late($1, $2, $3)',
             [item.residentId, item.occurredAt, item.ref],
           );
         } else {
           await client.query(
-            'select * from public.record_check_late($1, $2, $3, $4)',
+            'select * from record_check_late($1, $2, $3, $4)',
             [item.residentId, item.direction, item.occurredAt, item.ref],
           );
         }

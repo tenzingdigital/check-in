@@ -89,8 +89,14 @@ a supervisor's tool and add no data.**
 
 ## Stage 5 — Many centres
 
-**Status: next. Groundwork built (schema per tenant, migrations 009–011);
-isolation and the organisation view not started.**
+**Status: built 4 September 2026 (migration 020), on the working branch and
+NOT on main until it has been seen on a copy of the live database.** The
+proof is the "tenancy isolation" section of `test/api.test.js`: a second
+centre's admin cannot read, change, export or erase a legacy resident;
+events, settings, buildings and reports stay in their own schema; an
+invited staff member joins the inviter's centre; the nightly jobs run once
+per centre; a suspended centre is refused at the door; a closed centre's
+schema is dropped and its logins stop working.
 
 - Tenancy isolation: a request runs inside its own centre's schema, the
   staff list and password reset are centre-scoped, and a test proves one

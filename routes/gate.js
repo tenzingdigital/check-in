@@ -11,7 +11,7 @@ const MAX_LOG_ROWS = 500;
 // GET /api/summary — the header counts.
 router.get('/summary', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows } = await client.query('select * from public.hut_summary()');
+    const { rows } = await client.query('select * from hut_summary()');
     return rows[0];
   });
   res.json(row || { on_site: 0, events_today: 0 });
@@ -27,7 +27,7 @@ router.post('/gate-events', wrap(async (req, res) => {
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'select * from public.record_check($1, $2)',
+      'select * from record_check($1, $2)',
       [uuidParam(body.resident_id, 'resident_id'), direction],
     );
     return rows[0];
@@ -51,11 +51,11 @@ router.get('/gate-events', wrap(async (req, res) => {
 
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: log } = await client.query(
-      `with s as (select local_timezone as tz from public.app_settings limit 1)
+      `with s as (select local_timezone as tz from app_settings limit 1)
        select l.id, l.resident_id, l.kind, l.occurred_at,
               l.resident_name, l.guard_id, l.guard_name,
               l.late_entry, l.recorded_at
-         from public.v_check_log l, s
+         from v_check_log l, s
         where l.occurred_at >= ($1::date)::timestamp at time zone s.tz
           and l.occurred_at <  (($1::date) + 1)::timestamp at time zone s.tz
         order by l.occurred_at desc

@@ -141,6 +141,7 @@
       <button role="tab" id="tabReports"   aria-selected="false" aria-controls="panelReports">Reports</button>
       <button role="tab" id="tabStaff"     aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
       <button role="tab" id="tabSettings"  aria-selected="false" aria-controls="panelSettings" hidden>Settings</button>
+      <button role="tab" id="tabCentres"   aria-selected="false" aria-controls="panelCentres" hidden>Centres</button>
     </nav>
 
     <!-- ---- residents (supervisors and admins) ---- -->
@@ -233,6 +234,26 @@
         </div>
         <div class="tablewrap"><table id="rpTable"></table></div>
       </div>
+    </section>
+
+    <!-- ---- centres (platform administrators only) ---- -->
+    <section id="panelCentres" role="tabpanel" aria-labelledby="tabCentres" hidden>
+      <p class="hint flush">Every centre on this service. Each has its own schema, its own staff and its own settings; nothing here shows a resident.</p>
+      <form id="centreForm" class="formcard mt14" autocomplete="off">
+        <h2>Add a centre</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="cfName">Centre name</label><input id="cfName" class="field" type="text" required maxlength="120" placeholder="Harbour House"></div>
+          <div><label class="lbl" for="cfSlug">Slug</label><input id="cfSlug" class="field" type="text" required pattern="[a-z][a-z0-9-]{1,38}[a-z0-9]" placeholder="harbour-house"></div>
+        </div>
+        <div><label class="lbl" for="cfTz">Timezone</label><input id="cfTz" class="field" type="text" value="Europe/Dublin" required></div>
+        <div class="grid2">
+          <div><label class="lbl" for="cfAdminName">First administrator</label><input id="cfAdminName" class="field" type="text" required maxlength="80"></div>
+          <div><label class="lbl" for="cfAdminEmail">Their email</label><input id="cfAdminEmail" class="field" type="email" required></div>
+        </div>
+        <div class="actions"><button class="btn primary-in" id="cfSave" type="submit">Create centre and invite</button></div>
+        <div id="centreNotice" class="alert warn" hidden></div>
+      </form>
+      <div id="centreList" class="list"></div>
     </section>
 
     <!-- ---- staff (admins only; the database refuses every operation below
@@ -937,6 +958,50 @@ $("rpPrint").addEventListener("click", () => {
 });
 
 /* ========================================================================
+   Centres (platform administrators) — Stage 5 of the product roadmap
+   ====================================================================== */
+async function loadCentres() {
+  const rows = await guarded(() => apiGet("/api/tenants"), (err) => showError("Could not load centres: " + err.message));
+  if (!rows) return;
+  showError("");
+  $("centreList").innerHTML = rows.map((t) => `
+    <div class="bld">
+      <div class="bldhead">
+        <div><b>${esc(t.name)}</b><span class="hint"> · ${esc(t.slug)} · ${esc(t.status)}</span></div>
+        ${t.slug !== "default" && t.status !== "closed" ? `<button class="linkish" type="button" data-close="${esc(t.id)}" data-slug="${esc(t.slug)}">close centre</button>` : ""}
+      </div>
+      <p class="hint flush">${t.status === "closed" ? `Closed ${esc(String(t.closed_at).slice(0, 10))}` :
+        `${t.residents ?? "?"} active residents · ${t.staff ?? "?"} active staff · ${t.logins} logins · last close-out ${t.last_close_out ? esc(String(t.last_close_out).slice(0, 16).replace("T", " ")) : "never"}`}</p>
+    </div>`).join("") || '<p class="empty">No centres.</p>';
+}
+$("centreForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = { name: $("cfName").value.trim(), slug: $("cfSlug").value.trim(), timezone: $("cfTz").value.trim(), admin_name: $("cfAdminName").value.trim(), admin_email: $("cfAdminEmail").value.trim() };
+  $("cfSave").disabled = true;
+  const out = await guarded(() => apiPost("/api/tenants", body), (err) => toast("Not created: " + err.message, "err"));
+  $("cfSave").disabled = false;
+  if (!out) return;
+  const n = $("centreNotice");
+  if (out.admin.delivered) { toast(`${body.name} created; login link emailed to ${body.admin_email}`, "ok"); n.hidden = true; }
+  else {
+    n.innerHTML = `<b>${esc(body.name)} created.</b> Email is not configured, so pass this one-time link to ${esc(body.admin_name)} yourself. It expires in 24 hours:<br>
+      <input class="field mt8" id="cfLink" readonly value="${esc(out.admin.link || "")}">`;
+    n.hidden = false;
+    $("cfLink").addEventListener("click", (ev) => ev.target.select());
+  }
+  $("centreForm").reset(); $("cfTz").value = "Europe/Dublin";
+  loadCentres();
+});
+$("centreList").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-close]");
+  if (!b) return;
+  const typed = prompt(`Closing "${b.dataset.slug}" drops its data and ends its logins. This is the end of the deletion timeline in the DPA. Type the slug to confirm:`);
+  if (typed === null) return;
+  const out = await guarded(() => api(`/api/tenants/${b.dataset.close}`, { method: "DELETE", body: JSON.stringify({ confirm_slug: typed }), headers: { "content-type": "application/json" } }), (err) => toast("Not closed: " + err.message, "err"));
+  if (out) { toast("Centre closed", "ok"); loadCentres(); }
+});
+
+/* ========================================================================
    Settings (admins only)
    ====================================================================== */
 const SETTINGS_FIELDS = {
@@ -985,7 +1050,7 @@ $("stReload").addEventListener("click", loadSettings);
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["residents", "buildings", "reports", "staff", "settings"]) {
+  for (const t of ["residents", "buildings", "reports", "staff", "settings", "centres"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
@@ -994,6 +1059,7 @@ function selectTab(name) {
   if (name === "residents") loadResidents();
   if (name === "buildings") loadBuildings();
   if (name === "reports") loadReports();
+  if (name === "centres") loadCentres();
   if (name === "staff") loadStaff();
   if (name === "settings") loadSettings();
 }
@@ -1033,6 +1099,7 @@ async function enterApp() {
   $("adminTabs").hidden = false;
   $("tabStaff").hidden = !canStaff();
   $("tabSettings").hidden = !canStaff();
+  $("tabCentres").hidden = !profile.platform_admin;
   applyFeatures();
   if (featureOn("feature_buildings")) loadBuildings({ quiet: true });
   selectTab("residents");
@@ -1086,6 +1153,7 @@ $("residentList").addEventListener("click", (e) => {
 $("tabResidents").addEventListener("click", () => selectTab("residents"));
 $("tabBuildings").addEventListener("click", () => selectTab("buildings"));
 $("tabReports").addEventListener("click", () => selectTab("reports"));
+$("tabCentres").addEventListener("click", () => selectTab("centres"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));
 $("tabSettings").addEventListener("click", () => selectTab("settings"));
 

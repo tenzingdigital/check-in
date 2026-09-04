@@ -29,9 +29,9 @@ const REPORTS = {
                  dc.required, dc.presented,
                  to_char(dc.first_seen_at at time zone s.local_timezone, 'HH24:MI') as first_seen,
                  dc.checkin_count as check_ins, (dc.closed_at is not null) as closed
-            from public.daily_compliance dc
-            join public.v_resident_status v on v.id = dc.resident_id
-            cross join (select local_timezone from public.app_settings where id) s
+            from daily_compliance dc
+            join v_resident_status v on v.id = dc.resident_id
+            cross join (select local_timezone from app_settings where id) s
            where dc.compliance_date between $1 and $2
            order by dc.compliance_date, v.last_name, v.first_name`,
   },
@@ -44,9 +44,9 @@ const REPORTS = {
                  count(*) filter (where dc.required and not dc.presented and dc.closed_at is not null) as days_missed,
                  max(dc.compliance_date) filter (where dc.presented)                 as last_seen,
                  c.consecutive_missed as current_streak_missed
-            from public.v_resident_status v
-            left join public.daily_compliance dc on dc.resident_id = v.id and dc.compliance_date between $1 and $2
-            left join public.v_resident_compliance c on c.id = v.id
+            from v_resident_status v
+            left join daily_compliance dc on dc.resident_id = v.id and dc.compliance_date between $1 and $2
+            left join v_resident_compliance c on c.id = v.id
            group by v.id, v.full_name, v.age_years, v.status, v.last_name, v.first_name, c.consecutive_missed
            order by v.last_name, v.first_name`,
   },
@@ -56,8 +56,8 @@ const REPORTS = {
     sql: `select to_char(l.occurred_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as at,
                  l.resident_name as resident, upper(l.kind) as direction, l.guard_name as recorded_by,
                  l.late_entry as recorded_later
-            from public.v_check_log l
-            cross join (select local_timezone from public.app_settings where id) s
+            from v_check_log l
+            cross join (select local_timezone from app_settings where id) s
            where (l.occurred_at at time zone s.local_timezone)::date between $1 and $2
            order by l.occurred_at`,
   },
@@ -67,7 +67,7 @@ const REPORTS = {
     sql: `select o.building, o.floor, o.room, o.capacity, o.occupants, o.on_site,
                  (select string_agg(p->>'full_name' || case when (p->>'presence') = 'in' then ' (on site)' else '' end, '; ')
                     from jsonb_array_elements(o.residents) p) as residents
-            from public.v_room_occupancy o
+            from v_room_occupancy o
            order by o.building_sort, o.building, o.room_sort, o.floor, o.room`,
   },
   evacuation: {
@@ -80,7 +80,7 @@ const REPORTS = {
                       when 'hearing' then 'needs help to hear the alarm' when 'sight' then 'needs help to find the way'
                       when 'carer' then 'infant or carer' else 'needs help' end as assistance,
                  e.household_label as family
-            from public.v_evacuation_list e`,
+            from v_evacuation_list e`,
   },
   'roll-calls': {
     title: 'Drills and roll calls',
@@ -88,11 +88,11 @@ const REPORTS = {
     sql: `select to_char(rc.started_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as started,
                  rc.kind, p.full_name as started_by,
                  to_char(rc.ended_at at time zone s.local_timezone, 'HH24:MI') as ended,
-                 (select count(*)::int from public.roll_call_marks m where m.roll_call_id = rc.id) as accounted_for,
+                 (select count(*)::int from roll_call_marks m where m.roll_call_id = rc.id) as accounted_for,
                  round(extract(epoch from (rc.ended_at - rc.started_at)) / 60)::int as minutes
-            from public.roll_calls rc
-            left join public.profiles p on p.id = rc.started_by
-            cross join (select local_timezone from public.app_settings where id) s
+            from roll_calls rc
+            left join profiles p on p.id = rc.started_by
+            cross join (select local_timezone from app_settings where id) s
            where (rc.started_at at time zone s.local_timezone)::date between $1 and $2
            order by rc.started_at desc`,
   },
@@ -129,7 +129,7 @@ router.get('/reports/:name', wrap(async (req, res) => {
   }
 
   const rows = await db.withIdentity(req.session.userId, async (client) => {
-    await client.query('select public.note_report($1, $2, $3, $4)', [req.params.name, reason, from, to]);
+    await client.query('select note_report($1, $2, $3, $4)', [req.params.name, reason, from, to]);
     const { rows } = await client.query(def.sql, def.ranged ? [from, to] : []);
     return rows;
   }).catch((err) => {

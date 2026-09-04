@@ -76,6 +76,35 @@ Verified against a freshly migrated database, not from memory.
 **RLS policies:** all 13, unchanged — they stay role-based, because the schema
 already answers "which tenant".
 
+## Built, 4 September 2026 (migration 020)
+
+- `withIdentity()` in `database.js` resolves the caller's tenant (one query
+  on `auth.users` and `public.tenants`, never cached) and sets
+  `search_path` to `<schema>, public, extensions` before it switches role.
+  Every route now uses unqualified names, so each resolves inside the
+  caller's schema; a suspended or closed tenant is refused with a 403
+  before any query runs.
+- `auth.profile_for(user)` finds a person's profile in their own centre by
+  dynamic SQL from the validated slug; login, session validation, password
+  reset and invitation links use it. `public.handle_new_user()` creates the
+  profile in the new user's tenant. `auth.create_user()` and
+  `auth.create_user_invited()` take an optional tenant and otherwise use the
+  caller's own.
+- `jobs.js` runs the per-tenant jobs once per open tenant inside its schema
+  (each centre's `job_runs` and health banner are its own) and the platform
+  jobs once.
+- `tenant/template.sql` now carries the grants (pg_dump without `--no-acl`,
+  minus default privileges and schema ACLs); `provisionSchema()` grants
+  usage on the schema to the request roles.
+- `routes/tenants.js`: platform administrators (`auth.users.platform_admin`,
+  set in SQL by the operator) list centres with counts, provision one (row,
+  schema, first admin, invitation link) and close one (slug typed back,
+  schema dropped, logins ended). Admin → Centres is the screen.
+- Not built: the trial's read-only state (`tenant_may_write()` exists and
+  is not enforced), and an organisation role that spans several centres
+  without being platform admin. One login belongs to one centre; a person
+  who works at two has two logins.
+
 ## The two things that need care
 
 **1. `handle_new_user()`.** Today it is a trigger on `auth.users` that inserts

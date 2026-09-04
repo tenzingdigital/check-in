@@ -3,7 +3,7 @@
 // Same posture as every other router: thin transport, no authorisation logic
 // here. Creating an account and resetting a password go through the
 // admin_create_staff / admin_set_staff_password SECURITY DEFINER functions,
-// which re-check public.is_admin() themselves; deactivation and role changes
+// which re-check is_admin() themselves; deactivation and role changes
 // are plain updates that the profiles_admin_all policy allows only to admins,
 // so a non-admin's update simply matches no rows. The list is readable by any
 // staff member by design — profiles are staff-visible so the log can show who
@@ -24,7 +24,7 @@ router.get('/', wrap(async (req, res) => {
     const { rows } = await client.query(
       `select p.id, u.email, p.full_name, p.role, p.active,
               u.last_sign_in_at, p.created_at
-         from public.profiles p
+         from profiles p
          join auth.users u on u.id = p.id
         order by p.active desc, p.role, p.full_name`,
     );
@@ -47,7 +47,7 @@ router.post('/', wrap(async (req, res) => {
 
   const id = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'select public.admin_invite_staff($1, $2, $3) as id',
+      'select admin_invite_staff($1, $2, $3) as id',
       [cleanEmail, String(full_name || ''), String(role || 'guard')],
     );
     return rows[0].id;
@@ -68,7 +68,7 @@ router.post('/:id/link', wrap(async (req, res) => {
   // granted, then confirm the role with the admin policy on profiles.
   const target = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `select u.email, p.full_name from auth.users u join public.profiles p on p.id = u.id where u.id = $1`, [id]);
+      `select u.email, p.full_name from auth.users u join profiles p on p.id = u.id where u.id = $1`, [id]);
     return rows[0];
   });
   if (!target) throw new HttpError(404, 'No such account.');
@@ -100,7 +100,7 @@ async function sendLoginLink(req, email, { invite }) {
   const link = `${base}/?reset=${encodeURIComponent(token)}`;
 
   const siteName = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows } = await client.query('select site_name from public.app_settings limit 1');
+    const { rows } = await client.query('select site_name from app_settings limit 1');
     return rows[0] && rows[0].site_name;
   });
 
@@ -128,7 +128,7 @@ router.post('/:id/active', wrap(async (req, res) => {
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'update public.profiles set active = $2 where id = $1 returning id, active',
+      'update profiles set active = $2 where id = $1 returning id, active',
       [id, active],
     );
     return rows[0];
@@ -153,7 +153,7 @@ router.post('/:id/role', wrap(async (req, res) => {
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'update public.profiles set role = $2 where id = $1 returning id, role',
+      'update profiles set role = $2 where id = $1 returning id, role',
       [id, role],
     );
     return rows[0];
@@ -170,7 +170,7 @@ router.post('/:id/password', wrap(async (req, res) => {
 
   const ok = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      'select public.admin_set_staff_password($1, $2) as ok',
+      'select admin_set_staff_password($1, $2) as ok',
       [id, String(req.body?.password || '')],
     );
     return rows[0].ok;
@@ -181,3 +181,4 @@ router.post('/:id/password', wrap(async (req, res) => {
 }));
 
 module.exports = router;
+module.exports.sendLoginLink = sendLoginLink;

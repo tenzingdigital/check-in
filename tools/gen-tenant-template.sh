@@ -22,7 +22,7 @@ source "$REPO/test/cluster.sh"
 start_cluster
 
 OUT="$REPO/tenant/template.sql"
-pg_dump --schema-only --no-owner --no-acl --no-comments -n public -d hut \
+pg_dump --schema-only --no-owner --no-comments -n public -d hut \
   | node "$HERE/tenant-template.js" > "$OUT"
 
 echo "==> wrote $OUT ($(wc -l < "$OUT") lines)"
