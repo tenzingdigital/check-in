@@ -453,8 +453,11 @@
     .stat span { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 
     .wrap { padding: 0 12px 48px; }
-    nav.tabs { margin: 12px 0; }
-    nav.tabs button { padding: 10px 6px; }
+    /* The admin page can have six tabs: the row scrolls sideways rather
+       than squeezing them unreadable or hiding the last one. */
+    nav.tabs { margin: 12px 0; overflow-x: auto; scrollbar-width: none; }
+    nav.tabs::-webkit-scrollbar { display: none; }
+    nav.tabs button { padding: 10px 6px; flex: 1 0 auto; white-space: nowrap; }
     .field { padding: 13px 14px; }
     /* One row that scrolls sideways rather than wrapping into two — the
        usual phone pattern, bled to the screen edge so a half-visible chip
