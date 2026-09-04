@@ -318,7 +318,7 @@ function viewChosen() { try { return sessionStorage.getItem(VIEW_SLOT); } catch 
 function rememberView(v) { try { sessionStorage.setItem(VIEW_SLOT, v); } catch (_) { /* private mode */ } }
 function clearViewChoice() { try { sessionStorage.removeItem(VIEW_SLOT); } catch (_) { /* nothing */ } }
 
-function mountViewChooser({ current, canAdmin = false } = {}) {
+function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
   if (viewChosen()) return;
   const el = document.createElement("div");
   el.id = "chooser"; el.className = "chooser"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
@@ -333,7 +333,8 @@ function mountViewChooser({ current, canAdmin = false } = {}) {
       <b>Daily register — check-in</b>
       <span>The once-a-day presentation the policy requires. Swipe right to record today's check-in. Nothing here signs anyone in or out.</span>
     </a>
-    ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Admin</b><span>Residents, buildings, staff and settings.</span></a>` : ""}`;
+    ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Site admin</b><span>This centre's residents, buildings, staff and settings.</span></a>` : ""}
+    ${canOrg ? `<a class="choice admin" href="/org.html" data-view="org"><b>Organisation</b><span>Every centre on the service. No resident data.</span></a>` : ""}`;
   el.addEventListener("click", (e) => {
     const a = e.target.closest("[data-view]");
     if (!a) return;

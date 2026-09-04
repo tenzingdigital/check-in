@@ -102,9 +102,12 @@ schema is dropped and its logins stop working.
   staff list and password reset are centre-scoped, and a test proves one
   centre's admin cannot read, list, write, export or erase anything in
   another. `docs/MULTI-TENANCY.md` describes each step.
-- An organisation role above admin, for an operator running several
-  centres: which centres exist, who administers each, and the counts that
-  matter across all of them. No resident data crosses centres.
+- An organisation level above any one site (`/org.html`): which centres
+  exist, their counts, provisioning and closing. Platform administrators
+  only for now. No resident data crosses centres. Still open: an
+  organisation *entity*, an operator that owns several centres with its own
+  administrators who are not platform administrators; that needs a decision
+  on who those people are before it is modelled.
 - Provisioning a new centre from the template, and deprovisioning one.
 
 ## Stage 6 — Access control integration

@@ -372,11 +372,12 @@ out of the two working apps:
   occupancy and the evacuation list as they stand, each as a CSV download
   or a printable page. A reason is required and every export is on the
   audit record with the range.
-- **Centres** (platform administrators only, on the working branch until
-  it has been proven on a copy of the live database): every centre on the
-  service with its counts, a form that provisions a new one and invites its
-  first administrator, and a close step that drops the centre's schema. A
-  platform administrator is made in SQL:
+- **Organisation page** (`/org.html`, platform administrators only, on the
+  working branch until it has been proven on a copy of the live database):
+  a level above any one site. Every centre on the service with its counts,
+  a form that provisions a new one and invites its first administrator, and
+  a close step that drops the centre's schema. The site admin page never
+  shows this list. A platform administrator is made in SQL:
   `update auth.users set platform_admin = true where email = '…'`.
 - **Features for this site** (admins, under Settings): the three switches
   above. All are off until an administrator turns them on, so a centre

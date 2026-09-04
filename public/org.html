@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Hut Check-In — Organisation</title>
+
+<!--
+  The organisation page: every centre on the service, for the operator.
+  Centres are a level above a site — a site's admin page manages residents,
+  buildings, staff and settings for ONE centre and never sees this list —
+  so the list lives here, on its own page, for platform administrators only
+  (auth.users.platform_admin, set in SQL). Nothing on this page shows a
+  resident: the counts are counts.
+-->
+<link rel="stylesheet" href="/app-common.css">
+<style>
+  .bld { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .bldhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .bldhead b { font-size: 16px; }
+  .bldhead .linkish { margin-left: auto; font-weight: 500; }
+  .formcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .formcard h2 { margin: 0; font-size: 16px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
+  .lbl { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 4px; }
+</style>
+</head>
+<body class="app-org">
+
+<section id="login" class="login" hidden>
+  <h1>Hut Check-In — Organisation</h1>
+  <p>Platform administrator sign-in required.</p>
+  <div id="loginError" class="alert" hidden></div>
+  <form id="loginForm" autocomplete="on">
+    <input id="email" class="field" type="email" placeholder="Email" autocomplete="username" required>
+    <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button id="loginBtn" class="btn" type="submit">Log in</button>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <span>Organisation</span>
+        <small id="guardName">&nbsp;</small>
+      </div>
+      <nav class="viewswitch" aria-label="App view">
+        <a href="/admin.html">Site admin</a>
+        <span aria-current="page">Organisation</span>
+      </nav>
+      <button class="btn ghost sm" id="logoutBtn">Log out</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="appError" class="alert" hidden></div>
+    <div id="notForYou" class="alert" hidden>This page is for platform administrators. Your account manages one centre: use the site admin page.</div>
+    <!-- ---- centres (platform administrators only) ---- -->
+    <section id="panelCentres">
+      <p class="hint flush">Every centre on this service. Each has its own schema, its own staff and its own settings; nothing here shows a resident.</p>
+      <form id="centreForm" class="formcard mt14" autocomplete="off">
+        <h2>Add a centre</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="cfName">Centre name</label><input id="cfName" class="field" type="text" required maxlength="120" placeholder="Harbour House"></div>
+          <div><label class="lbl" for="cfSlug">Slug</label><input id="cfSlug" class="field" type="text" required pattern="[a-z][a-z0-9-]{1,38}[a-z0-9]" placeholder="harbour-house"></div>
+        </div>
+        <div><label class="lbl" for="cfTz">Timezone</label><input id="cfTz" class="field" type="text" value="Europe/Dublin" required></div>
+        <div class="grid2">
+          <div><label class="lbl" for="cfAdminName">First administrator</label><input id="cfAdminName" class="field" type="text" required maxlength="80"></div>
+          <div><label class="lbl" for="cfAdminEmail">Their email</label><input id="cfAdminEmail" class="field" type="email" required></div>
+        </div>
+        <div class="actions"><button class="btn primary-in" id="cfSave" type="submit">Create centre and invite</button></div>
+        <div id="centreNotice" class="alert warn" hidden></div>
+      </form>
+      <div id="centreList" class="list"></div>
+    </section>
+
+
+  </main>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/app-common.js"></script>
+<script>
+const state = { profile: null };
+
+/* ========================================================================
+   Centres (platform administrators) — Stage 5 of the product roadmap
+   ====================================================================== */
+async function loadCentres() {
+  const rows = await guarded(() => apiGet("/api/tenants"), (err) => showError("Could not load centres: " + err.message));
+  if (!rows) return;
+  showError("");
+  $("centreList").innerHTML = rows.map((t) => `
+    <div class="bld">
+      <div class="bldhead">
+        <div><b>${esc(t.name)}</b><span class="hint"> · ${esc(t.slug)} · ${esc(t.status)}</span></div>
+        ${t.slug !== "default" && t.status !== "closed" ? `<button class="linkish" type="button" data-close="${esc(t.id)}" data-slug="${esc(t.slug)}">close centre</button>` : ""}
+      </div>
+      <p class="hint flush">${t.status === "closed" ? `Closed ${esc(String(t.closed_at).slice(0, 10))}` :
+        `${t.residents ?? "?"} active residents · ${t.staff ?? "?"} active staff · ${t.logins} logins · last close-out ${t.last_close_out ? esc(String(t.last_close_out).slice(0, 16).replace("T", " ")) : "never"}`}</p>
+    </div>`).join("") || '<p class="empty">No centres.</p>';
+}
+$("centreForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = { name: $("cfName").value.trim(), slug: $("cfSlug").value.trim(), timezone: $("cfTz").value.trim(), admin_name: $("cfAdminName").value.trim(), admin_email: $("cfAdminEmail").value.trim() };
+  $("cfSave").disabled = true;
+  const out = await guarded(() => apiPost("/api/tenants", body), (err) => toast("Not created: " + err.message, "err"));
+  $("cfSave").disabled = false;
+  if (!out) return;
+  const n = $("centreNotice");
+  if (out.admin.delivered) { toast(`${body.name} created; login link emailed to ${body.admin_email}`, "ok"); n.hidden = true; }
+  else {
+    n.innerHTML = `<b>${esc(body.name)} created.</b> Email is not configured, so pass this one-time link to ${esc(body.admin_name)} yourself. It expires in 24 hours:<br>
+      <input class="field mt8" id="cfLink" readonly value="${esc(out.admin.link || "")}">`;
+    n.hidden = false;
+    $("cfLink").addEventListener("click", (ev) => ev.target.select());
+  }
+  $("centreForm").reset(); $("cfTz").value = "Europe/Dublin";
+  loadCentres();
+});
+$("centreList").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-close]");
+  if (!b) return;
+  const typed = prompt(`Closing "${b.dataset.slug}" drops its data and ends its logins. This is the end of the deletion timeline in the DPA. Type the slug to confirm:`);
+  if (typed === null) return;
+  const out = await guarded(() => api(`/api/tenants/${b.dataset.close}`, { method: "DELETE", body: JSON.stringify({ confirm_slug: typed }), headers: { "content-type": "application/json" } }), (err) => toast("Not closed: " + err.message, "err"));
+  if (out) { toast("Centre closed", "ok"); loadCentres(); }
+});
+
+
+async function enterApp() {
+  let session;
+  try { session = await apiGet("/api/session"); }
+  catch (err) { return showLogin(err.status === 401 ? "" : err.message); }
+  state.profile = session.profile;
+  $("guardName").textContent = `${session.profile.full_name} · ${session.profile.platform_admin ? "platform administrator" : session.profile.role}`;
+  $("login").hidden = true;
+  $("app").hidden = false;
+  rememberView("org");
+  const ok = !!session.profile.platform_admin;
+  $("notForYou").hidden = ok;
+  $("panelCentres").hidden = !ok;
+  if (ok) loadCentres();
+}
+
+function showLogin(message) {
+  state.profile = null;
+  $("app").hidden = true;
+  $("login").hidden = false;
+  $("loginError").hidden = !message;
+  if (message) $("loginError").textContent = message;
+  $("email").focus();
+}
+
+mountLogin({ onReady: enterApp });
+$("logoutBtn").addEventListener("click", async () => { clearViewChoice(); await logout(); showLogin(""); });
+setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
+enterApp();
+</script>
+</body>
+</html>

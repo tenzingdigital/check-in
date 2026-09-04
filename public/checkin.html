@@ -735,7 +735,7 @@ async function enterApp() {
   $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
   $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
-  mountViewChooser({ current: "register", canAdmin: profile.role === "admin" || profile.role === "supervisor" });
+  mountViewChooser({ current: "register", canAdmin: profile.role === "admin" || profile.role === "supervisor", canOrg: !!profile.platform_admin });
 
   $("login").hidden = true;
   $("app").hidden = false;

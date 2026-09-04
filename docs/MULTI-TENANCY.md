@@ -99,7 +99,9 @@ already answers "which tenant".
 - `routes/tenants.js`: platform administrators (`auth.users.platform_admin`,
   set in SQL by the operator) list centres with counts, provision one (row,
   schema, first admin, invitation link) and close one (slug typed back,
-  schema dropped, logins ended). Admin → Centres is the screen.
+  schema dropped, logins ended). The screen is `/org.html`, the
+  organisation page, a level above any one site: the site admin page
+  manages one centre and never shows the list of centres.
 - Not built: the trial's read-only state (`tenant_may_write()` exists and
   is not enforced), and an organisation role that spans several centres
   without being platform admin. One login belongs to one centre; a person

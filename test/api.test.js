@@ -26,6 +26,13 @@ const PASSWORD = "correct-horse-battery";
 const EMAIL = "gina@hut.example";
 
 let passed = 0;
+// Today as the seeded site (Europe/Dublin) counts it: between 23:00 and
+// 00:00 UTC in summer that is not the UTC date, and every per-day assertion
+// must agree with the register, not with the clock in the sandbox.
+function siteToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Dublin", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
 async function test(name, fn) {
   await fn();
   passed += 1;
@@ -326,7 +333,9 @@ async function main() {
     assert.equal(res.status, 200);
     assert.equal(res.json.presence, "out");
 
-    const today = new Date().toISOString().slice(0, 10);
+    // The log is per SITE day (Europe/Dublin in the seed), which between
+    // 23:00 and 00:00 UTC in summer is already tomorrow's UTC date.
+    const today = siteToday();
     const log = await api.fetch(`/api/gate-events?date=${today}`);
     assert.equal(log.status, 200);
     assert.ok(log.json.some((e) => e.resident_id === resident.id && e.guard_name === "Gina Guard"));
@@ -375,11 +384,12 @@ async function main() {
 
   await test("queued events are replayed, dated when they happened, and flagged", async () => {
     const occurred = agoIso(60_000);
+    const gateAt = agoIso(90_000);
     const res = await api.fetch("/api/sync", {
       method: "POST",
       body: { events: [
         { ref: refs.checkin, kind: "checkin", resident_id: syncResident.id, occurred_at: occurred },
-        { ref: refs.gate, kind: "gate", direction: "in", resident_id: syncResident.id, occurred_at: agoIso(90_000) },
+        { ref: refs.gate, kind: "gate", direction: "in", resident_id: syncResident.id, occurred_at: gateAt },
       ] },
     });
     assert.equal(res.status, 200, res.text);
@@ -395,9 +405,11 @@ async function main() {
     const after = await api.fetch(`/api/residents/${syncResident.id}/compliance`);
     assert.equal(after.json.seen_today, true, "a synced check-in did not satisfy the day");
 
-    const today = new Date().toISOString().slice(0, 10);
+    // Per SITE day (Europe/Dublin), which after 23:00 UTC in summer is not the
+    // UTC date; and matched on the queued time, not just the first "in".
+    const today = siteToday();
     const log = await api.fetch(`/api/gate-events?date=${today}`);
-    const entry = log.json.find((e) => e.resident_id === syncResident.id && e.kind === "in");
+    const entry = log.json.find((e) => e.resident_id === syncResident.id && e.kind === "in" && Math.abs(new Date(e.occurred_at) - new Date(gateAt)) < 1500);
     assert.ok(entry, "the synced gate event is not in the log");
     assert.equal(entry.late_entry, true, "the log does not show the event as synced later");
   });
@@ -1249,7 +1261,7 @@ async function main() {
   console.log("\n== reports ==");
 
   await test("a report needs a reason and a supervisor; a guard is refused", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = siteToday();
     const noReason = await supC.fetch(`/api/reports/register?from=${today}&to=${today}`);
     assert.equal(noReason.status, 400);
     const asGuard = await api.fetch(`/api/reports/register?from=${today}&to=${today}&reason=test`);
@@ -1263,7 +1275,7 @@ async function main() {
   });
 
   await test("the register and attendance reports come as CSV and JSON, and the export is logged", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = siteToday();
     const from = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
     const csv = await supC.fetch(`/api/reports/register?from=${from}&to=${today}&reason=HIQA+inspection`);
     assert.equal(csv.status, 200, csv.text);
@@ -1608,7 +1620,7 @@ async function main() {
   });
 
   await test("the two apps are served", async () => {
-    for (const path of ["/", "/index.html", "/checkin.html", "/admin.html", "/app-common.js", "/app-common.css", "/offline.js", "/sw.js"]) {
+    for (const path of ["/", "/index.html", "/checkin.html", "/admin.html", "/org.html", "/app-common.js", "/app-common.css", "/offline.js", "/sw.js"]) {
       const res = await api.fetch(path);
       assert.equal(res.status, 200, `${path} answered ${res.status}`);
     }
@@ -1647,7 +1659,7 @@ async function main() {
     assert.match(csp, /frame-ancestors 'none'/);
 
     const crypto = require("crypto");
-    for (const page of ["/index.html", "/checkin.html", "/admin.html"]) {
+    for (const page of ["/index.html", "/checkin.html", "/admin.html", "/org.html"]) {
       const html = (await api.fetch(page)).text;
       for (const m of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
         const hash = crypto.createHash("sha256").update(m[1], "utf8").digest("base64");
