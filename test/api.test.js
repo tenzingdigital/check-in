@@ -1274,6 +1274,7 @@ async function main() {
     const csp = res.headers.get("content-security-policy");
     assert.ok(csp, "no CSP sent");
     assert.ok(!/script-src[^;]*unsafe-inline/.test(csp), "script-src still allows 'unsafe-inline'");
+    assert.ok(!/style-src[^;]*unsafe-inline/.test(csp), "style-src still allows 'unsafe-inline'");
     assert.ok(!/cdn\.jsdelivr\.net|supabase/.test(csp), "CSP still names a third-party origin");
     assert.match(csp, /frame-ancestors 'none'/);
 

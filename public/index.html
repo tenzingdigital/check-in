@@ -50,12 +50,16 @@
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
       <span id="netState" class="net" role="status" hidden></span>
-      <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
+      <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
   </header>
+    <!-- The tiles are the filter, as on the register: tap one to see those
+         residents, tap it again for everyone. Counted from the list itself,
+         so the numbers and the list under them cannot disagree. -->
     <div class="stats">
-      <div class="stat ok"> <b id="statOnSite">–</b><span>On site</span></div>
-      <div class="stat">    <b id="statToday">–</b><span>Today</span></div>
+      <button class="stat ok" type="button" data-filter="in"    aria-pressed="false"><b id="statOnSite">–</b><span>On site</span></button>
+      <button class="stat"    type="button" data-filter="out"   aria-pressed="false"><b id="statOffSite">–</b><span>Off site</span></button>
+      <button class="stat"    type="button" data-filter="today" aria-pressed="false"><b id="statToday">–</b><span>Moved today</span></button>
     </div>
 
   <main class="wrap">
@@ -71,12 +75,8 @@
     <section id="panelSearch" role="tabpanel" aria-labelledby="tabSearch">
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-      <nav class="chips" id="presenceFilter" aria-label="Filter by presence">
-        <button type="button" data-presence="all" aria-pressed="true">All</button>
-        <button type="button" data-presence="in"  aria-pressed="false">On site</button>
-        <button type="button" data-presence="out" aria-pressed="false">Off site</button>
-      </nav>
-      <p class="hint" style="margin:8px 2px 0">Verify the person first. Tap a name for detail; swipe right to sign IN, left to sign OUT.</p>
+      <p id="filterLine" class="hint filterline" hidden></p>
+      <p class="hint tight">Verify the person first. Tap a name for detail; swipe right to sign IN, left to sign OUT.</p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
     </section>
@@ -84,10 +84,10 @@
     <!-- ---- log ---- -->
     <section id="panelLog" role="tabpanel" aria-labelledby="tabLog" hidden>
       <div class="row">
-        <input id="logDate" class="field" type="date" style="flex:1">
+        <input id="logDate" class="field grow" type="date">
         <button class="btn ghost" id="logToday">Today</button>
       </div>
-      <p class="hint" style="margin:8px 2px 0" id="logCount"></p>
+      <p class="hint tight" id="logCount"></p>
       <div id="logList" class="list"></div>
     </section>
 
@@ -112,7 +112,9 @@ const state = {
   selected: null,   // resident status row shown in the detail panel
   tab:      "search",
   busy:     false,
-  presence: "all",  // the On site / Off site chip row
+  filter:   "all",  // which tile is pressed: all | in | out | today
+  loaded:   false,  // the first list has arrived (or come from the offline copy)
+  allRows:  null,   // the whole register as last loaded — what the tiles count
   searchRows:  [],  // the last search response, refiltered client-side
   searchQuery: "",
   // Every row we have rendered, by id. Tapping a card reads from here rather
@@ -163,7 +165,7 @@ function renderList(container, rows, emptyMsg) {
     container.innerHTML = `<p class="empty">${esc(emptyMsg)}</p>`;
     return;
   }
-  container.innerHTML = withLetters(rows, !state.searchQuery && state.presence === "all");
+  container.innerHTML = withLetters(rows, !state.searchQuery && state.filter === "all");
   nudgeOnce(container);
 }
 
@@ -249,14 +251,38 @@ function renderLog(rows) {
    Data access
    ====================================================================== */
 
-async function refreshSummary() {
-  // Header counts are non-critical: a failure here leaves the previous numbers
-  // on screen rather than interrupting a guard mid-search. A 401 is the one
-  // exception and is handled centrally by guarded().
-  const summary = await guarded(() => apiGet("/api/summary"), (err) => Offline.noteFailure(err));
-  if (!summary) return;
-  $("statOnSite").textContent = summary.on_site;
-  $("statToday").textContent  = summary.events_today;
+// The three tiles are the three filters applied to the whole register, so
+// they are counted here from the rows rather than fetched from /api/summary:
+// the numbers and the list under a pressed tile then cannot disagree, and a
+// page load costs one query instead of two. (/api/summary still exists; the
+// Log tab's "N events" is the count of movements, which is a different
+// number from residents who moved.)
+const FILTERS = {
+  all:   () => true,
+  in:    (r) => r.presence === "in",
+  out:   (r) => r.presence !== "in",
+  today: (r) => !!r.last_event_at && isToday(r.last_event_at),
+};
+const FILTER_LABEL = { all: "everyone", in: "on site", out: "off site", today: "who moved today" };
+
+function isToday(iso) {
+  const d = new Date(iso);
+  const p = (v) => String(v).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` === todayISODate();
+}
+
+function refreshSummary() {
+  if (!state.loaded) return;
+  const all = state.allRows || [];
+  $("statOnSite").textContent  = all.filter(FILTERS.in).length;
+  $("statOffSite").textContent = all.filter(FILTERS.out).length;
+  $("statToday").textContent   = all.filter(FILTERS.today).length;
+}
+
+function setFilter(name) {
+  state.filter = FILTERS[name] ? name : "all";
+  renderDetail(null);
+  renderSearch();
 }
 
 let searchToken = 0;
@@ -300,32 +326,46 @@ async function runSearch(q) {
   showError("");
   state.searchRows = await Offline.overlay("gate", rows);
   state.searchQuery = q;
+  if (!q) state.allRows = state.searchRows;   // the whole register: what the tiles count
+  state.loaded = true;
   renderSearch();
+  refreshSummary();
 }
 
-// Re-renders the search list through the presence filter. Filtering is
-// client-side: the rows already carry `presence`, so switching chips never
-// costs a round trip, and the counts on the chips always describe the rows
-// the current query matched.
+// Re-renders the search list through the pressed tile. Filtering is
+// client-side: the rows already carry `presence` and `last_event_at`, so
+// pressing a tile never costs a round trip.
 function renderSearch() {
   const rows = state.searchRows || [];
-  const inCount = rows.filter((r) => r.presence === "in").length;
-  const counts = { all: rows.length, in: inCount, out: rows.length - inCount };
-  const labels = { all: "All", in: "On site", out: "Off site" };
-
-  document.querySelectorAll("#presenceFilter button").forEach((b) => {
-    const p = b.dataset.presence;
-    b.textContent = `${labels[p]} (${counts[p]})`;
-    b.setAttribute("aria-pressed", String(p === state.presence));
+  document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.filter === state.filter));
   });
 
-  const shown = state.presence === "all"
-    ? rows
-    : rows.filter((r) => r.presence === state.presence);
-  const empty = state.searchQuery
-    ? `No resident matching “${state.searchQuery}”.`
-    : state.presence === "in"  ? "Nobody is on site."
-    : state.presence === "out" ? "Nobody is off site."
+  const shown = rows.filter(FILTERS[state.filter]);
+  const line = $("filterLine");
+
+  // Nothing has arrived yet: say so rather than "0 on site".
+  if (!state.loaded) {
+    if (state.filter === "all") { line.hidden = true; line.innerHTML = ""; }
+    else { line.innerHTML = `Loading ${FILTER_LABEL[state.filter]}…`; line.hidden = false; }
+    $("searchResults").innerHTML = '<p class="empty">Loading the register…</p>';
+    return;
+  }
+
+  if (state.filter === "all") {
+    line.hidden = true;
+    line.innerHTML = "";
+  } else {
+    line.innerHTML = `Showing ${shown.length} ${FILTER_LABEL[state.filter]} · <button class="linkish" type="button" id="showAll">Show everyone</button>`;
+    line.hidden = false;
+    $("showAll").onclick = () => setFilter("all");
+  }
+  const q = state.searchQuery;
+  const empty = q
+    ? `No resident matching “${q}”${state.filter === "all" ? "" : ` ${FILTER_LABEL[state.filter]}`}.`
+    : state.filter === "in"    ? "Nobody is on site."
+    : state.filter === "out"   ? "Nobody is off site."
+    : state.filter === "today" ? "Nobody has moved yet today."
     : "No residents on the register.";
   renderList($("searchResults"), shown, empty);
 }
@@ -468,6 +508,8 @@ function showLogin(message) {
   idleLock.stop();
   state.profile = null;
   state.userId = null;
+  state.loaded = false;
+  state.allRows = null;
   $("app").hidden = true;
   $("login").hidden = false;
   $("loginError").hidden = !message;
@@ -555,11 +597,9 @@ document.addEventListener("click", (e) => {
   renderDetail(row);
 });
 
-$("presenceFilter").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-presence]");
-  if (!btn) return;
-  state.presence = btn.dataset.presence;
-  renderSearch();
+// A tile pressed once filters; pressed again it shows everyone.
+document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
+  b.addEventListener("click", () => setFilter(state.filter === b.dataset.filter ? "all" : b.dataset.filter));
 });
 
 $("tabSearch").addEventListener("click", () => selectTab("search"));
@@ -570,9 +610,12 @@ $("logToday").addEventListener("click", () => {
   loadLog(todayISODate());
 });
 
-// Periodic summary refresh so a terminal left open overnight does not show a
-// stale on-site count.
-setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
+// Periodic refresh so a terminal left open overnight does not show a stale
+// on-site count or a list another terminal has since changed. Only while
+// online and nobody is typing a name.
+setInterval(() => {
+  if (state.profile && Offline.isOnline() && state.tab === "search" && !$("q").value) runSearch("");
+}, 60000);
 
 // Any request that comes back 401 — an expired session, or a supervisor
 // deactivating the account mid-shift — returns the terminal to the login

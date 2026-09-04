@@ -64,8 +64,6 @@
      phone offers to suppress those after a couple, after which every
      later prompt silently returns nothing and "Add" appears to do nothing. */
   #panelCheckin { margin-top: 14px; }
-  .filterline { margin: 8px 2px 0; display: flex; align-items: center; gap: 10px; color: var(--text); }
-  .filterline .linkish { padding: 0; }
 
   .idform { margin-top: 10px; display: grid; gap: 10px; }
   .idform .seg { display: flex; gap: 6px; }
@@ -119,7 +117,7 @@
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
       <span id="netState" class="net" role="status" hidden></span>
-      <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
+      <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
     <!-- The three tiles are the questions a manager asks; tapping one shows
          exactly those residents in the Check in list. Tap again for all. -->
@@ -143,7 +141,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="hint" style="margin:8px 2px 0">Verify the person first. Tap a name for detail; swipe right to record the check-in.</p>
+      <p class="hint tight">Verify the person first. Tap a name for detail; swipe right to record the check-in.</p>
       <div id="searchResults" class="list"></div>
     </section>
 

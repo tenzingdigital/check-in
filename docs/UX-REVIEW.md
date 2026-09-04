@@ -229,10 +229,13 @@ you cannot log in until the connection returns" state is missing: the form
 just fails with a network error.
 
 ### Gate — Search
-The strongest screen. Full register, filter chips with live counts, swipe
-and tap both work, the pill on each card says the one thing that matters at
-a gate. The queued state is well signposted. Fixes: pinned search (P1.2),
-section headers (P1.4), swipe discoverability (P1.6).
+The strongest screen. Full register, swipe and tap both work, the pill on
+each card says the one thing that matters at a gate. The queued state is
+well signposted. Fixes: pinned search (P1.2), section headers (P1.4), swipe
+discoverability (P1.6). *Later the same day:* the On site / Off site chip row
+duplicated the tiles above it, so it went; the tiles (On site, Off site,
+Moved today) are the one filter, counted from the list itself, exactly as on
+the register.
 
 ### Gate — detail sheet
 Two facts and two big buttons. Correct. "Last check-in 1h 49m ago" is

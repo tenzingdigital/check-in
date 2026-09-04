@@ -82,7 +82,7 @@
         <span aria-current="page">Admin</span>
       </nav>
       <span id="netState" class="net" hidden></span>
-      <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
+      <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
   </header>
 
@@ -93,7 +93,7 @@
     <!-- A guard has nothing to do here; say so rather than show empty panels. -->
     <div id="notForYou" class="formcard notice" hidden>
       <h2>This area is for supervisors and administrators.</h2>
-      <p class="hint" style="margin:0">Residents are managed by supervisors; staff accounts by administrators.
+      <p class="hint flush">Residents are managed by supervisors; staff accounts by administrators.
         <a href="/checkin.html">Back to the daily register</a>.</p>
     </div>
 
@@ -124,7 +124,7 @@
         <div>
           <label class="lbl" for="afDob">Date of birth</label>
           <input id="afDob" class="field" type="date" required>
-          <p class="hint" style="margin:4px 2px 0">Used only to apply the adult rule. Never shown to guards.</p>
+          <p class="hint under">Used only to apply the adult rule. Never shown to guards.</p>
         </div>
         <div>
           <label class="lbl">ID card (optional)</label>
@@ -133,7 +133,7 @@
             <button type="button" data-type="TRC" aria-pressed="false">TRC</button>
             <button type="button" data-type="IRP" aria-pressed="false">IRP</button>
           </div>
-          <input id="afNumber" class="field upper" type="text" placeholder="Number as printed on the card" maxlength="40" style="margin-top:8px" hidden>
+          <input id="afNumber" class="field upper mt8" type="text" placeholder="Number as printed on the card" maxlength="40" hidden>
         </div>
         <div class="actions">
           <button class="btn primary-in" id="afSave" type="submit">Add to register</button>
@@ -162,7 +162,7 @@
         <div class="actions">
           <button class="btn primary-in" id="sfAdd" type="submit">Add and send login link</button>
         </div>
-        <p class="hint" style="margin:0">
+        <p class="hint flush">
           No password is typed here. The new colleague gets a one-day link by email to choose their own;
           nobody else ever sees it. <b>admin</b> manages staff, residents and settings, <b>supervisor</b>
           manages residents, <b>guard</b> signs residents in and out and records check-ins.
@@ -178,23 +178,23 @@
         <h2>Site</h2>
         <div><label class="lbl" for="stSite">Site name</label><input id="stSite" class="field" type="text" maxlength="80" required></div>
         <div><label class="lbl" for="stTz">Timezone</label><input id="stTz" class="field" type="text" placeholder="Europe/Dublin" required>
-          <p class="hint" style="margin:4px 2px 0">Defines "today" for the whole register. Keep it matched to the site.</p></div>
+          <p class="hint under">Defines "today" for the whole register. Keep it matched to the site.</p></div>
 
-        <h2 style="margin-top:6px">The daily rule</h2>
+        <h2 class="mt6">The daily rule</h2>
         <div class="grid2">
           <div><label class="lbl" for="stAdult">Applies from age</label><input id="stAdult" class="field" type="number" min="1" max="30" required></div>
           <div><label class="lbl" for="stDue">Flag "not seen" after (hour, 0–23)</label><input id="stDue" class="field" type="number" min="0" max="23" required></div>
         </div>
 
-        <h2 style="margin-top:6px">House Rules thresholds</h2>
+        <h2 class="mt6">House Rules thresholds</h2>
         <div class="grid2">
           <div><label class="lbl" for="stWarn">Consecutive nights → warning letter</label><input id="stWarn" class="field" type="number" min="1" max="90" required></div>
           <div><label class="lbl" for="stWinLimit">Days absent in the window</label><input id="stWinLimit" class="field" type="number" min="1" max="365" required></div>
         </div>
         <div><label class="lbl" for="stWinDays">Rolling window (days)</label><input id="stWinDays" class="field" type="number" min="7" max="365" required></div>
-        <p class="hint" style="margin:0">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
+        <p class="hint flush">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
 
-        <h2 style="margin-top:6px">Retention</h2>
+        <h2 class="mt6">Retention</h2>
         <div class="grid2">
           <div><label class="lbl" for="stEventDays">Movement log (days)</label><input id="stEventDays" class="field" type="number" min="1" max="3650" required></div>
           <div><label class="lbl" for="stCompDays">Daily register (days)</label><input id="stCompDays" class="field" type="number" min="1" max="36500" required></div>
@@ -203,7 +203,7 @@
           <div><label class="lbl" for="stLate">Offline sync window (hours)</label><input id="stLate" class="field" type="number" min="1" max="168" required></div>
           <div><label class="lbl" for="stIdle">Lock screen after (minutes idle)</label><input id="stIdle" class="field" type="number" min="1" max="720" required></div>
         </div>
-        <p class="hint" style="margin:0">The IPAS verification policy says sign-in sheets are held six months (180 days). Shortening retention deletes records at the next nightly run.</p>
+        <p class="hint flush">The IPAS verification policy says sign-in sheets are held six months (180 days). Shortening retention deletes records at the next nightly run.</p>
 
         <div class="actions">
           <button class="btn primary-in" id="stSave" type="submit">Save settings</button>
@@ -351,7 +351,7 @@ function renderDetail(rec, summary) {
     <h2>${esc(rec.first_name)} ${esc(rec.last_name)}</h2>
     <div class="sub">${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
 
-    <form id="editForm" class="formcard" autocomplete="off" style="margin-top:14px">
+    <form id="editForm" class="formcard mt14" autocomplete="off">
       <div class="grid2">
         <div><label class="lbl" for="efFirst">First name</label><input id="efFirst" class="field" type="text" required maxlength="80" value="${esc(rec.first_name)}"></div>
         <div><label class="lbl" for="efLast">Last name</label><input id="efLast" class="field" type="text" required maxlength="80" value="${esc(rec.last_name)}"></div>
@@ -367,8 +367,8 @@ function renderDetail(rec, summary) {
           <button type="button" data-type="TRC" aria-pressed="${type === "TRC"}">TRC</button>
           <button type="button" data-type="IRP" aria-pressed="${type === "IRP"}">IRP</button>
         </div>
-        <input id="efNumber" class="field upper" type="text" placeholder="Number as printed on the card" maxlength="40"
-               style="margin-top:8px" value="${esc(rec.id_number || "")}" ${type ? "" : "hidden"}>
+        <input id="efNumber" class="field upper mt8" type="text" placeholder="Number as printed on the card" maxlength="40"
+               value="${esc(rec.id_number || "")}" ${type ? "" : "hidden"}>
       </div>
       <div class="actions">
         <button class="btn primary-in" id="efSave" type="submit">Save changes</button>
@@ -379,7 +379,7 @@ function renderDetail(rec, summary) {
     ${canStaff() ? `
     <div class="formcard">
       <h2>Their record</h2>
-      <p class="hint" style="margin:0">Everything held about ${esc(rec.first_name)}: their details, every movement and check-in,
+      <p class="hint flush">Everything held about ${esc(rec.first_name)}: their details, every movement and check-in,
         the daily register and every change made to their record. The reason is kept with the export.</p>
       <label class="lbl" for="exReason">Reason for the export</label>
       <input id="exReason" class="field" type="text" maxlength="200" placeholder="e.g. subject access request received 4 Sep">
@@ -387,7 +387,7 @@ function renderDetail(rec, summary) {
     </div>
     <div class="formcard">
       <h2 class="danger">Erase ${esc(rec.first_name)}'s record</h2>
-      <p class="hint" style="margin:0">Removes the person and their entire history. Cannot be undone. A non-identifying proof that
+      <p class="hint flush">Removes the person and their entire history. Cannot be undone. A non-identifying proof that
         an erasure happened is kept. If the daily register is a legal obligation, the request may be refusable — decide first.</p>
       <label class="lbl" for="erReason">Reason</label>
       <input id="erReason" class="field" type="text" maxlength="200" placeholder="e.g. erasure request, agreed by manager">
@@ -399,11 +399,11 @@ function renderDetail(rec, summary) {
     <div class="formcard">
       ${departed ? `
         <h2>Reactivate</h2>
-        <p class="hint" style="margin:0">Puts ${esc(rec.first_name)} back on the daily register from today.</p>
+        <p class="hint flush">Puts ${esc(rec.first_name)} back on the daily register from today.</p>
         <div class="actions"><button class="btn wide" id="reactivate" type="button">Reactivate</button></div>
       ` : `
         <h2 class="danger">Mark as departed</h2>
-        <p class="hint" style="margin:0">The daily rule stops applying after the date given. Set it before the next
+        <p class="hint flush">The daily rule stops applying after the date given. Set it before the next
           nightly close-out, or the days after it are recorded as missed.</p>
         <label class="lbl" for="efDeparted">Last day on site</label>
         <input id="efDeparted" class="field" type="date" value="${todayISODate()}" max="${todayISODate()}">
@@ -515,7 +515,7 @@ function staffCard(s) {
       </span>
       <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
       <span class="actions-row">
-        <select class="field sRole" data-sid="${esc(s.id)}" style="width:auto;padding:8px 10px" aria-label="Role for ${esc(s.full_name)}">${roleOptions}</select>
+        <select class="field sRole compact" data-sid="${esc(s.id)}" aria-label="Role for ${esc(s.full_name)}">${roleOptions}</select>
         <button class="btn ghost sPw"  data-sid="${esc(s.id)}" type="button">Send&nbsp;login&nbsp;link</button>
         <button class="btn ghost sTgl" data-sid="${esc(s.id)}" type="button">${s.active ? "Disable" : "Enable"}</button>
       </span>
@@ -546,8 +546,12 @@ function showLinkResult(out, who) {
   }
   box.innerHTML = `<b>Email is not configured on this service.</b> The link for ${esc(who)} was not sent.
     Pass it on yourself — it works once and expires in 24 hours:<br>
-    <input class="field" style="margin-top:8px" readonly value="${esc(out.link)}" onclick="this.select()">`;
+    <input class="field mt8" id="linkOut" readonly value="${esc(out.link)}">`;
   box.hidden = false;
+  // A tap selects the whole link for copying. (An onclick="" attribute would
+  // be refused by the CSP, which admits scripts by hash only.)
+  $("linkOut").addEventListener("focus", (e) => e.target.select());
+  $("linkOut").addEventListener("click", (e) => e.target.select());
 }
 
 $("staffForm").addEventListener("submit", async (e) => {

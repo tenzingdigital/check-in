@@ -1,0 +1,72 @@
+# Runs the same ./check.sh a contributor runs, on every push and pull request,
+# plus a dependency audit. Annex II of the DPA tells customers that changes
+# "pass an automated test suite before deployment"; this is what makes that
+# sentence true rather than a habit.
+#
+# Turn on branch protection for `main` requiring the "check" job, so nothing
+# reaches Render (which deploys main) without it.
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # test/cluster.sh builds a throwaway PostgreSQL 16 cluster from the
+      # server binaries; it never uses the runner's own postgres service.
+      - name: PostgreSQL 16 server binaries
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/initdb ]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-16
+          fi
+          /usr/lib/postgresql/16/bin/postgres --version
+
+      - run: npm ci
+
+      - name: Parse, SQL suite, HTTP suite
+        run: npm test
+
+      - name: Dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+  browser:
+    name: browser (offline path)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: PostgreSQL 16 server binaries
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/initdb ]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-16
+          fi
+
+      - run: npm ci
+
+      - name: Playwright and Chromium
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Service worker, encrypted queue, sync, idle lock
+        run: ./test/e2e.sh

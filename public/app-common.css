@@ -307,6 +307,24 @@
   .synclist .btn.ghost { padding: 8px 10px; font-size: 13px; flex: none; }
   .empty { text-align: center; color: var(--muted); padding: 36px 16px; }
   .hint { color: var(--muted); font-size: 13px; }
+  /* "Showing 93 on site · Show everyone" under the search box when a tile
+     is pressed. Shared by the gate and the register. */
+  .filterline { margin: 8px 2px 0; display: flex; align-items: center; gap: 10px; color: var(--text); }
+  .filterline .linkish { padding: 0; }
+  /* Spacing variants, so no element needs a style="" attribute and the
+     CSP can refuse inline styles altogether (style-src 'self'). */
+  .hint.tight  { margin: 8px 2px 0; }
+  .hint.under  { margin: 4px 2px 0; }
+  .hint.flush  { margin: 0; }
+  .hint.lead   { margin: 0 2px 10px; }
+  .hint.centre { margin: 12px 2px 0; text-align: center; }
+  .hint a      { color: var(--accent); }
+  .btn.sm      { padding: 8px 12px; }
+  .grow        { flex: 1; }
+  .mt6  { margin-top: 6px; }
+  .mt8  { margin-top: 8px; }
+  .mt14 { margin-top: 14px; }
+  .field.compact { width: auto; padding: 8px 10px; }
 
   /* ---- login ---- */
   .login { max-width: 380px; margin: 12vh auto; padding: 0 20px; }

@@ -155,25 +155,25 @@ function mountResetUI() {
 
   const holder = document.createElement("div");
   holder.innerHTML = `
-    <p class="hint" style="margin:12px 2px 0;text-align:center">
-      <a href="#" id="forgotLink" style="color:var(--accent)">Forgot your password?</a>
+    <p class="hint centre">
+      <a href="#" id="forgotLink">Forgot your password?</a>
     </p>
 
-    <form id="resetPanel" hidden style="margin-top:14px">
-      <p class="hint" style="margin:0 2px 10px">
+    <form id="resetPanel" class="mt14" hidden>
+      <p class="hint lead">
         Enter the email address for your account and we will send a link to
         choose a new password.
       </p>
       <input id="resetEmail" class="field" type="email" placeholder="Email"
              autocomplete="username" required>
       <button id="resetBtn" class="btn" type="submit">Email me a link</button>
-      <p class="hint" style="margin:10px 2px 0;text-align:center">
-        <a href="#" id="backToLogin" style="color:var(--accent)">Back to log in</a>
+      <p class="hint centre">
+        <a href="#" id="backToLogin">Back to log in</a>
       </p>
     </form>
 
-    <form id="newPassPanel" hidden style="margin-top:14px">
-      <p class="hint" style="margin:0 2px 10px">
+    <form id="newPassPanel" class="mt14" hidden>
+      <p class="hint lead">
         Choose a new password of at least 12 characters. This signs the account
         out everywhere else.
       </p>
