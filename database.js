@@ -11,7 +11,15 @@ try { require('dotenv').config(); } catch (_) { /* env comes from the host */ }
 
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// A Postgres DATE is a calendar day, and it stays one on the way out: the
+// driver's default turns it into a JavaScript Date at local midnight, which
+// JSON.stringify then renders as "2026-08-30T00:00:00.000Z" — a timestamp for
+// a day, one the front end's date formatting cannot read, and one that would
+// slip to the previous day on any server not running in UTC. Under Supabase
+// the same columns arrived as "2026-08-30"; keep that.
+types.setTypeParser(types.builtins.DATE, (v) => v);
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is not set — see .env.example');

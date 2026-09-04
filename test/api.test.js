@@ -320,6 +320,24 @@ async function main() {
     assert.equal(after.json.seen_today, true);
   });
 
+  // A calendar day must reach the browser as one. The driver's default would
+  // send a DATE column as a midnight timestamp, which the page cannot format
+  // and which shifts by a day off UTC.
+  await test("dates cross the API as YYYY-MM-DD, not as timestamps", async () => {
+    const found = await api.fetch("/api/residents?q=brennan&compliance=1");
+    const resident = found.json[0];
+    const days = await api.fetch(`/api/residents/${resident.id}/days`);
+    assert.equal(days.status, 200);
+    assert.ok(days.json.length > 0, "expected at least today's row after the check-in above");
+    for (const d of days.json) {
+      assert.match(String(d.compliance_date), /^\d{4}-\d{2}-\d{2}$/, `compliance_date was ${d.compliance_date}`);
+    }
+    const detail = await api.fetch(`/api/residents/${resident.id}/compliance`);
+    if (detail.json.last_seen_on !== null) {
+      assert.match(String(detail.json.last_seen_on), /^\d{4}-\d{2}-\d{2}$/, `last_seen_on was ${detail.json.last_seen_on}`);
+    }
+  });
+
   console.log("\n== offline sync ==");
 
   // The terminal queues events while the link is down and replays them here.
