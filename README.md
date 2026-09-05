@@ -104,6 +104,9 @@ test/
 staff.js                account administration CLI (add / passwd / disable)
 jobs.js                 nightly maintenance, run by the Render cron job
 seed.sql                optional demo data (test databases only)
+seed-200.sql            optional: tops a demo database up to 200 residents
+seed-today.js           optional: shapes today's register so every state is visible (SEED_TODAY_CHECKINS=1)
+seed-rooms.js           optional: puts every resident in a room, inventing buildings if none (SEED_ROOMS=1)
 render.yaml             the blueprint: web service + Postgres + cron, all Frankfurt
 check.sh                one command: parse everything, then both suites
 docs/GDPR.md            what personal data is held, why, and for how long

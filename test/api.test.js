@@ -1088,6 +1088,44 @@ async function main() {
     assert.equal(bad.status, 400, "household_id can only be cleared through this route");
   });
 
+  console.log("\n== demo data: seed-rooms ==");
+
+  await test("seed-rooms places every unplaced resident, families together, never over capacity", async () => {
+    // Two adults and a child as one household, so the placement has a family to keep together.
+    const fam = [];
+    for (const [f, l, dob] of [["Nour", "Placement", "1980-02-02"], ["Sami", "Placement", "1982-03-03"], ["Lina", "Placement", "2019-04-04"]]) {
+      const r = await supC.fetch("/api/residents", { method: "POST", body: { first_name: f, last_name: l, date_of_birth: dob } });
+      assert.equal(r.status, 201, r.text);
+      fam.push(r.json.id);
+    }
+    for (const id of fam.slice(1)) {
+      const j = await supC.fetch(`/api/residents/${id}`, { method: "PATCH", body: { household_with: fam[0] } });
+      assert.equal(j.status, 200, j.text);
+    }
+    // The centre already has buildings from the tests above (so the script
+    // must not invent any) but not enough beds; one big room takes the rest.
+    const annex = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Annex" } });
+    assert.equal(annex.status, 201, annex.text);
+    const big = await supC.fetch(`/api/buildings/${annex.json.id}/rooms`, { method: "POST", body: { rooms: [{ number: "Dorm", capacity: 30 }] } });
+    assert.equal(big.status, 201, big.text);
+    const first = await require("../seed-rooms").run();
+    assert.ok(first.placed >= 3, `placed ${first.placed}`);
+    assert.equal(first.unplaced, 0, "beds ran out");
+    assert.equal(first.created, false, "it must not add buildings to a centre that has some");
+    const { rows: check } = await withOwner((c) => c.query(`
+      select (select count(*)::int from public.residents where status = 'active' and room_id is null) as homeless,
+             (select count(*)::int from public.rooms rm where (select count(*) from public.residents r where r.room_id = rm.id and r.status = 'active') > rm.capacity) as over,
+             (select count(distinct room_id)::int from public.residents where id = any($1::uuid[])) as family_rooms`, [fam]));
+    assert.equal(check[0].homeless, 0, "someone is still without a room");
+    assert.equal(check[0].over, 0, "a room is over capacity");
+    assert.equal(check[0].family_rooms, 1, "the family was split up");
+    // Re-running moves nobody and places nobody new.
+    const again = await require("../seed-rooms").run();
+    assert.equal(again.placed, 0);
+    // Tidy up as the owner: the erase route is exercised on its own later.
+    await withOwner((c) => c.query(`delete from public.residents where id = any($1::uuid[])`, [fam]));
+  });
+
   console.log("\n== reports ==");
 
   await test("a report needs a reason and a supervisor; a guard is refused", async () => {
