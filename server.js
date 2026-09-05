@@ -60,6 +60,11 @@ async function boot() {
   if (process.env.SEED_TODAY_CHECKINS === '1') {
     await require('./seed-today').run();
   }
+  // Likewise SEED_ROOMS=1 puts every active resident in a room, inventing
+  // Slaney Manor's buildings first if the centre has none (see seed-rooms.js).
+  if (process.env.SEED_ROOMS === '1') {
+    await require('./seed-rooms').run();
+  }
 
   const admin = await auth.seedAdminIfEmpty();
   if (admin) {

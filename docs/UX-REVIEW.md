@@ -178,6 +178,12 @@ slides the first card a few pixels with "swipe right to sign in" — or a
 subtle chevron on the card's edge would surface it. Keep the tap path as the
 canonical one.
 
+*5 September:* the demonstration was playing behind the "What are you
+recording?" chooser, so nobody saw it and it used up its three plays. It
+now waits until the chooser is out of the way, and only a play someone
+could see counts (`nudgeFirstCard` in `app-common.js`, shared by both
+apps). Devices that had used their plays get three fresh ones.
+
 ### P1.7 The Staff tab is in the wrong app — *done the same afternoon*
 
 Administration lived inside the gate app's tab row, one tap from a guard's

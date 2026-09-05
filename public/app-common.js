@@ -339,11 +339,44 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
     const a = e.target.closest("[data-view]");
     if (!a) return;
     rememberView(a.dataset.view);
-    if (a.dataset.view === current) { e.preventDefault(); el.remove(); }
+    if (a.dataset.view === current) {
+      e.preventDefault(); el.remove();
+      // Anything that waited for the screen to be visible (the swipe demo)
+      // can go ahead now.
+      document.dispatchEvent(new Event("viewchosen"));
+    }
   });
   document.body.appendChild(el);
   const first = el.querySelector(current === "register" ? ".choice.register" : ".choice.gate");
   if (first) first.focus();
+}
+
+// The swipe demo: on the first three loads of an app in this browser, the
+// first card slides aside to reveal the strip behind it. Counted per app,
+// because the gate and the register swipe for different things. It waits
+// until the chooser is out of the way — a demonstration nobody can see is
+// not a demonstration, and it must not use up one of the three plays.
+// localStorage can be unavailable (private mode); then it simply never shows.
+function nudgeFirstCard(container, app) {
+  if (nudgeFirstCard.done) return;              // once per page load, whatever re-renders
+  if (!container.querySelector("button.card")) return;
+  if (document.getElementById("chooser")) {
+    if (!nudgeFirstCard.waiting) {
+      nudgeFirstCard.waiting = true;
+      document.addEventListener("viewchosen", () => { nudgeFirstCard.waiting = false; nudgeFirstCard(container, app); }, { once: true });
+    }
+    return;
+  }
+  try {
+    const key = "swipeNudge2:" + app;
+    const seen = Number(localStorage.getItem(key) || 0);
+    nudgeFirstCard.done = true;
+    if (seen >= 3) return;
+    const first = container.querySelector("button.card");
+    first.classList.add("nudge");
+    if (first.parentElement && first.parentElement.classList.contains("swipe")) first.parentElement.classList.add("nudge");
+    localStorage.setItem(key, String(seen + 1));
+  } catch (_) { /* storage blocked */ }
 }
 
 // The second step for supervisors and admins at a site that requires it: a

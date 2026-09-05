@@ -217,7 +217,7 @@ function renderList(container, rows, emptyMsg) {
     return;
   }
   container.innerHTML = withLetters(rows, !state.searchQuery && state.filter === "all");
-  nudgeOnce(container);
+  nudgeFirstCard(container, "gate");
 }
 
 // Letter separators for the full alphabetical list, so a thumb scrolling a
@@ -236,25 +236,6 @@ function withLetters(rows, wanted) {
   }).join("");
 }
 
-// On the first three loads of this app in this browser, the first card
-// slides aside to reveal the strip behind it — a demonstration of the swipe.
-// Counted per app, because the gate and the register swipe for different
-// things. localStorage can be unavailable (private mode); then the nudge
-// simply never shows.
-function nudgeOnce(container) {
-  try {
-    const key = "swipeNudge:gate";
-    const seen = Number(localStorage.getItem(key) || 0);
-    if (seen >= 3) return;
-    if (nudgeOnce.done) return;             // once per page load, whatever re-renders
-    const first = container.querySelector("button.card");
-    if (!first) return;
-    nudgeOnce.done = true;
-    first.classList.add("nudge");
-    if (first.parentElement && first.parentElement.classList.contains("swipe")) first.parentElement.classList.add("nudge");
-    localStorage.setItem(key, String(seen + 1));
-  } catch (_) { /* storage blocked */ }
-}
 
 
 function renderDetail(r) {
