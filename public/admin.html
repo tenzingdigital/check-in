@@ -898,7 +898,7 @@ async function loadReports() {
   const list = await guarded(() => apiGet("/api/reports"), (err) => showError("Could not load reports: " + err.message));
   if (!list) return;
   showError("");
-  $("reportList").innerHTML = list.map((r) => `
+  $("reportList").innerHTML = list.filter((r) => !r.admin || canStaff()).map((r) => `
     <div class="report">
       <div><b>${esc(r.title)}</b><span class="hint">${r.ranged ? "For the dates above" : "As it stands now"}</span></div>
       <div class="row">

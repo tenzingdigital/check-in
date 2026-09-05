@@ -379,6 +379,12 @@ out of the two working apps:
   occupancy and the evacuation list as they stand, each as a CSV download
   or a printable page. A reason is required and every export is on the
   audit record with the range.
+- **Who viewed which record** (admins, under Reports): every opening of a
+  resident's detail sheet on the register, of their edit sheet, and every
+  export, with who and when. Written by the server with the read itself,
+  kept as long as the audit trail, and included in the resident's own
+  export. The gate's sheet shows nothing beyond the list and is not
+  logged; nor is a sheet opened offline, which never reaches the server.
 - **Codes by email at login** (admins, Settings → Security; on the working
   branch until proven on a copy): supervisors and administrators type a
   six-digit emailed code after their password, may trust a personal device

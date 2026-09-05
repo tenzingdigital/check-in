@@ -344,18 +344,22 @@ function policyNotes(r) {
 }
 
 function renderDetail(r) {
+  // An opening is a different sheet from the one on screen; a re-render (a
+  // check-in, a list refresh, the number arriving) is not.
+  const opening = !!r && !(state.selected && state.selected.id === r.id);
   state.selected = r;
   if (r) state.rows.set(r.id, r);
   const el = $("detail");
   if (!r) { el.hidden = true; el.innerHTML = ""; return; }
 
-  // The number lives on the detail endpoint only. Fetch it once per open,
-  // keep it on the row so a re-render (a check-in, a list refresh) does not
-  // lose it, and redraw if this sheet is still the one on screen.
-  if (r.has_id && !r.id_number && !r._idLoading && Offline.isOnline()) {
-    r._idLoading = true;
+  // Every opening asks the server for the detail row: the identity number
+  // lives on that endpoint only, and the request is what puts the opening
+  // on the access log (migration 023) — so it goes whether or not there is
+  // a number to fetch. Kept on the row so a re-render does not lose it,
+  // and redrawn if this sheet is still the one on screen. Offline, the
+  // sheet reads the encrypted copy and nothing is logged.
+  if (opening && Offline.isOnline()) {
     guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {}).then((fresh) => {
-      r._idLoading = false;
       if (!fresh) return;
       const row = state.rows.get(r.id) || r;
       Object.assign(row, { id_type: fresh.id_type, id_number: fresh.id_number, has_id: !!fresh.id_number });

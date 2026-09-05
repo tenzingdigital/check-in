@@ -661,6 +661,18 @@ begin
              ) order by dc.compliance_date)
       from __TENANT__.daily_compliance dc where dc.resident_id = r.id
     ), '[]'::jsonb),
+    -- Who opened this record and when (migration 023). Part of "everything
+    -- held about me", and the reason the access log exists.
+    'views', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'at', v.viewed_at,
+               'by', p.full_name,
+               'where', v.surface
+             ) order by v.viewed_at)
+      from __TENANT__.resident_views v
+      left join __TENANT__.profiles p on p.id = v.actor_id
+      where v.resident_id = r.id
+    ), '[]'::jsonb),
     -- Every change an administrator made to this record, and every export
     -- of it. Art. 15 is "everything held about me"; that includes who
     -- edited it and when.
@@ -865,6 +877,28 @@ $$;
 
 --
 
+-- Name: note_view(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if not __TENANT__.is_staff() then
+    raise exception 'Not a staff member' using errcode = '42501';
+  end if;
+  -- A lookup of an id that is not on the register is not a view of anyone;
+  -- the route answers 404 and there is nothing to log.
+  insert into __TENANT__.resident_views (actor_id, resident_id, surface)
+  select auth.uid(), p_resident_id, p_surface
+   where exists (select 1 from __TENANT__.residents where id = p_resident_id);
+end;
+$$;
+
+
+--
+
 -- Name: prune_empty_households(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -994,6 +1028,25 @@ declare v_days integer; v_n integer;
 begin
   select compliance_retention_days into v_days from __TENANT__.app_settings where id;
   delete from __TENANT__.roll_calls where started_at < now() - make_interval(days => v_days);
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
+-- Name: purge_resident_views(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_resident_views() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_days integer; v_n integer;
+begin
+  select compliance_retention_days into v_days from __TENANT__.app_settings where id;
+  delete from __TENANT__.resident_views where viewed_at < now() - make_interval(days => v_days);
   get diagnostics v_n = row_count;
   return v_n;
 end;
@@ -1312,6 +1365,35 @@ $$;
 
 --
 
+-- Name: resident_views_between(date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.resident_views_between(p_from date, p_to date) RETURNS TABLE(at text, staff text, resident text, "where" text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_tz text;
+begin
+  if not __TENANT__.is_admin() then
+    raise exception 'Only an administrator may see who viewed a record' using errcode = '42501';
+  end if;
+  select local_timezone into v_tz from __TENANT__.app_settings where id;
+  return query
+    select to_char(v.viewed_at at time zone v_tz, 'YYYY-MM-DD HH24:MI') as at,
+           coalesce(p.full_name, '(account removed)') as staff,
+           r.first_name || ' ' || r.last_name as resident,
+           v.surface as "where"
+      from __TENANT__.resident_views v
+      left join __TENANT__.profiles p on p.id = v.actor_id
+      join __TENANT__.residents r on r.id = v.resident_id
+     where (v.viewed_at at time zone v_tz)::date between p_from and p_to
+     order by v.viewed_at desc;
+end;
+$$;
+
+
+--
+
 -- Name: search_residents(text, boolean, integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1544,6 +1626,36 @@ CREATE TABLE __TENANT__.profiles (
     active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT profiles_role_check CHECK ((role = ANY (ARRAY['guard'::text, 'supervisor'::text, 'admin'::text])))
+);
+
+
+--
+
+-- Name: resident_views; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.resident_views (
+    id bigint NOT NULL,
+    viewed_at timestamp with time zone DEFAULT now() NOT NULL,
+    actor_id uuid,
+    resident_id uuid NOT NULL,
+    surface text NOT NULL,
+    CONSTRAINT resident_views_surface_check CHECK ((surface = ANY (ARRAY['register'::text, 'admin'::text, 'export'::text])))
+);
+
+
+--
+
+-- Name: resident_views_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.resident_views ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME __TENANT__.resident_views_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
 );
 
 
@@ -1803,6 +1915,15 @@ ALTER TABLE ONLY __TENANT__.profiles
 
 --
 
+-- Name: resident_views resident_views_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.resident_views
+    ADD CONSTRAINT resident_views_pkey PRIMARY KEY (id);
+
+
+--
+
 -- Name: residents residents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1957,6 +2078,22 @@ CREATE INDEX gate_events_time_idx ON __TENANT__.gate_events USING btree (occurre
 --
 
 CREATE INDEX job_runs_job_idx ON __TENANT__.job_runs USING btree (job, ran_at DESC);
+
+
+--
+
+-- Name: resident_views_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX resident_views_at_idx ON __TENANT__.resident_views USING btree (viewed_at);
+
+
+--
+
+-- Name: resident_views_resident_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX resident_views_resident_idx ON __TENANT__.resident_views USING btree (resident_id, viewed_at);
 
 
 --
@@ -2133,6 +2270,24 @@ ALTER TABLE ONLY __TENANT__.gate_events
 
 ALTER TABLE ONLY __TENANT__.profiles
     ADD CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: resident_views resident_views_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.resident_views
+    ADD CONSTRAINT resident_views_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: resident_views resident_views_resident_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.resident_views
+    ADD CONSTRAINT resident_views_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
 
 
 --
@@ -2389,6 +2544,21 @@ CREATE POLICY profiles_admin_all ON __TENANT__.profiles USING (__TENANT__.is_adm
 --
 
 CREATE POLICY profiles_read ON __TENANT__.profiles FOR SELECT USING ((__TENANT__.is_staff() OR (id = auth.uid())));
+
+
+--
+
+-- Name: resident_views; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.resident_views ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: resident_views resident_views_admin; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY resident_views_admin ON __TENANT__.resident_views FOR SELECT USING (__TENANT__.is_admin());
 
 
 --
@@ -2744,6 +2914,16 @@ GRANT ALL ON FUNCTION __TENANT__.note_report(p_report text, p_reason text, p_fro
 
 --
 
+-- Name: FUNCTION note_view(p_resident_id uuid, p_surface text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) TO service_role;
+
+
+--
+
 -- Name: FUNCTION prune_empty_households(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -2811,6 +2991,15 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_roll_calls() TO service_role;
 
 --
 
+-- Name: FUNCTION purge_resident_views(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_resident_views() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_resident_views() TO service_role;
+
+
+--
+
 -- Name: TABLE gate_events; Type: ACL; Schema: public; Owner: -
 --
 
@@ -2874,6 +3063,16 @@ REVOKE ALL ON FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at tim
 REVOKE ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION resident_views_between(p_from date, p_to date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.resident_views_between(p_from date, p_to date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.resident_views_between(p_from date, p_to date) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.resident_views_between(p_from date, p_to date) TO service_role;
 
 
 --
@@ -3001,6 +3200,25 @@ GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO service_role;
 GRANT ALL ON TABLE __TENANT__.profiles TO anon;
 GRANT ALL ON TABLE __TENANT__.profiles TO authenticated;
 GRANT ALL ON TABLE __TENANT__.profiles TO service_role;
+
+
+--
+
+-- Name: TABLE resident_views; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.resident_views TO authenticated;
+GRANT ALL ON TABLE __TENANT__.resident_views TO service_role;
+
+
+--
+
+-- Name: SEQUENCE resident_views_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.resident_views_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.resident_views_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.resident_views_id_seq TO service_role;
 
 
 --

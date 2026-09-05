@@ -1322,7 +1322,8 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 6);
+    assert.equal(list.json.length, 7);
+    assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
   await test("the register and attendance reports come as CSV and JSON, and the export is logged", async () => {
@@ -1421,6 +1422,62 @@ async function main() {
     // put it back so later boots in this cluster are quiet
     const real = require("crypto").createHash("sha256").update(require("fs").readFileSync(require("path").join(__dirname, "..", "migrations", "001_platform.sql"), "utf8"), "utf8").digest("hex");
     await withOwner((c) => c.query(`update public.schema_migrations set checksum = $1 where name = '001_platform.sql'`, [real]));
+  });
+
+  console.log("\n== who viewed which record (migration 023) ==");
+
+  let viewedId;
+  const viewAdmin = client(base);
+  await test("opening a detail sheet, an edit sheet or an export leaves a row saying who and where", async () => {
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["viewadmin@hut.example", PASSWORD, "Vera Admin", "admin"]));
+    const login = await viewAdmin.fetch("/api/session", { method: "POST", body: { email: "viewadmin@hut.example", password: PASSWORD } });
+    assert.equal(login.status, 200, login.text);
+    const r = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Viewed", last_name: "Person", date_of_birth: "1990-05-05", id_type: "TRC", id_number: "TRC-VIEW-1" } });
+    assert.equal(r.status, 201, r.text);
+    viewedId = r.json.id;
+    const sheet = await api.fetch(`/api/residents/${viewedId}/compliance`);       // the guard on the register
+    assert.equal(sheet.status, 200, sheet.text);
+    const strip = await api.fetch(`/api/residents/${viewedId}/days`);             // the strip under it: same opening, not logged twice
+    assert.equal(strip.status, 200);
+    const edit = await supC.fetch(`/api/residents/${viewedId}/record`);           // the supervisor's edit sheet
+    assert.equal(edit.status, 200, edit.text);
+    const { rows } = await withOwner((c) => c.query(
+      `select p.full_name as staff, v.surface from public.resident_views v join public.profiles p on p.id = v.actor_id
+        where v.resident_id = $1 order by v.viewed_at`, [viewedId]));
+    assert.deepEqual(rows.map((x) => x.surface), ["register", "admin"]);
+    assert.match(rows[0].staff, /Gina/);
+  });
+
+  await test("the access report is the administrator's; a supervisor and a guard are refused out loud", async () => {
+    const today = siteToday();
+    const asSup = await supC.fetch(`/api/reports/access?from=${today}&to=${today}&reason=complaint&format=json`);
+    assert.equal(asSup.status, 403, asSup.text);
+    assert.match(asSup.json.error, /administrator/);
+    const asGuard = await api.fetch(`/api/reports/access?from=${today}&to=${today}&reason=complaint&format=json`);
+    assert.equal(asGuard.status, 403);
+    const rep = await viewAdmin.fetch(`/api/reports/access?from=${today}&to=${today}&reason=complaint&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    const mine = rep.json.rows.filter((x) => x.resident === "Viewed Person");
+    assert.deepEqual(mine.map((x) => x.where).sort(), ["admin", "register"]);
+    assert.ok(mine.every((x) => /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(x.at)), "times are in the site's zone, to the minute");
+    // The Art. 15 export is itself a view, and says so: the person receiving
+    // it sees this disclosure among the others.
+    const exp = await viewAdmin.fetch(`/api/residents/${viewedId}/export?reason=subject+access+request`);
+    assert.equal(exp.status, 200, exp.text);
+    assert.deepEqual(exp.json.views.map((x) => x.where), ["register", "admin", "export"]);
+    assert.match(exp.json.views[2].by, /Vera/);
+    const { rows } = await withOwner((c) => c.query(`select surface from public.resident_views where resident_id = $1 order by viewed_at`, [viewedId]));
+    assert.deepEqual(rows.map((x) => x.surface), ["register", "admin", "export"]);
+  });
+
+  await test("erasure takes the views with it; the nightly purge follows the audit retention", async () => {
+    await withOwner((c) => c.query(`update public.resident_views set viewed_at = now() - interval '400 days' where resident_id = $1 and surface = 'register'`, [viewedId]));
+    const purged = await withOwner((c) => c.query(`select public.purge_resident_views() as n`));
+    assert.equal(purged.rows[0].n, 1, "the old view was not purged");
+    const gone = await viewAdmin.fetch(`/api/residents/${viewedId}`, { method: "DELETE", body: { reason: "test", confirm_name: "Viewed Person" } });
+    assert.equal(gone.status, 200, gone.text);
+    const { rows } = await withOwner((c) => c.query(`select count(*)::int as n from public.resident_views where resident_id = $1`, [viewedId]));
+    assert.equal(rows[0].n, 0, "views survived the erasure");
   });
 
   console.log("\n== codes by email at login (migration 021) ==");

@@ -84,6 +84,7 @@ and any events are held like anyone else's if the centre registers them.
 | Login codes (SHA-256 digests) and trusted-device tokens (digests), with the user agent | `auth.mfa_challenges`, `auth.mfa_devices` | The second login step for supervisors and admins where a site requires it (migration 021) | Codes purged a day after expiry; devices 30 days |
 | Every sign-in attempt: email as typed, outcome, IP, the country it resolved to, why it was unusual, user agent | `auth.login_events` | Detecting misuse; refusing senior logins from abroad; the privacy notice promises it | 90 days; purged nightly |
 | Administrators' and supervisors' changes, with the row before and after | `admin_audit` | Accountability for changes to residents, staff and settings | Same period as the register; purged nightly |
+| Who opened which resident's record, where (register sheet, edit sheet, export) and when | `resident_views` (migration 023) | The access log: the first thing to read after a complaint that somebody was looking at a record they had no business with. Written by the server with the read itself; the gate's sheet (no identity number) and a sheet opened offline are not logged | Administrators, through the "Who viewed which record" report; each resident's own export includes theirs. Same period as the audit trail; purged nightly |
 
 Staff data is Tenzing Digital's own processing as well as the centre's, and
 `docs/legal/PRIVACY-2026-09-03.md` is the notice for it.
@@ -138,6 +139,7 @@ running is noticed.
 | Entry, exit and check-in events | `event_retention_days` | 90 days | Granular movement data; minimise (Art. 5(1)(e)). The register outlives it |
 | The daily register | `compliance_retention_days` | 180 days | The six-month limit in the IPAS verification policy of March 2026 (migration 008) |
 | Administrators' audit trail | follows `compliance_retention_days` | 180 days | Accountability for the period the register itself exists |
+| Access log (who viewed which record) | follows `compliance_retention_days` | 180 days | Same reasoning as the audit trail |
 | Sign-in attempts | fixed | 90 days | Long enough to investigate misuse; short because it holds IP addresses |
 | Job run history | fixed | 90 days | Operational |
 | Backups (Tenzing's off-provider copy) | `tools/backup.sh` | 35 days | DPA section 9 |
@@ -215,7 +217,8 @@ supervisor by the database function itself, not just by the screen.
 | Right | How | Notes |
 |---|---|---|
 | Reports for an inspection | Admin → Reports: register, attendance, movements, occupancy, evacuation, drills, as CSV or a printable page | Supervisors and admins. A reason is required; each export is written to `admin_audit` with the range (`note_report()`) |
-| Access (Art. 15) and portability (Art. 20) | Export button → `GET /api/residents/:id/export?reason=…` | JSON: the record, every event with the recording staff member's name, the register, the change history. The reason is recorded in `admin_audit` |
+| Access (Art. 15) and portability (Art. 20) | Export button → `GET /api/residents/:id/export?reason=…` | JSON: the record, every event with the recording staff member's name, the register, the change history, and who has viewed the record. The reason is recorded in `admin_audit` |
+| Who has looked at a record | Admin → Reports → *Who viewed which record*, for a date range | Administrators only (`resident_views_between()`); a reason is required and the report itself is logged like any other |
 | Rectification (Art. 16) | Edit sheet (supervisors and admins) | Names, date of birth, identity document, departure date. The change is audited. Events are corrected by new events, never edited |
 | Erasure (Art. 17) | Erase button, with the reason and the full name typed back | See "Erasure leaves proof" above. The decision is the centre's; Art. 17(3)(b) may apply |
 | Objection (Art. 21) | Procedural | Only arises under legitimate interests |

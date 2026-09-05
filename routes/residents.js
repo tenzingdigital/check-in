@@ -146,6 +146,9 @@ router.get('/', wrap(async (req, res) => {
 // GET /api/residents/:id/compliance — the detail panel's row.
 router.get('/:id/compliance', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
+    // This is the detail sheet, and it carries the identity number: the
+    // opening goes on the access log (migration 023) in the same transaction.
+    await client.query('select note_view($1, $2)', [uuidParam(req.params.id, 'resident id'), 'register']);
     const { rows } = await client.query(
       `select id, full_name, id_type, id_number, age_years, required_today,
               seen_today, checkins_today, open_breaches, consecutive_missed,
@@ -214,6 +217,7 @@ router.post('/', wrap(async (req, res) => {
 // the row does not exist.
 router.get('/:id/record', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
+    await client.query('select note_view($1, $2)', [uuidParam(req.params.id, 'resident id'), 'admin']);
     const { rows } = await client.query(
       `select id, first_name, last_name, date_of_birth, id_type, id_number,
               status, departed_on, registered_at, room_id, evac_need, household_id
@@ -329,6 +333,7 @@ router.get('/:id/export', wrap(async (req, res) => {
 
   const out = await db.withIdentity(req.session.userId, async (client) => {
     await client.query('select note_disclosure($1, $2)', [id, reason]);
+    await client.query('select note_view($1, $2)', [id, 'export']);
     const { rows } = await client.query('select export_resident_record($1) as record', [id]);
     return rows[0].record;
   }).catch((err) => { throw err.code === '42501' ? new HttpError(403, 'Only an administrator can export a record') : err; });

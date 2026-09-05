@@ -239,6 +239,21 @@ on the Render dashboard that the `basic-256mb` plan actually has PITR enabled
 off-provider copy and nobody has restored one. The DPA's 35-day backup deletion
 promise in section 9 also needs a written procedure behind it.
 
+### F15. Nobody could say who had looked at a record — *built 5 September (migration 023), on the working branch*
+
+The audit trail said what changed and the register said what was recorded,
+but a supervisor reading a resident's identity number on the detail sheet
+left nothing behind. That is the access log the DPA promises, and the
+first evidence an inspector asks for after a complaint. `resident_views`
+now takes one row per opening — who, which resident, which surface,
+when — written by the server in the same transaction as the read, so an
+opening without a row cannot happen from the app. Administrators read it
+through the *Who viewed which record* report; a resident's Art. 15 export
+carries their own; a guard or supervisor asking is refused out loud, not
+handed an empty table. Kept as long as the audit trail. Not logged, and
+documented as such: the gate's sheet (nothing beyond the list) and a
+sheet opened offline.
+
 ### F14. Small things
 
 - *Done 4 September:* `style-src` is `'self'`; every `style=""` attribute is a

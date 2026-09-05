@@ -98,6 +98,14 @@ const REPORTS = {
   },
 };
 
+// Administrators only: who opened which resident's record (migration 023).
+REPORTS.access = {
+  title: 'Who viewed which record',
+  ranged: true,
+  admin: true,
+  sql: `select * from resident_views_between($1, $2)`,
+};
+
 function csv(rows) {
   if (!rows.length) return '';
   const cols = Object.keys(rows[0]);
@@ -110,7 +118,7 @@ function csv(rows) {
 }
 
 router.get('/reports', wrap(async (req, res) => {
-  res.json(Object.entries(REPORTS).map(([name, r]) => ({ name, title: r.title, ranged: r.ranged })));
+  res.json(Object.entries(REPORTS).map(([name, r]) => ({ name, title: r.title, ranged: r.ranged, admin: !!r.admin })));
 }));
 
 router.get('/reports/:name', wrap(async (req, res) => {
@@ -133,7 +141,7 @@ router.get('/reports/:name', wrap(async (req, res) => {
     const { rows } = await client.query(def.sql, def.ranged ? [from, to] : []);
     return rows;
   }).catch((err) => {
-    if (err && err.code === '42501') throw new HttpError(403, 'Only a supervisor or admin can export a report');
+    if (err && err.code === '42501') throw new HttpError(403, def.admin ? 'Only an administrator can see who viewed a record' : 'Only a supervisor or admin can export a report');
     throw err;
   });
 

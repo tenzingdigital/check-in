@@ -175,4 +175,26 @@ select
           where table_name='app_settings' and column_name='compliance_window_hours') = false as old_window_gone;
 
 \echo ''
+\echo '=========== J. THE ACCESS LOG (migration 023) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+\echo '--- the guard opens Okonkwo''s sheet: allowed, and it leaves a row'
+select public.note_view(:'okonkwo_id', 'register');
+select pg_temp.try('guard reads the access log',           'select * from public.resident_views');
+select pg_temp.try('guard runs the access report',         'select * from public.resident_views_between(current_date - 1, current_date + 1)');
+select pg_temp.try('guard inserts into the access log',    format('insert into public.resident_views (actor_id, resident_id, surface) values (auth.uid(), %L, %L)', :'okonkwo_id', 'admin'));
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.try('supervisor runs the access report',    'select * from public.resident_views_between(current_date - 1, current_date + 1)');
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+\echo '--- the admin reads the log and the report: the guard, the resident, the surface'
+select count(*) as rows_visible_to_admin from public.resident_views;
+select staff, resident, "where" from public.resident_views_between(current_date - 1, current_date + 1);
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon notes a view',                    format('select public.note_view(%L, %L)', :'okonkwo_id', 'register'));
+reset role;
+
+\echo ''
 \echo '=========== DONE ==========='
