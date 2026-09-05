@@ -363,6 +363,10 @@ out of the two working apps:
   first, a tap per person at the assembly point, working without a
   connection and syncing the ticks later. A printable evacuation list.
   Drills and incidents are kept as a record for as long as the register.
+- **The register opens on who has not been seen today.** A recorded
+  check-in drops the card off that view; the tiles and "Show everyone" are
+  one tap away, and a typed name always searches everyone. A card swiped
+  either way records the check-in.
 - **Households** (only when the site's *Households* feature is on): link
   family members from a resident's edit sheet. A family stays together on
   the roll call, children marked, and reads as a family in a room. The

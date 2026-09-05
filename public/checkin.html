@@ -136,7 +136,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="register">Daily register:</b><span>the once-a-day check-in — swipe right to record it. Door movements are on the Gate.</span></p>
+      <p class="jobline"><b class="register">Daily register:</b><span>the once-a-day check-in — swipe a card either way to record it. Door movements are on the Gate.</span></p>
       <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
     </section>
@@ -163,7 +163,7 @@ const state = {
   settings:  null,   // app_settings row
   selected:  null,   // resident row shown in the detail panel
   busy:      false,
-  filter:    "all",   // which tile is pressed: all | not_seen | breach | seen
+  filter:    "not_seen",   // which tile is pressed: all | not_seen | breach | seen
   searchRows:  [],    // the last list response, refiltered client-side
   searchQuery: "",
   loaded:    false,   // false until the first list has arrived — before that, every count is unknown, not zero
@@ -229,6 +229,7 @@ function residentCard(r) {
   // The strip behind the card says what a right swipe does (see .swipe-bg).
   return `<div class="swipe">
     <span class="swipe-bg right" aria-hidden="true">Check in ✓</span>
+    <span class="swipe-bg left" aria-hidden="true">Check in ✓</span>
     <button class="${cls.join(" ")}" data-id="${esc(r.id)}" type="button">
       <span class="who">
         <span class="name">${esc(r.full_name)}</span>
@@ -241,7 +242,11 @@ function residentCard(r) {
 }
 
 function renderList(container, rows, emptyMsg) {
-  (rows || []).forEach((r) => state.rows.set(r.id, r));
+  (rows || []).forEach((r) => {
+    const had = state.rows.get(r.id);
+    if (had && had.id_number && !r.id_number) { r.id_type = had.id_type; r.id_number = had.id_number; }
+    state.rows.set(r.id, r);
+  });
   if (!rows || rows.length === 0) {
     container.innerHTML = `<p class="empty">${esc(emptyMsg)}</p>`;
     return;
@@ -298,8 +303,11 @@ function canEditId() {
 }
 
 function idLine(r) {
+  // List rows never carry the number (docs/GDPR.md: detail view only), just
+  // has_id. The sheet fetches it on open; until then say it exists.
   const shown = r.id_number
     ? `<b>${esc(r.id_type)} ${esc(r.id_number)}</b>`
+    : r.has_id ? `<span class="hint">ID recorded · loading…</span>`
     : `<span class="hint">No ID recorded</span>`;
   const edit = canEditId()
     ? ` <button class="linkish" id="editId" type="button">${r.id_number ? "Change" : "Add"}</button>`
@@ -359,6 +367,20 @@ function renderDetail(r) {
   if (r) state.rows.set(r.id, r);
   const el = $("detail");
   if (!r) { el.hidden = true; el.innerHTML = ""; return; }
+
+  // The number lives on the detail endpoint only. Fetch it once per open,
+  // keep it on the row so a re-render (a check-in, a list refresh) does not
+  // lose it, and redraw if this sheet is still the one on screen.
+  if (r.has_id && !r.id_number && !r._idLoading && Offline.isOnline()) {
+    r._idLoading = true;
+    guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {}).then((fresh) => {
+      r._idLoading = false;
+      if (!fresh) return;
+      const row = state.rows.get(r.id) || r;
+      Object.assign(row, { id_type: fresh.id_type, id_number: fresh.id_number, has_id: !!fresh.id_number });
+      if (state.selected && state.selected.id === r.id) renderDetail(row);
+    });
+  }
 
   el.innerHTML = `
     <h2>${esc(r.full_name)}</h2>
@@ -520,7 +542,7 @@ const FILTERS = {
 const FILTER_LABEL = { all: "everyone", not_seen: "not seen today", breach: "with missed days", seen: "seen today" };
 
 function setFilter(name) {
-  state.filter = FILTERS[name] ? name : "all";
+  state.filter = FILTERS[name] ? name : "not_seen";
   renderDetail(null);
   renderSearch();
 }
@@ -545,7 +567,10 @@ function renderSearch() {
     b.setAttribute("aria-pressed", String(b.dataset.filter === state.filter));
   });
 
-  const shown = orderFor(state.filter, rows.filter(FILTERS[state.filter]));
+  // A typed name searches everyone: a guard looking for a person must find
+  // them whether or not they have been seen today.
+  const active = state.searchQuery ? "all" : state.filter;
+  const shown = orderFor(active, rows.filter(FILTERS[active]));
   const line = $("filterLine");
 
   // Nothing has arrived yet: say so. A filter applied to an empty list is
@@ -558,17 +583,17 @@ function renderSearch() {
     return;
   }
 
-  if (state.filter === "all") {
+  if (active === "all") {
     line.hidden = true;
     line.innerHTML = "";
   } else {
-    line.innerHTML = `Showing ${shown.length} ${FILTER_LABEL[state.filter]}${state.filter === "breach" ? ", worst first" : ""} · <button class="linkish" type="button" id="showAll">Show everyone</button>`;
+    line.innerHTML = `Showing ${shown.length} ${FILTER_LABEL[active]}${active === "breach" ? ", worst first" : ""} · <button class="linkish" type="button" id="showAll">Show everyone</button>`;
     line.hidden = false;
     $("showAll").onclick = () => setFilter("all");
   }
   const q = state.searchQuery;
   const empty = q
-    ? `No resident matching “${q}”${state.filter === "all" ? "" : ` under ${FILTER_LABEL[state.filter]}`}.`
+    ? `No resident matching “${q}”.`
     : state.filter === "not_seen" ? "Everyone who is required today has been seen."
     : state.filter === "breach"   ? "Nobody has missed days outstanding."
     : state.filter === "seen"     ? "Nobody has been seen yet today."
@@ -677,8 +702,11 @@ function openIdEditor(r) {
     if (!saved) return;
 
     toast(`${type} ${number} recorded`, "ok");
-    const fresh = await guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {});
-    if (fresh && state.selected && state.selected.id === r.id) renderDetail(fresh);
+    // Keep the saved number on the row itself, so the list refresh below
+    // (whose rows carry has_id only) cannot turn it back into "No ID".
+    const row = state.rows.get(r.id) || r;
+    Object.assign(row, { id_type: type, id_number: number, has_id: true });
+    if (state.selected && state.selected.id === r.id) renderDetail(row);
     runSearch($("q").value);
   });
 }
@@ -830,7 +858,8 @@ document.addEventListener("click", (e) => {
   renderDetail(row);
 });
 
-mountCardSwipe({ onRight: (id) => checkin(id) });
+// Either direction records the check-in: there is only one act on this page.
+mountCardSwipe({ onRight: (id) => checkin(id), onLeft: (id) => checkin(id) });
 
 // A tile sets the filter; the pressed tile pressed again clears it, and so
 // does "Show everyone" on the line under the search box.

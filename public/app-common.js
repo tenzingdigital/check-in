@@ -331,7 +331,7 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
     </a>
     <a class="choice register" href="/checkin.html" data-view="register">
       <b>Daily register — check-in</b>
-      <span>The once-a-day presentation the policy requires. Swipe right to record today's check-in. Nothing here signs anyone in or out.</span>
+      <span>The once-a-day presentation the policy requires. Swipe a card either way to record today's check-in. Nothing here signs anyone in or out.</span>
     </a>
     ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Site admin</b><span>This centre's residents, buildings, staff and settings.</span></a>` : ""}
     ${canOrg ? `<a class="choice admin" href="/org.html" data-view="org"><b>Organisation</b><span>Every centre on the service. No resident data.</span></a>` : ""}`;

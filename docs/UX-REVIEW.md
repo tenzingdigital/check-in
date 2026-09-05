@@ -268,6 +268,16 @@ replaces that. The role hint under the form is good copy. "Reset password"
 opens a browser prompt (P1.8).
 
 ### Daily register — Check in
+
+*5 September, from the owner's testing:* the register now opens on the
+residents not yet seen today (the Not seen tile pressed), and a recorded
+check-in drops the card off that view, so the list is always the work
+left to do; "Show everyone" and the other tiles are one tap away, and a
+typed name always searches everyone. A card swiped either way records the
+check-in, since there is only one act on this page. And a bug: the detail
+sheet said "No ID recorded" for everyone, because list rows deliberately
+carry no identity number; the sheet now fetches it when the row says one
+exists, so a number just saved stays on screen.
 Tiles now filter, chips scroll, cards are two lines. The red left border
 plus red badge plus red "Not seen" count is three red signals for one fact;
 one would do (P1.1, P1.3). The empty states per filter are well written.
