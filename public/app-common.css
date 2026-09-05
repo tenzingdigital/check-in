@@ -321,6 +321,9 @@
   body.app-gate .swipe-bg.right { background: color-mix(in srgb, var(--accent) 26%, var(--surface)); color: var(--accent); }
   body.app-gate button.card.swipe-arm { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border-color: var(--accent); }
   body.app-gate .swipe-bg.left  { background: color-mix(in srgb, var(--warn) 26%, var(--surface)); color: var(--warn-text); }
+  /* The register records one act whichever way the card goes. */
+  body.app-register .swipe-bg.left { justify-content: flex-end; background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); }
+  body.app-register button.card.swipe-arm-out { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); border-color: var(--ok); }
   body.app-gate button.card.swipe-arm-out { background: color-mix(in srgb, var(--warn) 18%, var(--surface)); border-color: var(--warn); }
   .btn.primary-out { background: var(--warn); color: var(--on-warn); border-color: transparent; }
   .btn.wide { grid-column: 1 / -1; }

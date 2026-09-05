@@ -331,7 +331,7 @@ function mountViewChooser({ current, canAdmin = false } = {}) {
     </a>
     <a class="choice register" href="/checkin.html" data-view="register">
       <b>Daily register — check-in</b>
-      <span>The once-a-day presentation the policy requires. Swipe right to record today's check-in. Nothing here signs anyone in or out.</span>
+      <span>The once-a-day presentation the policy requires. Swipe a card either way to record today's check-in. Nothing here signs anyone in or out.</span>
     </a>
     ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Admin</b><span>Residents, buildings, staff and settings.</span></a>` : ""}`;
   el.addEventListener("click", (e) => {
