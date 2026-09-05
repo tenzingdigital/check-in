@@ -57,9 +57,11 @@ begin
     v_kiritimati >= v_midway,
     true
   );
+  -- The two zones are 25 hours apart (UTC+14 and UTC-11), so for one hour a
+  -- day, 10:00-11:00 UTC, their calendar dates are two apart, not one.
   perform pg_temp.expect(
-    'kiritimati_today and midway_today differ by at most one day',
-    (v_kiritimati - v_midway) <= 1,
+    'kiritimati_today and midway_today differ by at most two days',
+    (v_kiritimati - v_midway) <= 2,
     true
   );
 
