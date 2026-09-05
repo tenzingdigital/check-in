@@ -287,6 +287,8 @@
         <p class="hint flush">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
 
         <h2 class="mt6">Security</h2>
+        <div><label class="lbl" for="stHome">Home countries</label><input id="stHome" class="field" type="text" required pattern="[A-Za-z]{2}(,[A-Za-z]{2})*" placeholder="IE">
+          <p class="hint under">Two-letter codes, comma-separated. A supervisor or administrator logging in from anywhere else is refused; a guard from elsewhere must type an emailed code. Unknown addresses are not treated as abroad.</p></div>
         <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login. Needs email configured on the service.</span></label>
 
         <h2 class="mt6">Features for this site</h2>
@@ -947,7 +949,7 @@ const SETTINGS_FIELDS = {
   site_name: "stSite", local_timezone: "stTz", adult_age_years: "stAdult", due_soon_after_hour: "stDue",
   warn_after_consecutive_nights: "stWarn", absence_window_limit: "stWinLimit", absence_window_days: "stWinDays",
   event_retention_days: "stEventDays", compliance_retention_days: "stCompDays", late_entry_window_hours: "stLate",
-  idle_lock_minutes: "stIdle",
+  idle_lock_minutes: "stIdle", home_countries: "stHome",
 };
 
 const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", mfa_email: "stMfa" };

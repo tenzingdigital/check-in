@@ -82,7 +82,7 @@ and any events are held like anyone else's if the centre registers them.
 | Session tokens (SHA-256 digests), created and last-seen times, IP, user agent | `auth.sessions` | Keeping the person logged in for a shift | Until expiry (12 hours) or logout; purged nightly |
 | Password-reset and invitation tokens (digests) | `auth.password_resets` | The emailed one-day link | 24 hours; purged nightly |
 | Login codes (SHA-256 digests) and trusted-device tokens (digests), with the user agent | `auth.mfa_challenges`, `auth.mfa_devices` | The second login step for supervisors and admins where a site requires it (migration 021) | Codes purged a day after expiry; devices 30 days |
-| Every sign-in attempt: email as typed, outcome, IP, user agent | `auth.login_events` | Detecting misuse; the privacy notice promises it | 90 days; purged nightly |
+| Every sign-in attempt: email as typed, outcome, IP, the country it resolved to, why it was unusual, user agent | `auth.login_events` | Detecting misuse; refusing senior logins from abroad; the privacy notice promises it | 90 days; purged nightly |
 | Administrators' and supervisors' changes, with the row before and after | `admin_audit` | Accountability for changes to residents, staff and settings | Same period as the register; purged nightly |
 
 Staff data is Tenzing Digital's own processing as well as the centre's, and

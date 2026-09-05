@@ -143,6 +143,16 @@ Authentication is now this codebase's own, so this is real work, but TOTP
 Node's `crypto`. The forgot-password machinery already provides the shape for
 recovery codes.
 
+### F6b. Nothing looks at where a login comes from — *built 5 September (migration 022), on the working branch*
+
+*Built:* the country of every sign-in is recorded; senior roles from outside
+the site's home countries (Ireland by default) are refused with the security
+contact in the message; a guard abroad, or a never-seen device after recent
+failures, must type the emailed code. A hard country block was rejected on
+purpose: Irish mobile networks sometimes route through the UK, and the
+attacker who has a phished password can rent an Irish exit for a euro. The
+code is the control; the country is a signal.
+
 ### F7. A 12-hour session on a shared terminal has no idle lock — *fixed 4 September*
 
 *Fixed:* `mountIdleLock()` in `public/app-common.js` ends the session

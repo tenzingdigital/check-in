@@ -2,7 +2,7 @@
   "name": "hut-check-in",
   "version": "1.0.0",
   "private": true,
-  "description": "Hut Check-In \u2014 gate presence and the statutory daily register for a security hut.",
+  "description": "Hut Check-In — gate presence and the statutory daily register for a security hut.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -17,6 +17,7 @@
   "dependencies": {
     "dotenv": "^16.6.1",
     "express": "^4.21.0",
+    "geoip-country": "^5.0.202609050122",
     "pg": "^8.22.0"
   },
   "overrides": {

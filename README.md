@@ -376,6 +376,16 @@ out of the two working apps:
   branch until proven on a copy): supervisors and administrators type a
   six-digit emailed code after their password, may trust a personal device
   for 30 days, and guards keep password-only login. Needs email configured.
+- **Where a login comes from** (migration 022, on the working branch): every
+  sign-in records the country its address resolves to. Home is the site's
+  list under Settings → Security, Ireland by default. A supervisor or
+  administrator from anywhere else is refused with `security@tenzing.ie` in
+  the message; a guard from elsewhere, or anyone on a device never seen
+  before after three wrong passwords, must type the emailed code. Unknown
+  addresses are not treated as abroad. The country table is the bundled
+  GeoLite2 data in `geoip-country`; update the package with `npm update`
+  every few months, or set `HUT_TRUST_CF_COUNTRY=1` once the service sits
+  behind Cloudflare on its own domain and the header does the work.
 - **Organisation page** (`/org.html`, platform administrators only, on the
   working branch until it has been proven on a copy of the live database):
   a level above any one site. Every centre on the service with its counts,

@@ -7,6 +7,7 @@ const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const auth = require('../lib/auth');
+const geo = require('../lib/geo');
 
 const router = express.Router();
 
@@ -21,7 +22,13 @@ router.post('/', wrap(async (req, res) => {
   }
 
   const deviceToken = auth.parseCookies(req.headers.cookie)[auth.DEVICE_COOKIE_NAME];
-  const result = await auth.signIn(email, password, { ip, userAgent: req.get('user-agent'), deviceToken });
+  const country = geo.countryFor(req);
+  const result = await auth.signIn(email, password, { ip, userAgent: req.get('user-agent'), deviceToken, country });
+  if (result && result.blocked) {
+    // The one refusal that explains itself: the person has the right
+    // password, and the message tells them who to write to.
+    return res.status(403).json({ error: result.message });
+  }
   if (!result) {
     // One message for every failure mode — wrong password, unknown email,
     // deactivated profile. Distinguishing them tells an attacker which
@@ -33,9 +40,11 @@ router.post('/', wrap(async (req, res) => {
   if (result.mfaRequired) {
     // No session yet. The browser shows the code screen; the challenge id
     // alone opens nothing — the code does, and only five guesses are allowed.
-    return res.json({ mfa_required: true, challenge: result.challengeId, email_hint: result.emailHint, delivered: result.delivered });
+    return res.json({ mfa_required: true, challenge: result.challengeId, email_hint: result.emailHint, delivered: result.delivered, risk: result.risk || [] });
   }
-  res.setHeader('Set-Cookie', auth.sessionCookie(result.token, result.expiresAt));
+  const cookies = [auth.sessionCookie(result.token, result.expiresAt)];
+  if (result.deviceToken) cookies.push(auth.deviceCookie(result.deviceToken));
+  res.setHeader('Set-Cookie', cookies);
   res.json({ ok: true });
 }));
 
@@ -73,7 +82,7 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
     const { rows } = await client.query(
       `select site_name, local_timezone, adult_age_years, due_soon_after_hour,
               event_retention_days, compliance_retention_days, late_entry_window_hours,
-              idle_lock_minutes, feature_buildings, feature_evacuation, feature_households, mfa_email
+              idle_lock_minutes, feature_buildings, feature_evacuation, feature_households, mfa_email, home_countries
          from app_settings limit 1`,
     );
     return rows[0] || null;

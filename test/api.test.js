@@ -19,6 +19,7 @@
 
 const assert = require('assert/strict');
 process.env.HUT_MAIL_SINK = '1';   // lib/mail.js keeps what it would have sent in global.__mailSink
+process.env.HUT_GEO_OVERRIDE = '1'; // lib/geo.js reads x-hut-test-country instead of the IP
 const app = require('../server');
 const auth = require('../lib/auth');
 const { closePool, withIdentity, withOwner, migrate } = require('../database');
@@ -1455,6 +1456,77 @@ async function main() {
     process.env.HUT_MAIL_SINK = "1";
     const off = await mfaAdmin.fetch("/api/settings", { method: "PATCH", body: { mfa_email: false } });
     assert.equal(off.status, 200, off.text);
+  });
+
+  console.log("\n== where a login comes from (migration 022) ==");
+
+  const from = (cc) => ({ "x-hut-test-country": cc });
+  await test("a guard from home on a new device logs in; the country is on the record", async () => {
+    const g = client(base);
+    const res = await g.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD }, headers: from("IE") });
+    assert.equal(res.json.ok, true, res.text);
+    assert.match(g.cookie, /hut_device=/, "the device was not remembered");
+    const { rows } = await withOwner((c) => c.query(`select country, risk from auth.login_events where email = $1 order by at desc limit 1`, [EMAIL]));
+    assert.equal(rows[0].country, "IE");
+    assert.equal(rows[0].risk, "new_device");
+    await g.fetch("/api/session", { method: "DELETE" });
+    const again = await g.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD }, headers: from("IE") });
+    assert.equal(again.json.ok, true);
+    const { rows: r2 } = await withOwner((c) => c.query(`select risk from auth.login_events where email = $1 order by at desc limit 1`, [EMAIL]));
+    assert.equal(r2[0].risk, null, "a device seen before still counted as new");
+  });
+
+  await test("a supervisor abroad is refused, and told who to write to", async () => {
+    const s = client(base);
+    const res = await s.fetch("/api/session", { method: "POST", body: { email: "mfasup@hut.example", password: PASSWORD }, headers: from("FR") });
+    assert.equal(res.status, 403, res.text);
+    assert.match(res.json.error, /Ireland/);
+    assert.match(res.json.error, /security@tenzing\.ie/);
+    assert.equal((await s.fetch("/api/session")).status, 401);
+    const { rows } = await withOwner((c) => c.query(`select outcome, country, risk from auth.login_events where email = 'mfasup@hut.example' order by at desc limit 1`));
+    assert.equal(rows[0].outcome, "blocked_abroad");
+    assert.equal(rows[0].country, "FR");
+    assert.match(rows[0].risk, /abroad/);
+  });
+
+  await test("a guard abroad must type an emailed code; without mail they are refused with the contact", async () => {
+    const g = client(base);
+    const res = await g.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD }, headers: from("FR") });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.json.mfa_required, true, "a guard abroad was let in without a code");
+    const code = lastCode();
+    const done = await g.fetch("/api/session/mfa", { method: "POST", body: { challenge: res.json.challenge, code } });
+    assert.equal(done.status, 200, done.text);
+    delete process.env.HUT_MAIL_SINK;
+    const h = client(base);
+    const refused = await h.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD }, headers: from("FR") });
+    assert.equal(refused.status, 403, refused.text);
+    assert.match(refused.json.error, /security@tenzing\.ie/);
+    process.env.HUT_MAIL_SINK = "1";
+  });
+
+  await test("a new device after three wrong passwords needs the code; an unknown address does not", async () => {
+    const n = client(base);
+    for (let i = 0; i < 3; i++) await n.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: "wrong-wrong-wrong" }, headers: from("IE") });
+    const res = await n.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD }, headers: from("IE") });
+    assert.equal(res.json.mfa_required, true, "new device plus recent failures should need a code");
+    assert.deepEqual(res.json.risk, ["new_device", "recent_failures"]);
+    const u = client(base);
+    await withOwner((c) => c.query(`delete from auth.login_events where email = $1 and outcome = 'bad_password'`, [EMAIL]));
+    const unknown = await u.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD }, headers: from("NONE") });
+    assert.equal(unknown.json.ok, true, "an unknown address must not count as abroad");
+  });
+
+  await test("home countries are a site setting with a strict shape", async () => {
+    const bad = await mfaAdmin.fetch("/api/settings", { method: "PATCH", body: { home_countries: "ireland" } });
+    assert.equal(bad.status, 400);
+    const ok = await mfaAdmin.fetch("/api/settings", { method: "PATCH", body: { home_countries: "ie, gb" } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.equal(ok.json.home_countries, "IE,GB");
+    const s = client(base);
+    const gb = await s.fetch("/api/session", { method: "POST", body: { email: "mfasup@hut.example", password: PASSWORD }, headers: from("GB") });
+    assert.notEqual(gb.status, 403, "GB is home now and must not be refused");
+    await mfaAdmin.fetch("/api/settings", { method: "PATCH", body: { home_countries: "IE" } });
   });
 
   console.log("\n== staff management ==");
