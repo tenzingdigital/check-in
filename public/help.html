@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<title>CheckSteady — Help</title>
+<link rel="stylesheet" href="/app-common.css">
+<style>
+  /* The guide: plain reading on a phone, in the app's own palette. Nothing
+     here is interactive beyond links, so there is no script on this page. */
+  .guide { max-width: 720px; margin: 0 auto; padding: 0 16px 64px; }
+  .guide h1 { font-size: 26px; letter-spacing: -0.01em; margin: 18px 0 6px; }
+  .guide h2 { font-size: 20px; margin: 34px 0 8px; padding-top: 18px; border-top: 1px solid var(--line); letter-spacing: -0.01em; }
+  .guide h3 { font-size: 15.5px; margin: 18px 0 6px; }
+  .guide p, .guide li { font-size: 15px; line-height: 1.55; }
+  .guide p { margin: 8px 0; }
+  .guide ul, .guide ol { padding-left: 20px; margin: 6px 0; }
+  .guide li + li { margin-top: 4px; }
+  .guide .lede { color: var(--muted); font-size: 15px; }
+  .guide kbd, .guide .ui { font: inherit; font-weight: 650; color: var(--text); white-space: nowrap; }
+  .guide .step { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; margin: 8px 0; }
+  .guide .step b { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-size: 13px; }
+  .guide .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 10px 0; box-shadow: var(--lift); }
+  .guide .card b { display: block; margin-bottom: 4px; }
+  .guide .toc { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 12px 0 0; padding: 0; list-style: none; }
+  .guide .toc a { display: block; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); text-decoration: none; color: var(--text); font-weight: 600; font-size: 14px; box-shadow: var(--lift); }
+  .guide .toc small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .guide .who { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); vertical-align: middle; margin-left: 6px; }
+  .guide .gate { color: var(--accent); font-weight: 650; }
+  .guide .register { color: var(--ok); font-weight: 650; }
+  .guide .warn { border-left: 3px solid var(--warn); padding-left: 12px; color: var(--muted); }
+  .guide .top { display: inline-block; margin-top: 10px; font-size: 13px; }
+  .guide details { margin: 8px 0; }
+  .guide summary { cursor: pointer; font-weight: 600; font-size: 15px; padding: 8px 0; }
+  .guide details p { margin: 4px 0 8px; }
+  @media (max-width: 480px) { .guide .toc { grid-template-columns: 1fr; } }
+  @media print { header, .guide .top, .guide .toc { display: none !important; } .guide h2 { break-before: page; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">CheckSteady<small>Help and guide</small></div>
+    <nav class="viewswitch" aria-label="Go to">
+      <a href="/index.html">Gate</a>
+      <a href="/checkin.html">Daily register</a>
+      <a href="/admin.html">Admin</a>
+    </nav>
+  </div>
+</header>
+
+<main class="guide" id="top">
+  <h1>How CheckSteady works</h1>
+  <p class="lede">Written so that a new staff member can start on a shift with no training. Each part is a task, in the order you meet it. Two things to know before anything else: the <span class="gate">Gate</span> records people passing the door, and the <span class="register">Daily register</span> records the once-a-day check-in. They are different acts, and the app keeps them apart on purpose.</p>
+
+  <ul class="toc">
+    <li><a href="#start">Start here<small>Logging in, choosing a screen, who can do what</small></a></li>
+    <li><a href="#gate">The gate<small>Sign in and out, tiles, the log</small></a></li>
+    <li><a href="#register">The daily register<small>Today's check-in, missed days, ID numbers</small></a></li>
+    <li><a href="#rollcall">Roll call and evacuation<small>Drills, marking people safe, several phones</small></a></li>
+    <li><a href="#admin">Admin<small>Residents, import, buildings, reports, staff, settings</small></a></li>
+    <li><a href="#offline">Working offline<small>What happens when the connection drops</small></a></li>
+    <li><a href="#trouble">When something goes wrong<small>Locked out, codes, refusals</small></a></li>
+    <li><a href="#privacy">Privacy on one page<small>What is held, who sees it, how long</small></a></li>
+  </ul>
+
+  <h2 id="start">Start here</h2>
+  <h3>Logging in</h3>
+  <p>Open the site on any phone, tablet or computer and enter your email and password. If you have never had a password, use <span class="ui">Forgot your password?</span> and a link arrives by email; it works once and for a day.</p>
+  <p>Supervisors and administrators may be asked for a six-digit code from their email after the password, if the site requires it or the login looks unusual. Type the code; tick <span class="ui">Trust this device</span> only on your own phone, never on a shared terminal.</p>
+  <h3>Which screen am I on?</h3>
+  <p>The first time you log in on a device you are asked <span class="ui">What are you recording?</span> Pick the job for this terminal. You can switch at any time with the pill at the top of the screen: <span class="gate">blue</span> is the gate, <span class="register">green</span> is the daily register. The colour follows you onto the buttons and the swipe strips, so you always know which record you are writing.</p>
+  <h3>Who can do what</h3>
+  <div class="card"><b>Guard</b> Records at the gate and on the register, runs a roll call, reads the log. Sees names, ages and states, never a date of birth.</div>
+  <div class="card"><b>Supervisor</b> Everything a guard does, plus adding and editing residents, importing a spreadsheet, buildings and rooms, and exporting reports.</div>
+  <div class="card"><b>Admin</b> Everything a supervisor does, plus staff accounts, the site's settings and feature switches, a resident's full record export and erasure, and the log of who viewed which record.</div>
+  <p>A refusal always says so in words. If a button does nothing for you, it is not yours to press, and the person who can is named in the message.</p>
+  <h3>The screen explains itself</h3>
+  <p>Hold a tile or a tab for a sentence about what it counts. A round <span class="ui">?</span> beside a label opens the same kind of note. The first time you open each screen on a device, a short card at the top says the three things that matter; tap <span class="ui">Got it</span> and it never returns.</p>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="gate">The gate <span class="who">every staff member</span></h2>
+  <p>The gate answers one question: who is on site right now? Every sign-in and sign-out is a movement with a time and your name on it.</p>
+  <h3>Sign someone in or out</h3>
+  <div class="step"><b>1</b><span>Find the person. The whole list is on screen; type part of a name to filter. Spelling, accents and name order are forgiven.</span></div>
+  <div class="step"><b>2</b><span>Look at the person. The app records that you checked; it does not check for you.</span></div>
+  <div class="step"><b>3</b><span>Swipe the card <span class="ui">right</span> to sign IN, <span class="ui">left</span> to sign OUT. The strip behind the card says which. Or tap the name and use the <span class="ui">Sign IN</span> and <span class="ui">Sign OUT</span> buttons.</span></div>
+  <p>The card updates the moment the movement is recorded. Nothing can be edited afterwards: a mistake is corrected by recording the opposite movement, and both stay on the log.</p>
+  <h3>The three tiles</h3>
+  <p><span class="ui">On site</span>, <span class="ui">Off site</span> and <span class="ui">Moved today</span> count the list below them. Tap a tile to see only those residents; tap it again for everyone. The line under the search box says which filter is on.</p>
+  <h3>The log</h3>
+  <p>The <span class="ui">Log</span> tab lists every movement for a day, newest first, with who recorded it. Pick another date at the top to look back.</p>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="register">The daily register <span class="who">every staff member</span></h2>
+  <p>The register answers a different question: has this resident presented today? The rule is one check-in per calendar day, midnight to midnight in the site's time zone. Being signed in at the gate does not count; the check-in is its own act.</p>
+  <h3>Record a check-in</h3>
+  <div class="step"><b>1</b><span>The list opens on <span class="ui">Not seen</span>: residents required today who have not checked in yet. Type a name to find anyone, seen or not.</span></div>
+  <div class="step"><b>2</b><span>Look at the person, then swipe the card either way, or tap the name and press <span class="ui">Check in</span>.</span></div>
+  <div class="step"><b>3</b><span>The card drops off the Not seen list and the tile counts change. A second check-in on the same day is recorded but changes nothing.</span></div>
+  <h3>The tiles</h3>
+  <p><span class="ui">Not seen</span> is today's work. <span class="ui">Missed days</span> is residents with a day they were required and not seen, worst first; it is always yesterday or earlier, because a day only closes at midnight. <span class="ui">Seen today</span> is who has already checked in.</p>
+  <h3>Under 18s</h3>
+  <p>Residents under the site's adult age are listed but not required. Their cards say so, and they never appear under Missed days.</p>
+  <h3>The detail sheet</h3>
+  <p>Tap a name for the sheet: the identity document type and number, the last 30 days as a strip (green seen, red missed, grey not required), and a note when a house rule applies, such as a run of missed nights. The note states the rule and the facts; it never gives a verdict. Supervisors and admins can add or change the ID number here.</p>
+  <p class="warn">The ID number is shown on the sheet only, never in a list, and every opening of the sheet is logged with your name. That is by design: an inspector can ask who looked at a record.</p>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="rollcall">Roll call and evacuation <span class="who">every staff member</span></h2>
+  <p>On the gate, the <span class="ui">Roll call</span> tab lists everyone recorded on site, by building, with people who need assistance first. It appears when the site has the evacuation feature on.</p>
+  <h3>Run a drill or a real roll call</h3>
+  <div class="step"><b>1</b><span>Tap <span class="ui">Start a drill</span> or <span class="ui">Roll call now</span>. Every other warden's phone shows the same roll call within a few seconds.</span></div>
+  <div class="step"><b>2</b><span>At the assembly point, tap <span class="ui">Safe</span> beside each person you can see. A tick made on one phone appears on the others; a person is counted once however many wardens tick them.</span></div>
+  <div class="step"><b>3</b><span>The amber line says how many people needing assistance are still to find. Tap it to show only them; tap again for everyone.</span></div>
+  <div class="step"><b>4</b><span>Tap <span class="ui">End</span>. If people are still unaccounted for the app asks you to confirm. The drill is kept as a record with who was accounted for, by whom, and when.</span></div>
+  <p><span class="ui">Print the evacuation list</span> gives a paper copy per building for the fire panel, with the assistance needs shown.</p>
+  <p class="warn">With no connection, each phone keeps its own ticks and they merge when the network returns. Two phones cannot see each other's ticks while both are offline.</p>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="admin">Admin <span class="who">supervisors and admins</span></h2>
+  <h3>Residents</h3>
+  <p><span class="ui">Add</span> takes a first name, last name and date of birth, and optionally the ID document, a room and an evacuation need. The date of birth is used only for the adult rule and is never shown to guards.</p>
+  <p>Tap a resident for the edit sheet: change details, move rooms, set an evacuation need, link family members, mark them <span class="ui">departed</span> when they leave (the record stays for the retention period), or as an admin export or erase the whole record.</p>
+  <h3>Import a spreadsheet</h3>
+  <div class="step"><b>1</b><span>Save your list as a CSV file with headings: First name, Last name, Date of birth, and optionally ID type, ID number, Building, Floor, Room, Evacuation need. <a href="/resident-import-template.csv" download>Download the template</a>.</span></div>
+  <div class="step"><b>2</b><span><span class="ui">Import</span>, choose the file. Every line gets a verdict: ready, already on the register, or the problem to fix, such as a date that does not exist or a room the site does not have.</span></div>
+  <div class="step"><b>3</b><span>Tap <span class="ui">Import N residents</span>. Only the ready lines are added. Fix the sheet and import it again: anyone already here is skipped, never duplicated.</span></div>
+  <p>Dates can be written day first (14/03/1988) or year first (1988-03-14). The evacuation column can be words, such as "needs help to move" or "wheelchair".</p>
+  <h3>Buildings and rooms</h3>
+  <p>Describe the site once: buildings, floors and room numbers as painted on the doors, with a capacity. Assign residents to rooms on their edit sheet. The tab then shows occupancy per room and who is on site, which is the list a fire officer asks for.</p>
+  <h3>Reports</h3>
+  <p>The daily register, attendance, the movement log and the drill record for a date range; occupancy and the evacuation list as they stand. Each can be viewed and printed, or downloaded as a spreadsheet. A reason is required and every export is logged with it. Administrators also have <span class="ui">Who viewed which record</span>.</p>
+  <h3>Staff <span class="who">admins</span></h3>
+  <p>Invite a staff member with their email and role. They receive a link to choose their own password; nobody is ever told a password. Disable an account when someone leaves: their sessions end at once. Roles can be changed at any time; you cannot demote or disable yourself.</p>
+  <h3>Settings <span class="who">admins</span></h3>
+  <ul>
+    <li><b>Register rules</b>: the adult age, the hour after which "not seen" turns amber, and the house rules for consecutive missed nights and days absent in a window.</li>
+    <li><b>Features for this site</b>: buildings, evacuation and households are off until turned on here. Turning one off hides its screens; nothing recorded is deleted.</li>
+    <li><b>Retention</b>: how long movements and the register are kept. The IPAS policy says six months for the register; the audit trail and access log follow it.</li>
+    <li><b>Security</b>: the idle lock, whether supervisors and admins need an emailed code, and the home countries a login is expected from.</li>
+  </ul>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="offline">Working offline</h2>
+  <p>The gate and the register keep working when the connection drops. The pill in the header changes from <span class="ui">Online</span> to <span class="ui">Offline</span>; the list you last saw stays on screen, and anything you record is queued and marked <span class="ui">Queued</span> on the card.</p>
+  <p>When the connection returns the queue is sent in order, with the time you actually recorded it, and the cards update. A queued event survives a logout and is sent the next time anyone logs in on that device. Events older than the site's sync window are refused and listed so you can re-record them.</p>
+  <p>The copy of the register held on the device is encrypted. Logging out does not delete queued events, on purpose; locking the screen after idle minutes does not either.</p>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="trouble">When something goes wrong</h2>
+  <details><summary>I am locked out after wrong passwords</summary><p>Five minutes, then try again. Use <span class="ui">Forgot your password?</span> if you are unsure of it.</p></details>
+  <details><summary>The screen locked itself</summary><p>The idle lock: after the site's idle minutes with no activity the screen returns to the login. Nothing was lost; log in again.</p></details>
+  <details><summary>The code by email did not arrive</summary><p>Codes last ten minutes. Check the spam folder, then start again from the login screen for a new one. If the site cannot send email at all, the login is refused with the security contact address in the message: tell your administrator.</p></details>
+  <details><summary>"Only an administrator can…" or "Not authorised"</summary><p>The action is for a higher role. Ask a supervisor or admin; the message names which.</p></details>
+  <details><summary>My login was refused because of where I am</summary><p>Supervisors and admins can only log in from the site's home countries. If you are travelling, ask an admin to add the country under Settings, or use a guard account.</p></details>
+  <details><summary>A resident is missing from the list</summary><p>They may be marked departed: an admin can see them under Residents with the Departed filter and reactivate them. Or they were never added: Add or Import.</p></details>
+  <details><summary>Something says Queued and stays that way</summary><p>The device has no connection. Check the pill in the header. The event is safe and will be sent when the connection returns.</p></details>
+  <details><summary>The nightly job is late</summary><p>A banner appears on the register when the midnight close-out has not run. Missed days may be behind by a day until it does. Tell your administrator; it is a hosting matter, not a data one.</p></details>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="privacy">Privacy on one page</h2>
+  <ul>
+    <li><b>Held about a resident</b>: name, date of birth, ID document type and number, room, evacuation need, household, and every movement, check-in and register day.</li>
+    <li><b>Who sees what</b>: guards see names, ages and states; the date of birth is for supervisors and admins; the ID number is on the detail sheet only; the evacuation need is on the roll call and evacuation list only.</li>
+    <li><b>Kept for</b>: movements 90 days, the register six months, both set by the site. The audit trail and the access log follow the register.</li>
+    <li><b>On the record</b>: every change an administrator makes, every export and its reason, every opening of a resident's record, and every login attempt.</li>
+    <li><b>A resident's rights</b>: an admin can export everything held about a person as one file, or erase them entirely, leaving only a proof that an erasure happened.</li>
+    <li><b>Where</b>: one provider, in Frankfurt, in the European Union. Nothing is sent to a third party.</li>
+  </ul>
+  <p>The full statement is in the site's privacy notice and data processing agreement.</p>
+  <a class="top" href="#top">Back to the top</a>
+</main>
+</body>
+</html>

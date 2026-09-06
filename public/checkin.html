@@ -96,6 +96,7 @@
     <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
     <button id="loginBtn" class="btn" type="submit">Log in</button>
   </form>
+  <p class="hint centre"><a href="/help.html">New here? How CheckSteady works</a></p>
 </section>
 
 <!-- ========================= APP ========================= -->
@@ -112,15 +113,16 @@
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
       <span id="netState" class="net" role="status" hidden></span>
+<a class="help" href="/help.html" aria-label="Help and guide" title="Help">?</a>
       <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
     <!-- The three tiles are the questions a manager asks; tapping one shows
          exactly those residents in the Check in list. Tap again for all. -->
   </header>
     <div class="stats">
-      <button class="stat" type="button" data-filter="not_seen" aria-pressed="false"><b id="statNotSeen">–</b><span>Not seen</span></button>
-      <button class="stat" type="button" data-filter="breach"   aria-pressed="false"><b id="statOpenBreach">–</b><span>Missed days</span></button>
-      <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false"><b id="statCheckins">–</b><span>Seen today</span></button>
+      <button class="stat" type="button" data-filter="not_seen" aria-pressed="false" data-tip="Residents required today who have not checked in yet. This is the list the register opens on; a check-in drops the card off it. Hold any tile for this note."><b id="statNotSeen">–</b><span>Not seen</span></button>
+      <button class="stat" type="button" data-filter="breach"   aria-pressed="false" data-tip="Residents with a day they were required and not seen, worst first. The day closes at midnight, so this is yesterday and earlier, never today."><b id="statOpenBreach">–</b><span>Missed days</span></button>
+      <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false" data-tip="Residents already checked in today. Tap to see them; tap again for the default list."><b id="statCheckins">–</b><span>Seen today</span></button>
     </div>
 
   <main class="wrap">
@@ -752,6 +754,12 @@ async function enterApp() {
 
   $("login").hidden = true;
   $("app").hidden = false;
+  mountTips();
+  mountCoach({ app: "register", title: "The daily register in three lines", before: "searchResults", points: [
+    "Swipe a card either way to record today's check-in. The card drops off the Not seen list.",
+    "The list opens on who has not been seen today. Type a name to find anyone.",
+    "Tap a name for the ID number and the last 30 days.",
+  ] });
 
   $("q").focus();
   refreshSummary();

@@ -26,6 +26,7 @@ const SHELL = [
   "/checkin.html",
   "/admin.html",
   "/org.html",
+  "/help.html",
   "/app-common.css",
   "/app-common.js",
   "/offline.js",

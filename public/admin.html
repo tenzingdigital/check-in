@@ -112,6 +112,7 @@
     <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
     <button id="loginBtn" class="btn" type="submit">Log in</button>
   </form>
+  <p class="hint centre"><a href="/help.html">New here? How CheckSteady works</a></p>
 </section>
 
 <!-- ========================= APP ========================= -->
@@ -129,6 +130,7 @@
         <a href="/org.html" id="orgLink" hidden>Organisation</a>
       </nav>
       <span id="netState" class="net" hidden></span>
+<a class="help" href="/help.html" aria-label="Help and guide" title="Help">?</a>
       <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
   </header>
@@ -252,7 +254,7 @@
             <div><label class="lbl" for="rpFrom">From</label><input id="rpFrom" class="field" type="date" required></div>
             <div><label class="lbl" for="rpTo">To</label><input id="rpTo" class="field" type="date" required></div>
           </div>
-          <div><label class="lbl" for="rpReason">Reason for the export</label><input id="rpReason" class="field" type="text" maxlength="200" required placeholder="e.g. HIQA inspection 12 September"></div>
+          <div><label class="lbl" for="rpReason">Reason for the export <button class="tip" type="button" data-tip="Every export is written to the audit record with this reason and the date range. An inspector or a data-protection request can ask why a report was run, so say what it was for." aria-label="Why a reason is needed">?</button></label><input id="rpReason" class="field" type="text" maxlength="200" required placeholder="e.g. HIQA inspection 12 September"></div>
           <div id="reportList" class="list"></div>
         </form>
       </div>
@@ -272,7 +274,7 @@
         <h2>Add a staff account</h2>
         <div class="grid2">
           <div><label class="lbl" for="sfName">Full name</label><input id="sfName" class="field" type="text" required></div>
-          <div><label class="lbl" for="sfRole">Role</label>
+          <div><label class="lbl" for="sfRole">Role <button class="tip" type="button" data-tip="Guard: records at the gate and on the register. Supervisor: also manages residents, buildings and reports. Admin: also manages staff and settings, exports and erases records, and reads the access log." aria-label="What each role can do">?</button></label>
             <select id="sfRole" class="field">
               <option value="guard">guard</option>
               <option value="supervisor">supervisor</option>
@@ -316,11 +318,11 @@
         <p class="hint flush">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
 
         <h2 class="mt6">Security</h2>
-        <div><label class="lbl" for="stHome">Home countries</label><input id="stHome" class="field" type="text" required pattern="[A-Za-z]{2}(,[A-Za-z]{2})*" placeholder="IE">
+        <div><label class="lbl" for="stHome">Home countries <button class="tip" type="button" data-tip="Two-letter codes, comma-separated. A supervisor or admin logging in from anywhere else is refused; a guard is asked for an emailed code." aria-label="What home countries do">?</button></label><input id="stHome" class="field" type="text" required pattern="[A-Za-z]{2}(,[A-Za-z]{2})*" placeholder="IE">
           <p class="hint under">Two-letter codes, comma-separated. A supervisor or administrator logging in from anywhere else is refused; a guard from elsewhere must type an emailed code. Unknown addresses are not treated as abroad.</p></div>
         <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login. Needs email configured on the service.</span></label>
 
-        <h2 class="mt6">Features for this site</h2>
+        <h2 class="mt6">Features for this site <button class="tip" type="button" data-tip="Each switch is off until you turn it on here, so a centre sees only what it uses. Turning one off hides the screens; nothing already recorded is deleted." aria-label="About feature switches">?</button></h2>
         <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
         <label class="check"><input id="stFeatHouseholds" type="checkbox"> <span><b>Households.</b> Link family members so a child appears with a parent on the roll call and a room's occupants read as a family. Holds only which residents share a household.</span></label>
         <label class="check"><input id="stFeatEvac" type="checkbox"> <span><b>Evacuation.</b> An evacuation-need code on each record (fixed list, no free text) and a Roll call tab on the gate. Turning this on means the site holds a special-category field: record it in the DPIA.</span></label>
@@ -1197,6 +1199,12 @@ async function enterApp() {
   $("tabStaff").hidden = !canStaff();
   $("tabSettings").hidden = !canStaff();
   $("orgLink").hidden = !profile.platform_admin;
+  mountTips();
+  mountCoach({ app: "admin", title: "Admin in three lines", before: "residentList", points: [
+    "Residents: add one, or import a whole spreadsheet with a preview of every line first.",
+    "Reports need a reason and are logged. Staff are invited by email and never handed a password.",
+    "Settings: turn features on per site, set retention, and choose who needs an email code to log in.",
+  ] });
   applyFeatures();
   if (featureOn("feature_buildings")) loadBuildings({ quiet: true });
   selectTab("residents");

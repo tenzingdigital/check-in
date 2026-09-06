@@ -91,6 +91,7 @@ public/                 the ONLY directory served publicly
   index.html            the gate app — Search and Log
   checkin.html          the check-in app — the register, filtered by its tiles
   admin.html            the organisation's page — residents (supervisors) and staff (admins)
+  help.html             the guide: every screen, task by task, for a person with no training
   app-common.css        styles shared by both front ends
   app-common.js         the API client and helpers shared by both
   offline.js            encrypted register copy, event queue, replay — see "Working offline"
@@ -111,6 +112,7 @@ render.yaml             the blueprint: web service + Postgres + cron, all Frankf
 check.sh                one command: parse everything, then both suites
 docs/GDPR.md            what personal data is held, why, and for how long
 docs/PERMISSIONS.md     who may do what, role by role — generated from test/permissions.js, which the HTTP suite enforces
+docs/ONBOARDING-REVIEW.md  using the product with no training: what is in place, what to do next
 docs/TECH-STACK.md      stack options, costs, and why this one
 docs/SECURITY-ROADMAP.md  hardening, privacy and resilience roadmap, mapped to ISO 27001
 ```
@@ -393,6 +395,12 @@ out of the two working apps:
   people write them (DD/MM/YYYY or YYYY-MM-DD); the evacuation column as
   words ("needs help to move"). Up to 200 lines per request; the page
   sends a bigger sheet in batches.
+- **Help without training**: a round ? beside Log out opens the guide
+  (`/help.html`), written task by task and cached for offline reading;
+  hold a tile or a tab for a sentence about what it counts; a ? beside a
+  label explains the rule behind it; and the first visit to each app on a
+  device shows a three-line card with "Got it". `docs/ONBOARDING-REVIEW.md`
+  is the review behind it.
 - **Who viewed which record** (admins, under Reports): every opening of a
   resident's detail sheet on the register, of their edit sheet, and every
   export, with who and when. Written by the server with the read itself,

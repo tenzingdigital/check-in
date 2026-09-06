@@ -72,6 +72,7 @@
     <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
     <button id="loginBtn" class="btn" type="submit">Log in</button>
   </form>
+  <p class="hint centre"><a href="/help.html">New here? How CheckSteady works</a></p>
 </section>
 
 <!-- ========================= APP ========================= -->
@@ -88,6 +89,7 @@
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
       <span id="netState" class="net" role="status" hidden></span>
+<a class="help" href="/help.html" aria-label="Help and guide" title="Help">?</a>
       <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
   </header>
@@ -95,9 +97,9 @@
          residents, tap it again for everyone. Counted from the list itself,
          so the numbers and the list under them cannot disagree. -->
     <div class="stats">
-      <button class="stat ok" type="button" data-filter="in"    aria-pressed="false"><b id="statOnSite">–</b><span>On site</span></button>
-      <button class="stat"    type="button" data-filter="out"   aria-pressed="false"><b id="statOffSite">–</b><span>Off site</span></button>
-      <button class="stat"    type="button" data-filter="today" aria-pressed="false"><b id="statToday">–</b><span>Moved today</span></button>
+      <button class="stat ok" type="button" data-filter="in"    aria-pressed="false" data-tip="Residents whose last door movement was IN. Tap to see only them; tap again for everyone. Hold any tile for this note."><b id="statOnSite">–</b><span>On site</span></button>
+      <button class="stat"    type="button" data-filter="out"   aria-pressed="false" data-tip="Residents whose last movement was OUT, or who have never been signed in at the door."><b id="statOffSite">–</b><span>Off site</span></button>
+      <button class="stat"    type="button" data-filter="today" aria-pressed="false" data-tip="Anyone with a door movement today, in or out. The Log tab lists each movement with the time and who recorded it."><b id="statToday">–</b><span>Moved today</span></button>
     </div>
 
   <main class="wrap">
@@ -106,8 +108,8 @@
 
     <nav class="tabs" role="tablist">
       <button role="tab" id="tabSearch" aria-selected="true"  aria-controls="panelSearch">Search</button>
-      <button role="tab" id="tabLog"    aria-selected="false" aria-controls="panelLog">Log</button>
-      <button role="tab" id="tabRoll"   aria-selected="false" aria-controls="panelRoll" hidden>Roll call</button>
+      <button role="tab" id="tabLog"    aria-selected="false" aria-controls="panelLog" data-tip="Every door movement for a day, newest first, with who recorded it. Pick another date at the top.">Log</button>
+      <button role="tab" id="tabRoll"   aria-selected="false" aria-controls="panelRoll" hidden data-tip="Everyone recorded on site, by building, for a drill or a real evacuation. Works on every warden's phone at once and with no connection.">Roll call</button>
     </nav>
 
     <!-- ---- search ---- -->
@@ -743,6 +745,12 @@ async function enterApp() {
   $("tabRoll").hidden = !settings?.feature_evacuation;
   loadRoll();
   syncRoll();
+  mountTips();
+  mountCoach({ app: "gate", title: "The gate in three lines", before: "searchResults", points: [
+    "Swipe a card right to sign someone IN, left to sign OUT. Or tap the name and use the buttons.",
+    "The three tiles at the top filter the list. Tap one, tap it again for everyone. Hold a tile for what it counts.",
+    "Today's check-in is a different act. It lives on the Daily register, one tap away at the top.",
+  ] });
 
   $("login").hidden = true;
   $("app").hidden = false;

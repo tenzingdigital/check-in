@@ -379,6 +379,85 @@ function nudgeFirstCard(container, app) {
   } catch (_) { /* storage blocked */ }
 }
 
+// Tips: one sentence that explains a control, on demand.
+//
+// Two ways in. A small "?" button (class tip, data-tip="…") next to a label
+// opens a bubble on tap; anything else with a data-tip (a tile, a tab) shows
+// it on a long press, and on hover where there is a mouse. Delegated on the
+// document, so lists that re-render keep working. One bubble for the page.
+function mountTips() {
+  if (mountTips.done) return;
+  mountTips.done = true;
+  const pop = document.createElement("div");
+  pop.id = "tipPop"; pop.setAttribute("role", "tooltip"); pop.hidden = true;
+  document.body.appendChild(pop);
+  const hover = window.matchMedia && window.matchMedia("(hover: hover)").matches;
+  let shownFor = null;
+  const hide = () => { pop.hidden = true; shownFor = null; };
+  const show = (el) => {
+    const text = el.dataset.tip; if (!text) return;
+    pop.textContent = text; pop.hidden = false; shownFor = el;
+    const r = el.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    const vw = document.documentElement.clientWidth;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(12, Math.min(left, vw - w - 12));
+    // Through the CSSOM: a style="" attribute would be refused by the CSP.
+    pop.style.left = `${left + window.scrollX}px`;
+    pop.style.top = `${r.bottom + window.scrollY + 8}px`;
+  };
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest(".tip");
+    if (t) { e.preventDefault(); e.stopPropagation(); if (shownFor === t) hide(); else show(t); return; }
+    if (e.target.closest("#tipPop")) return;
+    if (holdFired) { holdFired = false; e.preventDefault(); e.stopPropagation(); return; }
+    hide();
+  }, true);
+  // Long press on a tile or a tab.
+  let timer = null; let holdFired = false; let start = null;
+  document.addEventListener("pointerdown", (e) => {
+    const el = e.target.closest("[data-tip]:not(.tip)");
+    if (!el) return;
+    start = { x: e.clientX, y: e.clientY };
+    clearTimeout(timer);
+    timer = setTimeout(() => { holdFired = true; show(el); }, 500);
+  }, { passive: true });
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  document.addEventListener("pointerup", cancel, { passive: true });
+  document.addEventListener("pointercancel", cancel, { passive: true });
+  document.addEventListener("pointermove", (e) => { if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) cancel(); }, { passive: true });
+  if (hover) {
+    document.addEventListener("mouseover", (e) => { const el = e.target.closest("[data-tip]:not(.tip)"); if (el && el !== shownFor) show(el); });
+    document.addEventListener("mouseout", (e) => { const el = e.target.closest("[data-tip]:not(.tip)"); if (el && shownFor === el && !el.contains(e.relatedTarget)) hide(); });
+  }
+  document.addEventListener("focusin", (e) => { const el = e.target.closest("[data-tip]:not(.tip)"); if (el) show(el); });
+  document.addEventListener("focusout", (e) => { if (shownFor && shownFor === e.target) hide(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  window.addEventListener("scroll", hide, { passive: true });
+  window.addEventListener("resize", hide);
+}
+
+// The coach card: three sentences the first time someone opens an app on
+// this device, above the list, with a way to the full guide. Dismissed once,
+// gone for good — a person who has read it should never see it again.
+function mountCoach({ app, title, points, before }) {
+  const key = `coach:${app}`;
+  try { if (localStorage.getItem(key)) return; } catch (_) { return; }
+  const anchor = typeof before === "string" ? $(before) : before;
+  if (!anchor || $("coach")) return;
+  const el = document.createElement("section");
+  el.id = "coach"; el.className = "coach"; el.setAttribute("aria-label", "How this screen works");
+  el.innerHTML = `
+    <b>${esc(title)}</b>
+    <ul>${points.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>
+    <div class="row">
+      <button class="btn sm" type="button" id="coachOk">Got it</button>
+      <a class="btn ghost sm" href="/help.html#${esc(app)}">Open the guide</a>
+    </div>`;
+  anchor.parentNode.insertBefore(el, anchor);
+  $("coachOk").addEventListener("click", () => { try { localStorage.setItem(key, "1"); } catch (_) { /* private mode */ } el.remove(); });
+}
+
 // The second step for supervisors and admins at a site that requires it: a
 // six-digit code from the email. Injected into the login section on demand.
 function showMfa(challenge, onReady) {
