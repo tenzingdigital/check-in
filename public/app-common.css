@@ -27,6 +27,10 @@
        so on a dark phone the list does not read as part of the sheet. */
     --surface-raised: #1c2331;
     --scrim:     rgba(3, 6, 12, .64);
+    /* Depth: a hairline shadow under cards and tiles in daylight; none at
+       night, where the border does the work. */
+    --lift:      none;
+    --ring:      rgba(76, 141, 255, .28);
     color-scheme: dark;
   }
   @media (prefers-color-scheme: light) {
@@ -51,6 +55,8 @@
       --shadow:    rgba(16, 24, 40, .18);
       --surface-raised: #ffffff;
       --scrim:     rgba(16, 24, 40, .38);
+      --lift:      0 1px 2px rgba(16, 24, 40, .06), 0 1px 1px rgba(16, 24, 40, .03);
+      --ring:      rgba(29, 78, 216, .22);
       color-scheme: light;
     }
   }
@@ -69,7 +75,7 @@
   body { padding-bottom: env(safe-area-inset-bottom); }
 
   button, input, select { font: inherit; color: inherit; }
-  button { cursor: pointer; }
+  button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
 
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
@@ -122,7 +128,7 @@
 
   /* The job line: one sentence under the search box saying which of the two
      acts this screen records, and where the other one lives. */
-  .jobline { display: flex; gap: 8px; align-items: baseline; margin: 8px 2px 0; font-size: 13px; color: var(--muted); }
+  .jobline { display: flex; gap: 8px; align-items: baseline; margin: 8px 2px 0; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
   .jobline b { color: var(--text); white-space: nowrap; }
   .jobline b.gate     { color: var(--accent); }
   .jobline b.register { color: var(--ok); }
@@ -163,6 +169,7 @@
     flex: 1 1 0; min-width: 84px;
     background: var(--surface); border: 1px solid var(--line);
     border-radius: 10px; padding: 8px 10px;
+    box-shadow: var(--lift);
   }
   .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.15; }
   .stat span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
@@ -202,7 +209,10 @@
     background: var(--surface); color: var(--text);
     border: 1px solid var(--line); border-radius: 12px;
   }
-  .field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+  /* One ring, not two: the border takes the accent and a soft halo says
+     "this is where you are typing". The old outline-plus-border read as a
+     double frame. */
+  .field:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
   input[type="search"]::-webkit-search-cancel-button { filter: invert(.6); }
 
   /* ---- resident cards ---- */
@@ -249,6 +259,7 @@
     background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--radius); padding: 14px 16px;
     display: flex; align-items: center; gap: 12px;
+    box-shadow: var(--lift);
   }
   button.card:hover { border-color: var(--line-hover); }
   button.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -388,7 +399,7 @@
   .filterline .linkish { padding: 0; }
   /* Spacing variants, so no element needs a style="" attribute and the
      CSP can refuse inline styles altogether (style-src 'self'). */
-  .hint.tight  { margin: 8px 2px 0; }
+  .hint.tight  { margin: 6px 2px 0; font-size: 12px; }
   .hint.under  { margin: 4px 2px 0; }
   .hint.flush  { margin: 0; }
   .hint.lead   { margin: 0 2px 10px; }
@@ -494,6 +505,9 @@
          scroll under it never show through the gap below the header. */
       box-shadow: 0 0 0 8px var(--bg), 0 -6px 0 8px var(--bg), 0 10px 16px -6px var(--shadow);
     }
+    /* Two buttons side by side on a 390px screen: a label like "Save
+       settings" must fit on one line rather than folding into two. */
+    .actions .btn { padding: 16px 10px; font-size: 15px; white-space: nowrap; }
     .card { padding: 11px 13px; gap: 10px; }
     .card .name { font-size: 16px; }
     .card .meta { font-size: 12px; margin-top: 1px; }

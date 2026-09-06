@@ -365,3 +365,44 @@ verdict for every line before anything is written, and adds only the lines
 that are ready. Dates as written (DD/MM/YYYY); the evacuation column as
 words. The same sheet can be imported again after fixing the failures: a
 person already on the register is skipped, never duplicated.
+
+---
+
+## Style review — 6 September 2026
+
+A pass over the visual layer only: type, colour, depth, spacing and the
+small chrome around the lists, on a 390 px phone in both palettes. The
+structure from the UX review above is sound and was left alone; these are
+the things that made the screens look heavier or busier than they are.
+
+**Changed.**
+
+- *One focus ring, not two.* A field being typed in had an outline and an
+  accent border, one pixel apart, which read as a double frame. It is now
+  an accent border with a soft halo, in both palettes.
+- *Depth in daylight.* Cards, tiles and form panels carry a hairline shadow
+  in the light palette, so they sit on the page instead of floating as
+  outlined boxes. At night the border does the work and there is no shadow.
+- *The two lines above the list.* The job line and "verify the person
+  first" are the same words in a smaller, tighter setting, and the job
+  line's copy is shorter. The first card arrives about forty pixels sooner.
+- *Buttons that fold.* "Save settings" wrapped to two lines beside "Discard
+  changes" on a phone; action buttons no longer wrap a label.
+- *Number fields the width of the screen.* A retention setting of 90 days
+  had a full-width box. Number fields on the admin forms are now the width
+  of a number; the label above them still runs full width.
+- *The grey flash on tap.* iOS highlights tapped buttons with a grey wash;
+  it is switched off, so a swipe or a tap shows only the state the app
+  draws.
+
+**Looked at and left.**
+
+- The two-level navigation (filled pill for which app, underlined text for
+  which view) is deliberate and stays.
+- Card height on the phone was already trimmed in the UX pass; another cut
+  would cost the tap target.
+- The red "Not yet seen" on every card in the screenshots is the seed data
+  (nobody has ever checked in); on a live register the state is grey until
+  the due hour and amber after it, and red only for a missed day.
+- The gate's blue and the register's green are the product's memory aid
+  and stay exactly as they are.
