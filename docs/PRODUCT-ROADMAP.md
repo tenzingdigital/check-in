@@ -65,6 +65,12 @@ decision for a customer to make in writing, with a DPIA behind it.
   and are kept as a record of the drill or the incident.
 - A printable evacuation list per building for the fire panel, refreshed
   from the same data.
+- Several wardens, several phones, one list (6 September): a roll call
+  started on one phone appears on every other phone's Roll call tab, each
+  warden's ticks show on the others within about five seconds, a tick is
+  per resident so two wardens ticking the same person is one tick, and
+  ending it on one phone ends it on all. Offline phones keep ticking and
+  send when the connection returns.
 
 ## Stage 3 — Households
 

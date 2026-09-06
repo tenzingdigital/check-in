@@ -380,6 +380,10 @@ out of the two working apps:
   occupancy and the evacuation list as they stand, each as a CSV download
   or a printable page. A reason is required and every export is on the
   audit record with the range.
+- **Roll call on several phones at once**: every warden's Roll call tab
+  shows the same drill, ticks made on one phone appear on the others within
+  about five seconds, and a tick is per resident so nobody is counted
+  twice. Ending the roll call on one phone ends it on all.
 - **Import from a spreadsheet** (supervisors and admins, Admin → Residents
   → Import): a CSV with first name, last name and date of birth, and
   optionally ID type and number, building, floor, room and evacuation need.

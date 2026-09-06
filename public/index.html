@@ -491,7 +491,7 @@ function selectTab(name) {
   }
   if (name === "search") $("q").focus();
   if (name === "log")    loadLog($("logDate").value || todayISODate());
-  if (name === "roll")   renderRoll();
+  if (name === "roll")   { renderRoll(); syncRoll(); }
 }
 
 /* ========================================================================
@@ -520,6 +520,7 @@ async function syncRoll() {
   if (!Offline.isOnline() || !state.settings?.feature_evacuation) return;
   const server = await guarded(() => apiGet("/api/roll-calls/active"), () => {});
   if (server === undefined) return;
+  const before = JSON.stringify(state.roll);
   if (server && server.id) {
     const marks = state.roll && state.roll.id === server.id ? state.roll.marks : {};
     for (const m of server.marks || []) marks[m.resident_id] = m.marked_at;
@@ -531,8 +532,18 @@ async function syncRoll() {
     if (!queued) state.roll = null;
   }
   saveRoll();
-  if (state.tab === "roll") renderRoll();
+  // Redraw only when another warden's tick (or an end) changed something,
+  // so the list under a thumb does not flicker every few seconds.
+  if (state.tab === "roll" && JSON.stringify(state.roll) !== before) renderRoll();
 }
+
+// Several wardens, several phones, one list: while the roll call tab is
+// open and online, ask every five seconds what the others have ticked. A
+// mark is per resident, so two wardens ticking the same person is one
+// tick, never two, and a roll call ended on one phone ends on all.
+setInterval(() => {
+  if (state.profile && state.tab === "roll" && Offline.isOnline() && state.settings?.feature_evacuation) syncRoll();
+}, 5000);
 
 async function rollRows() {
   let rows = state.allRows;
