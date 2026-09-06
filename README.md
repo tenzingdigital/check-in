@@ -110,6 +110,7 @@ seed-rooms.js           optional: puts every resident in a room, inventing build
 render.yaml             the blueprint: web service + Postgres + cron, all Frankfurt
 check.sh                one command: parse everything, then both suites
 docs/GDPR.md            what personal data is held, why, and for how long
+docs/PERMISSIONS.md     who may do what, role by role — generated from test/permissions.js, which the HTTP suite enforces
 docs/TECH-STACK.md      stack options, costs, and why this one
 docs/SECURITY-ROADMAP.md  hardening, privacy and resilience roadmap, mapped to ISO 27001
 ```
@@ -556,6 +557,16 @@ per email and IP, and 12-hour sessions.
 
 
 ## Verifying the security model
+
+**The permission matrix.** `docs/PERMISSIONS.md` is the written answer to
+"who may do what": every API action, one column per role. It is generated
+from `test/permissions.js` (`node tools/gen-permissions-doc.js`), and the
+HTTP suite makes every request in that file as every role and holds the
+server to the expectation, so the document cannot drift from the code:
+`./check.sh` fails if either changes without the other. A refusal is always
+a 403 with a message written for the person to read; a record that a role
+cannot see is a 404.
+
 
 ```bash
 npm test              # everything — this is check.sh

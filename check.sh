@@ -48,10 +48,13 @@ console.log('front ends parse and load nothing from a CDN');
 
 # node --check understands ESM from the file extension and the package type,
 # which vm.Script does not.
-for f in server.js database.js jobs.js staff.js seed-today.js seed-rooms.js lib/*.js routes/*.js test/*.test.js; do
+for f in server.js database.js jobs.js staff.js seed-today.js seed-rooms.js lib/*.js routes/*.js tools/*.js test/*.js; do
   node --check "$f" || { echo "FAIL: $f does not parse"; fail=1; }
 done
 [ "$fail" -eq 0 ] && echo "server, lib/, routes/ and test/ parse"
+
+step "The permission matrix document is current"
+node tools/gen-permissions-doc.js --check || fail=1
 
 if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/null 2>&1; then
   step "Database suite"

@@ -254,6 +254,20 @@ handed an empty table. Kept as long as the audit trail. Not logged, and
 documented as such: the gate's sheet (nothing beyond the list) and a
 sheet opened offline.
 
+### F16. Permissions were a habit, not a document — *matrix and test built 6 September, on the working branch*
+
+Nobody could point to one page saying what a guard, a supervisor and an
+administrator may each do; the answer was spread across row policies,
+function bodies and route code. `docs/PERMISSIONS.md` is now that page,
+generated from `test/permissions.js`, and the HTTP suite makes every
+request in that file as every role — logged out, guard, supervisor,
+admin, platform admin — and holds the server to the expectation. Writing
+the test found three inconsistencies, fixed the same day: some refusals
+came back as 400 or 404 rather than 403 (staff changes by a guard,
+deleting a building, a room or a resident), and adding rooms to a
+building that had just been removed was a 500. ISO 27001 A.5.15, A.5.18
+and A.8.3: the access-control policy, and the evidence it is applied.
+
 ### F14. Small things
 
 - *Done 4 September:* `style-src` is `'self'`; every `style=""` attribute is a

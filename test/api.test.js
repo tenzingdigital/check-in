@@ -1772,16 +1772,16 @@ async function main() {
       method: "POST",
       body: { email: "sneaky@hut.example", full_name: "Sneaky", role: "admin" },
     });
-    assert.equal(create.status, 400);
+    assert.equal(create.status, 403);
     assert.match(create.json.error, /administrator/);
 
     const list = await guardC.fetch("/api/staff");
     assert.equal(list.status, 200); // profiles are staff-visible by design
     const admin = list.json.find((s) => s.email === "head@hut.example");
     const demote = await guardC.fetch(`/api/staff/${admin.id}/role`, { method: "POST", body: { role: "guard" } });
-    assert.equal(demote.status, 404, "a guard's role change did not fail closed");
+    assert.equal(demote.status, 403, "a guard's role change did not fail closed");
     const disable = await guardC.fetch(`/api/staff/${admin.id}/active`, { method: "POST", body: { active: false } });
-    assert.equal(disable.status, 404, "a guard's deactivation did not fail closed");
+    assert.equal(disable.status, 403, "a guard's deactivation did not fail closed");
   });
 
   await test("a duplicate email and a bad address are refused cleanly", async () => {
@@ -1851,6 +1851,107 @@ async function main() {
     const lockout = await adminC.fetch(`/api/staff/${self.id}/active`, { method: "POST", body: { active: false } });
     assert.equal(lockout.status, 400);
     assert.match(lockout.json.error, /own account/);
+  });
+
+  console.log("\n== the permission matrix (test/permissions.js) ==");
+
+  await test("every row of the matrix holds for every role", async () => {
+    const matrix = require("./permissions");
+    const { ROLES, expectFor } = matrix;
+    // Roles. The guard and supervisor clients exist; an admin and a platform
+    // admin are made for this.
+    const mkAdmin = async (email, platform) => {
+      const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [email, PASSWORD, "Matrix Admin", "admin"]));
+      if (platform) await withOwner((c) => c.query(`update auth.users set platform_admin = true where id = $1`, [rows[0].id]));
+      const cl = client(base);
+      return settle(cl, await cl.fetch("/api/session", { method: "POST", body: { email, password: PASSWORD } }), email);
+    };
+    // Fresh sessions for the guard and the supervisor: the staff tests above
+    // end sessions on purpose (a disabled account, a password reset).
+    // A login here may be judged unusual (a new device for an account that
+    // took bad passwords in the lockout tests above) and asked for the code.
+    const settle = async (cl, login, email) => {
+      assert.equal(login.status, 200, `${email}: ${login.text}`);
+      if (login.json.mfa_required) {
+        const done = await cl.fetch("/api/session/mfa", { method: "POST", body: { challenge: login.json.challenge, code: lastCode() } });
+        assert.equal(done.status, 200, `${email} code: ${done.text}`);
+      }
+      return cl;
+    };
+    const relogin = async (email) => {
+      const cl = client(base);
+      return settle(cl, await cl.fetch("/api/session", { method: "POST", body: { email, password: PASSWORD } }), email);
+    };
+    // The email-code tests above leave the switch on; the matrix is about
+    // roles, not the second step, so a login here must be one step.
+    await withOwner((c) => c.query(`update public.app_settings set mfa_email = false where id`));
+    const guardC = await relogin(EMAIL);
+    const supM = await relogin("sup2@hut.example");
+    const clients = { anon: client(base), guard: guardC, supervisor: supM, admin: await mkAdmin("matrixadmin@hut.example", false), platform: await mkAdmin("matrixplatform@hut.example", true) };
+    const EMAILS = { guard: EMAIL, supervisor: "sup2@hut.example", admin: "matrixadmin@hut.example", platform: "matrixplatform@hut.example" };
+
+    // Fixtures, remade on demand for the rows that consume them.
+    const fx = { today: siteToday() };
+    const makers = {
+      resident: async () => {
+        const n = `Row${Math.floor(Math.random() * 1e6)}`;
+        const r = await supM.fetch("/api/residents", { method: "POST", body: { first_name: "Matrix", last_name: n, date_of_birth: "1990-01-01" } });
+        assert.equal(r.status, 201, r.text);
+        fx.residentId = r.json.id; fx.residentName = `Matrix ${n}`;
+      },
+      building: async () => {
+        const b = await supM.fetch("/api/buildings", { method: "POST", body: { name: `Block ${Math.floor(Math.random() * 1e6)}` } });
+        assert.equal(b.status, 201, b.text);
+        fx.buildingId = b.json.id;
+      },
+      room: async () => {
+        const r = await supM.fetch(`/api/buildings/${fx.buildingId}/rooms`, { method: "POST", body: { rooms: [{ number: String(Math.floor(Math.random() * 1e6)), capacity: 2 }] } });
+        assert.equal(r.status, 201, r.text);
+        fx.roomId = r.json[0].id;
+      },
+      rollcall: async () => {
+        const id = require("crypto").randomUUID();
+        const r = await guardC.fetch("/api/roll-calls", { method: "POST", body: { id, kind: "drill" } });
+        assert.equal(r.status, 201, r.text);
+        fx.rollCallId = id;
+      },
+      staff: async () => {
+        const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [`target${Math.floor(Math.random() * 1e9)}@hut.example`, PASSWORD, "Target Staff", "guard"]));
+        fx.staffId = rows[0].id;
+      },
+      tenant: async () => {
+        const n = Math.floor(Math.random() * 1e6);
+        const t = await clients.platform.fetch("/api/tenants", { method: "POST", body: { name: `Centre ${n}`, slug: `centre-${n}`, admin_name: "First Admin", admin_email: `first${n}@hut.example` } });
+        assert.equal(t.status, 201, t.text);
+        fx.tenantId = t.json.id; fx.tenantSlug = `centre-${n}`;
+      },
+    };
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "tenant"]) {
+      try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
+    }
+
+    const failures = [];
+    for (const row of matrix) {
+      for (const role of ROLES) {
+        const want = expectFor(row, role);
+        if (want === "allow" && row.fresh) await makers[row.fresh]();
+        // A row that ends the session (log out) gets a throwaway session, so
+        // the role's client stays usable for the rows after it.
+        const cl = row.endsSession && role !== "anon" ? await relogin(EMAILS[role]) : clients[role];
+        const res = await cl.fetch(row.path(fx), { method: row.method, body: row.body ? row.body(fx) : undefined });
+        const s = res.status;
+        const ok = want === "allow" ? ![401, 403, 404, 500].includes(s)
+          : want === "deny" ? s === 403
+          : want === "unauth" ? s === 401
+          : s === 404;
+        if (!ok) failures.push(`${role.padEnd(10)} ${row.method} ${row.path(fx)}  expected ${want}, got ${s} ${res.text.slice(0, 80)}`);
+      }
+      // A consumed fixture is remade for the rows after; a building takes
+      // its rooms with it, so the room follows.
+      if (row.fresh) { await makers[row.fresh](); if (row.fresh === "building") await makers.room(); }
+    }
+    assert.equal(failures.length, 0, `\n${failures.join("\n")}`);
+    passed += matrix.length * ROLES.length - 1;
   });
 
   console.log("\n== the static tier ==");

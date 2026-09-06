@@ -38,6 +38,9 @@ function int(value, field, min, max, fallback) {
 function supervisorOnly(err) {
   if (err && err.code === '42501') return new HttpError(403, 'Only a supervisor or admin can change buildings and rooms');
   if (err && err.code === '23505') return new HttpError(409, 'That name or room already exists');
+  // A room for a building that has since been removed: not an outage, a
+  // stale screen. Found by the permission matrix test.
+  if (err && err.code === '23503') return new HttpError(404, 'No such building');
   return err;
 }
 
@@ -106,7 +109,9 @@ router.delete('/buildings/:id', wrap(async (req, res) => {
     const { rowCount } = await client.query(`delete from buildings where id = $1`, [id]);
     return rowCount;
   }).catch((err) => { throw supervisorOnly(err); });
-  if (!out) throw new HttpError(404, 'No such building');
+  // The row policy lets a guard's delete match nothing. A refusal, not a
+  // missing building: 403 like every other refusal (the permission matrix).
+  if (!out) throw req.session.role === 'guard' ? new HttpError(403, 'Only a supervisor or admin can change buildings and rooms') : new HttpError(404, 'No such building');
   res.json({ ok: true });
 }));
 
@@ -168,7 +173,7 @@ router.delete('/rooms/:id', wrap(async (req, res) => {
     const { rowCount } = await client.query(`delete from rooms where id = $1`, [id]);
     return rowCount;
   }).catch((err) => { throw supervisorOnly(err); });
-  if (!out) throw new HttpError(404, 'No such room');
+  if (!out) throw req.session.role === 'guard' ? new HttpError(403, 'Only a supervisor or admin can change buildings and rooms') : new HttpError(404, 'No such room');
   res.json({ ok: true });
 }));
 

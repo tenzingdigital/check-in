@@ -356,8 +356,12 @@ router.delete('/:id', wrap(async (req, res) => {
   if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the erasure (up to 200 characters)');
 
   const result = await db.withIdentity(req.session.userId, async (client) => {
+    // Only an administrator may erase; say so before the name check, so a
+    // guard (who cannot even read the table) hears a refusal, not "no such
+    // resident" (the permission matrix holds every refusal to a 403).
+    if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can erase a resident');
     const { rows } = await client.query('select first_name, last_name from residents where id = $1', [id]);
-    if (!rows[0]) throw new HttpError(404, 'No such resident, or not authorised');
+    if (!rows[0]) throw new HttpError(404, 'No such resident');
     const full = `${rows[0].first_name} ${rows[0].last_name}`.trim().toLowerCase().replace(/\s+/g, ' ');
     if (typed !== full) throw new HttpError(400, "The name typed does not match the resident's name");
     const { rows: out } = await client.query('select erase_resident($1, $2) as r', [id, reason]);

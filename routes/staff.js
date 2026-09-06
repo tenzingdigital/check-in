@@ -135,8 +135,10 @@ router.post('/:id/active', wrap(async (req, res) => {
   });
 
   // No row means the id does not exist — or the caller is not an admin, in
-  // which case the RLS policy made the update match nothing. Fails closed.
-  if (!row) throw new HttpError(404, 'No such account, or not authorised.');
+  // which case the RLS policy made the update match nothing. The two are
+  // told apart so a refusal is a 403 like every other refusal (the
+  // permission matrix holds every route to that), and an unknown id a 404.
+  if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can disable or enable an account.');
   res.json(row);
 }));
 
@@ -159,7 +161,7 @@ router.post('/:id/role', wrap(async (req, res) => {
     return rows[0];
   });
 
-  if (!row) throw new HttpError(404, 'No such account, or not authorised.');
+  if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can change a role.');
   res.json(row);
 }));
 
