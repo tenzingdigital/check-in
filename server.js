@@ -1,4 +1,4 @@
-// Express app entry point for Hut Check-In — the gate app and the daily
+// Express app entry point for CheckSteady — the gate app and the daily
 // register.
 //
 // Load a local .env (development convenience) before anything reads

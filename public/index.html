@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
-<title>Hut Check-In — Gate</title>
+<title>CheckSteady — Gate</title>
 <style>
   /* ---- roll call (migration 017) ---- */
   .rollstart { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
@@ -47,7 +47,7 @@
 </style>
 
 <!--
-  Hut Check-In — the gate app. No build step, no framework, no CDN.
+  CheckSteady — the gate app. No build step, no framework, no CDN.
 
   There is nothing to configure. The page talks to /api on its own origin,
   served by the same Render service that served this file, and authenticates
@@ -64,7 +64,7 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>Hut Check-In — Gate</h1>
+  <h1>CheckSteady — Gate</h1>
   <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -79,7 +79,7 @@
   <header>
     <div class="bar">
       <div class="brand">
-        <span id="siteName">Security Hut</span>
+        <span id="siteName">CheckSteady</span>
         <small id="guardName">&nbsp;</small>
       </div>
       <nav class="viewswitch" aria-label="App view">
