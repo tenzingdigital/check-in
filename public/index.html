@@ -27,13 +27,22 @@
   .rollrow .btn { padding: 10px 14px; font-size: 14px; flex: none; }
   .rollrow.done .btn { background: var(--ok); color: var(--on-ok); border-color: transparent; }
   .rollend { margin-top: 16px; display: flex; gap: 10px; }
+  /* Assistance required, at a glance: amber, tappable, a filter when pressed. */
+  .needchip {
+    display: block; width: 100%; text-align: left; margin-top: 10px; padding: 10px 12px; border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--warn-text); font-size: 14px;
+  }
+  .needchip b { font-size: 18px; font-variant-numeric: tabular-nums; color: var(--text); }
+  .needchip[aria-pressed="true"] { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 26%, var(--surface)); }
+  body.printing .needchip { display: none; }
   @media print {
     body.printing header, body.printing .stats, body.printing nav.tabs, body.printing #panelSearch,
     body.printing #panelLog, body.printing #rollActions, body.printing .rollend, body.printing #toast,
     body.printing #detail, body.printing .rollrow .btn { display: none !important; }
     body.printing .rollrow { break-inside: avoid; border-color: #999; }
     body.printing .rollrow.done { opacity: 1; }
-    body.printing .rollrow.done .who::after { content: " ✓ accounted"; }
+    body.printing .rollrow.done .who::after { content: " ✓ safe"; }
   }
 </style>
 
@@ -125,7 +134,7 @@
     <!-- ---- roll call (feature_evacuation) ---- -->
     <section id="panelRoll" role="tabpanel" aria-labelledby="tabRoll" hidden>
       <div id="rollActions">
-        <p class="hint flush">Everyone recorded on site, by building, those who need help first. Works without a connection; ticks are sent when it returns.</p>
+        <p class="hint flush">Everyone recorded on site, by building, those who need assistance first. Mark each person safe with one tap. Works on every warden's phone at once and without a connection; ticks are sent when it returns.</p>
         <div class="rollstart" id="rollStart">
           <button class="btn primary-in" type="button" id="rollDrill">Start a drill</button>
           <button class="btn primary-out" type="button" id="rollIncident">Roll call now</button>
@@ -153,6 +162,7 @@ const state = {
   profile:  null,   // { id, full_name, role }
   userId:   null,   // the guard this session belongs to; queued events carry it
   settings: null,   // app_settings row
+  rollNeedOnly: false, // the roll call showing only those who need assistance
   selected: null,   // resident status row shown in the detail panel
   tab:      "search",
   roll:     null,   // the open roll call on this terminal: { id, kind, started_at, marks: {residentId: iso} }
@@ -578,13 +588,25 @@ async function renderRoll() {
     ? `${hhRank.get(r.household_id)}|${(r.household_label || "").toLowerCase()}|${r.household_id}|${r.is_adult === false ? 1 : 0}`
     : `${needRank(r)}|${String(r.last_name || r.full_name || "").toLowerCase()}|${r.id}|0`;
   const accounted = roll ? rows.filter((r) => roll.marks[r.id]).length : 0;
+  // Assistance required, at a glance: how many on site need help, and during
+  // a roll call how many of those are not yet safe. Tapping it shows only
+  // them; tapping again shows everyone.
+  const needing = rows.filter((r) => needRank(r) === 0);
+  const needingUnsafe = roll ? needing.filter((r) => !roll.marks[r.id]).length : needing.length;
+  const needChip = needing.length ? `
+    <button class="needchip" type="button" id="rollNeed" aria-pressed="${state.rollNeedOnly ? "true" : "false"}">
+      ${roll ? `<b>${needingUnsafe}</b> of ${needing.length} needing assistance still to find` : `<b>${needing.length}</b> need${needing.length === 1 ? "s" : ""} assistance`}${state.rollNeedOnly ? " · showing only them, tap for everyone" : " · tap to see who"}
+    </button>` : "";
   const head = roll ? `
     <div class="rollhead">
-      <div><b>${accounted} of ${rows.length}</b> <span class="hint">accounted for · ${roll.kind === "drill" ? "drill" : "roll call"} started ${esc(timeOfDay(roll.started_at))}</span></div>
+      <div><b>${accounted} of ${rows.length}</b> <span class="hint">safe · ${roll.kind === "drill" ? "drill" : "roll call"} started ${esc(timeOfDay(roll.started_at))}</span></div>
       <span class="hint">${rows.length - accounted} still to find</span>
     </div>
-    <div class="rollprog"><div id="rollProg"></div></div>` : `
-    <div class="rollhead"><div><b>${rows.length}</b> <span class="hint">on site right now</span></div></div>`;
+    <div class="rollprog"><div id="rollProg"></div></div>${needChip}` : `
+    <div class="rollhead"><div><b>${rows.length}</b> <span class="hint">on site right now</span></div></div>${needChip}`;
+  if (state.rollNeedOnly) {
+    for (const [name, people] of groups) { const kept = people.filter((r) => needRank(r) === 0); if (kept.length) groups.set(name, kept); else groups.delete(name); }
+  }
   const list = [...groups.entries()].map(([name, people]) => {
     people.sort((a, b) => key(a).localeCompare(key(b)) || String(a.full_name).localeCompare(String(b.full_name)));
     const done = roll ? people.filter((r) => roll.marks[r.id]).length : 0;
@@ -600,7 +622,7 @@ async function renderRoll() {
             households && r.household_label ? esc(r.household_label) + (r.is_adult === false ? " · child" : "") : "",
           ].filter(Boolean).join(" · ")}${(r.room_label && state.settings?.feature_buildings) || (households && r.household_label) ? (r.evac_need && r.evac_need !== "none" ? " · " : "") : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : ""}</span>
         </span>
-        ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}">${roll.marks[r.id] ? "✓" : "Here"}</button>` : ""}
+        ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}" aria-label="${roll.marks[r.id] ? "Marked safe" : "Mark safe"}">${roll.marks[r.id] ? "Safe ✓" : "Safe"}</button>` : ""}
       </div>`).join("")}
     </div>`;
   }).join("");
@@ -849,6 +871,7 @@ $("rollBody").addEventListener("click", (e) => {
   const mark = e.target.closest("[data-mark]");
   if (mark) return markRoll(mark.dataset.mark);
   if (e.target.closest("#rollEnd")) return endRoll();
+  if (e.target.closest("#rollNeed")) { state.rollNeedOnly = !state.rollNeedOnly; return renderRoll(); }
 });
 $("logDate").addEventListener("change", (e) => loadLog(e.target.value || todayISODate()));
 $("logToday").addEventListener("click", () => {
