@@ -60,6 +60,7 @@ validation.
 | What | Logged out | Guard | Supervisor | Admin | Platform admin |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Add a resident<br><code>POST /api/residents</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Import residents from a spreadsheet (preview and for real)<br><code>POST /api/residents/import</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Change a resident's details, room, need or family<br><code>PATCH /api/residents/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Open a resident's full record (date of birth, the edit sheet; logged)<br><small>A guard reads residents through a view that carries age, never the date of birth; the table itself does not exist for them</small><br><code>GET /api/residents/:id/record</code> | — | hidden | ✓ | ✓ | ✓ |
 | Add a building<br><code>POST /api/buildings</code> | — | ✗ | ✓ | ✓ | ✓ |

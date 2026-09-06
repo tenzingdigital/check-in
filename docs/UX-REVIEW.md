@@ -354,3 +354,14 @@ error-toast lifetime (P0.2).
 None of this changes the security model, the database, or the offline
 machinery. All of it is presentation, copy and stylesheet, and every item can
 be checked in the browser test the way today's changes were.
+
+### Adding a centre's residents — *6 September: import from a spreadsheet*
+
+The add form is one person at a time; a centre arriving from paper or a
+spreadsheet has a hundred or two hundred. Admin → Residents → Import takes
+a CSV with the headings people already use (first name, surname, date of
+birth, and optionally ID, building, floor, room, evacuation need), shows a
+verdict for every line before anything is written, and adds only the lines
+that are ready. Dates as written (DD/MM/YYYY); the evacuation column as
+words. The same sheet can be imported again after fixing the failures: a
+person already on the register is skipped, never duplicated.

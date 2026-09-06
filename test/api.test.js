@@ -1169,6 +1169,64 @@ async function main() {
     assert.equal(after.json.find((b) => b.id === castleId).rooms.length, 2);
   });
 
+  console.log("\n== import from a spreadsheet ==");
+
+  await test("a preview judges every line; the import adds the ready ones and skips the rest", async () => {
+    const house = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Import House" } });
+    assert.equal(house.status, 201, house.text);
+    const rooms = await supC.fetch(`/api/buildings/${house.json.id}/rooms`, { method: "POST", body: { rooms: [{ floor: "1F", number: "7", capacity: 2 }, { floor: "2F", number: "7", capacity: 2 }, { number: "9" }] } });
+    assert.equal(rooms.status, 201, rooms.text);
+    const rows = [
+      { line: 2, first_name: "Imp", last_name: "Alpha", date_of_birth: "14/03/1988", id_type: "TRC", id_number: "trc-imp-1", building: "import house", room: "9", evac_need: "needs help to move" },
+      { line: 3, first_name: "Imp", last_name: "Beta", date_of_birth: "2019-07-01", building: "Import House", floor: "2F", room: "7" },
+      { line: 4, first_name: "Imp", last_name: "Gamma", date_of_birth: "05/05/70" },
+      { line: 5, first_name: "Imp", last_name: "Delta", date_of_birth: "31/02/1990" },                       // not a date
+      { line: 6, first_name: "Imp", last_name: "Epsilon", date_of_birth: "01/01/1990", building: "Import House", room: "7" },   // two room 7s
+      { line: 7, first_name: "Imp", last_name: "Zeta", date_of_birth: "01/01/1990", building: "Import House", room: "99" },     // no such room
+      { line: 8, first_name: "", last_name: "Eta", date_of_birth: "01/01/1990" },                               // no first name
+      { line: 9, first_name: "Imp", last_name: "Alpha", date_of_birth: "14/03/1988" },                          // duplicate of line 2 within the sheet
+      { line: 10, first_name: "Imp", last_name: "Theta", date_of_birth: "01/01/1990", evac_need: "sometimes" }, // unknown need
+    ];
+    const asGuard = await api.fetch("/api/residents/import", { method: "POST", body: { rows, dry_run: true } });
+    assert.equal(asGuard.status, 403);
+    const preview = await supC.fetch("/api/residents/import", { method: "POST", body: { rows, dry_run: true } });
+    assert.equal(preview.status, 200, preview.text);
+    const by = Object.fromEntries(preview.json.results.map((r) => [r.line, r]));
+    assert.equal(preview.json.ready, 3, JSON.stringify(preview.json));
+    assert.equal(preview.json.errors, 5);
+    assert.equal(preview.json.exists, 1);
+    assert.equal(by[2].status, "ready"); assert.equal(by[3].status, "ready"); assert.equal(by[4].status, "ready");
+    assert.match(by[5].message, /real date/);
+    assert.match(by[6].message, /give the floor/);
+    assert.match(by[7].message, /No room "99"/);
+    assert.match(by[8].message, /First name/);
+    assert.equal(by[9].status, "exists");
+    assert.match(by[10].message, /not recognised/);
+    const before = await withOwner((c) => c.query(`select count(*)::int as n from public.residents where last_name like 'Alpha' or last_name like 'Beta' or last_name like 'Gamma'`));
+    assert.equal(before.rows[0].n, 0, "a preview must not insert");
+
+    const ready = rows.filter((r) => by[r.line].status === "ready");
+    const run = await supC.fetch("/api/residents/import", { method: "POST", body: { rows: ready } });
+    assert.equal(run.status, 200, run.text);
+    assert.equal(run.json.added, 3);
+    const { rows: got } = await withOwner((c) => c.query(
+      `select r.last_name, r.date_of_birth::text as dob, r.id_type, r.id_number, r.evac_need, rm.floor, rm.number, b.name as building
+         from public.residents r left join public.rooms rm on rm.id = r.room_id left join public.buildings b on b.id = rm.building_id
+        where r.first_name = 'Imp' order by r.last_name`));
+    const alpha = got.find((g) => g.last_name === "Alpha");
+    assert.equal(alpha.dob, "1988-03-14"); assert.equal(alpha.id_type, "TRC"); assert.equal(alpha.id_number, "TRC-IMP-1");
+    assert.equal(alpha.evac_need, "mobility"); assert.equal(alpha.building, "Import House"); assert.equal(alpha.number, "9");
+    const beta = got.find((g) => g.last_name === "Beta");
+    assert.equal(beta.dob, "2019-07-01"); assert.equal(beta.floor, "2F");
+    assert.equal(got.find((g) => g.last_name === "Gamma").dob, "1970-05-05", "a two-digit year in the past is 19xx");
+
+    // The same sheet again: everything already here, nothing added twice.
+    const again = await supC.fetch("/api/residents/import", { method: "POST", body: { rows, dry_run: true } });
+    assert.equal(again.json.ready, 0); assert.equal(again.json.exists, 4);
+    const tooMany = await supC.fetch("/api/residents/import", { method: "POST", body: { rows: Array.from({ length: 201 }, () => rows[0]) } });
+    assert.equal(tooMany.status, 400);
+  });
+
   console.log("\n== evacuation and roll call ==");
 
   await test("the feature switches default off and reach the terminal", async () => {

@@ -211,6 +211,121 @@ router.post('/', wrap(async (req, res) => {
   res.status(201).json({ id: row.id });
 }));
 
+// POST /api/residents/import — a spreadsheet's worth of residents at once.
+//
+// A centre coming from paper or a spreadsheet has a hundred or two hundred
+// people to enter, and the add form is one at a time. The browser parses the
+// CSV, then sends rows here: first with dry_run so the person sees what
+// would happen to each line, then for real. Each row is judged on its own
+// (a savepoint per insert), so one bad line does not lose the other
+// hundred, and the answer says what happened to every line by number.
+//
+// Convergent on purpose: a row whose name and date of birth are already on
+// the register is skipped as "exists", so the same sheet can be imported
+// again after fixing the lines that failed.
+const IMPORT_MAX = 200;
+
+// Spreadsheets write dates the way the person did: DD/MM/YYYY in Ireland,
+// or YYYY-MM-DD. A two-digit year is read as 19xx when it would otherwise be
+// in the future — a resident born in "05" is a child, in "68" an adult.
+function dobFromSheet(value) {
+  const s = String(value || '').trim();
+  const pad = (n) => String(n).padStart(2, '0');
+  let m;
+  if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s))) return dobParam(`${m[1]}-${pad(m[2])}-${pad(m[3])}`);
+  if ((m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})$/.exec(s))) {
+    let y = m[3];
+    if (y.length === 2) { const yy = Number(y); const cur = new Date().getFullYear() % 100; y = String(yy > cur ? 1900 + yy : 2000 + yy); }
+    return dobParam(`${y}-${pad(m[2])}-${pad(m[1])}`);
+  }
+  throw new HttpError(400, 'Date of birth must be DD/MM/YYYY or YYYY-MM-DD');
+}
+
+// The evacuation column is free text on a sheet; it becomes one code here.
+function evacFromSheet(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (!s || /^(none|no|n|-|0|nil)$/.test(s)) return 'none';
+  if (EVAC_NEEDS.includes(s)) return s;
+  if (/mobil|move|wheel|walk|stair|frame/.test(s)) return 'mobility';
+  if (/hear|deaf|alarm/.test(s)) return 'hearing';
+  if (/sight|see|visual|blind|way/.test(s)) return 'sight';
+  if (/infant|baby|carer|pregnan|child|buggy/.test(s)) return 'carer';
+  if (/other|yes|y|help|assist/.test(s)) return 'other';
+  throw new HttpError(400, `Evacuation need "${value}" not recognised: use none, mobility, hearing, sight, carer or other`);
+}
+
+router.post('/import', wrap(async (req, res) => {
+  if (req.session.role !== 'supervisor' && req.session.role !== 'admin') {
+    throw new HttpError(403, 'Only a supervisor or admin can import residents');
+  }
+  const body = req.body || {};
+  const rows = Array.isArray(body.rows) ? body.rows : null;
+  if (!rows || !rows.length || rows.length > IMPORT_MAX) throw new HttpError(400, `Send between 1 and ${IMPORT_MAX} rows per request`);
+  const dryRun = body.dry_run === true;
+
+  const results = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows: rooms } = await client.query(
+      `select rm.id, lower(b.name) as building, lower(rm.floor) as floor, lower(rm.number) as number
+         from rooms rm join buildings b on b.id = rm.building_id`);
+    const { rows: existing } = await client.query(
+      `select lower(first_name) as f, lower(last_name) as l, date_of_birth::text as dob from residents where status = 'active'`);
+    const seen = new Set(existing.map((e) => `${e.f}|${e.l}|${e.dob}`));
+
+    const out = [];
+    for (const [i, raw] of rows.entries()) {
+      const r = raw && typeof raw === 'object' ? raw : {};
+      const line = Number.isInteger(r.line) ? r.line : i + 1;
+      try {
+        const first = nameParam(r.first_name, 'First name');
+        const last = nameParam(r.last_name, 'Last name');
+        const dob = dobFromSheet(r.date_of_birth);
+        const idType = String(r.id_type || '').trim();
+        const idNumber = String(r.id_number || '').trim();
+        const id = (idType || idNumber) ? idParams({ id_type: idType || null, id_number: idNumber || null }) : { idType: null, idNumber: null };
+        const evac = evacFromSheet(r.evac_need);
+
+        let roomId = null;
+        const bName = String(r.building || '').trim().toLowerCase();
+        const rNum = String(r.room || '').trim().toLowerCase();
+        const fl = String(r.floor || '').trim().toLowerCase();
+        if (bName || rNum) {
+          const hits = rooms.filter((x) => x.building === bName && x.number === rNum && (!fl || x.floor === fl));
+          if (hits.length === 0) throw new HttpError(400, `No room "${r.room || ''}" in "${r.building || ''}". Add it under Buildings first, or leave the room blank`);
+          if (hits.length > 1) throw new HttpError(400, `More than one room "${r.room}" in ${r.building}: give the floor`);
+          roomId = hits[0].id;
+        }
+
+        const key = `${first.toLowerCase()}|${last.toLowerCase()}|${dob}`;
+        if (seen.has(key)) { out.push({ line, status: 'exists', message: 'Already on the register (same name and date of birth)' }); continue; }
+        seen.add(key);
+        if (dryRun) { out.push({ line, status: 'ready', message: roomId ? 'Ready' : 'Ready (no room)' }); continue; }
+
+        await client.query('savepoint row_import');
+        try {
+          const { rows: ins } = await client.query(
+            `insert into residents (first_name, last_name, date_of_birth, id_type, id_number, room_id, evac_need, registered_by)
+             values ($1, $2, $3, $4, $5, $6, $7, auth.uid())
+             returning id`,
+            [first, last, dob, id.idType, id.idNumber, roomId, evac]);
+          await client.query('release savepoint row_import');
+          out.push({ line, status: 'added', id: ins[0].id, message: 'Added' });
+        } catch (err) {
+          await client.query('rollback to savepoint row_import');
+          if (err.code === '23505') throw new HttpError(400, 'That ID number is already on the register');
+          throw err;
+        }
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 400) out.push({ line, status: 'error', message: err.message });
+        else throw err;
+      }
+    }
+    return out;
+  }).catch((err) => { throw roomError(supervisorOnly(err)); });
+
+  const count = (st) => results.filter((x) => x.status === st).length;
+  res.json({ dry_run: dryRun, results, added: count('added'), ready: count('ready'), exists: count('exists'), errors: count('error') });
+}));
+
 // GET /api/residents/:id/record — the row as a supervisor edits it. This is
 // the ONE endpoint that returns a date of birth, and only to a role the row
 // policy lets read the residents table; a guard gets 404, because for them

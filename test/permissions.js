@@ -67,6 +67,7 @@ module.exports = [
 
   // ---- residents and buildings (supervisors and admins) --------------------
   { area: 'Residents and buildings', name: 'Add a resident', method: 'POST', path: () => '/api/residents', body: () => ({ first_name: 'Matrix', last_name: `Row${crypto.randomInt(1e6)}`, date_of_birth: dob }), expect: SUPERVISOR },
+  { area: 'Residents and buildings', name: 'Import residents from a spreadsheet (preview and for real)', method: 'POST', path: () => '/api/residents/import', body: () => ({ dry_run: true, rows: [{ first_name: 'Sheet', last_name: 'Row', date_of_birth: '01/01/1990' }] }), expect: SUPERVISOR },
   { area: 'Residents and buildings', name: "Change a resident's details, room, need or family", method: 'PATCH', path: (fx) => `/api/residents/${fx.residentId}`, body: () => ({ first_name: 'Matrix' }), expect: SUPERVISOR },
   { area: 'Residents and buildings', name: "Open a resident's full record (date of birth, the edit sheet; logged)", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/record`, expect: { anon: 'unauth', guard: 'hidden', supervisor: 'allow', admin: 'allow' }, note: 'A guard reads residents through a view that carries age, never the date of birth; the table itself does not exist for them' },
   { area: 'Residents and buildings', name: 'Add a building', method: 'POST', path: () => '/api/buildings', body: () => ({ name: `Wing ${crypto.randomInt(1e6)}` }), expect: SUPERVISOR },

@@ -380,6 +380,15 @@ out of the two working apps:
   occupancy and the evacuation list as they stand, each as a CSV download
   or a printable page. A reason is required and every export is on the
   audit record with the range.
+- **Import from a spreadsheet** (supervisors and admins, Admin → Residents
+  → Import): a CSV with first name, last name and date of birth, and
+  optionally ID type and number, building, floor, room and evacuation need.
+  The page previews every line (ready, already on the register, or the
+  problem to fix) before anything is written, and the same sheet can be
+  imported again safely: a person already there is skipped. Dates as
+  people write them (DD/MM/YYYY or YYYY-MM-DD); the evacuation column as
+  words ("needs help to move"). Up to 200 lines per request; the page
+  sends a bigger sheet in batches.
 - **Who viewed which record** (admins, under Reports): every opening of a
   resident's detail sheet on the register, of their edit sheet, and every
   export, with who and when. Written by the server with the read itself,

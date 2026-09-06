@@ -56,9 +56,13 @@
   .rphead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 0; }
   .rphead h2 { margin: 0; font-size: 18px; }
   .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-  #rpTable { border-collapse: collapse; width: 100%; font-size: 13px; }
-  #rpTable th, #rpTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  #rpTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  #rpTable, #impTable { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #rpTable th, #rpTable td, #impTable th, #impTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  #rpTable th, #impTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  #impTable td.st-error { color: var(--bad); white-space: normal; }
+  #impTable td.st-exists { color: var(--muted); }
+  #impTable td.st-ready, #impTable td.st-added { color: var(--ok); }
+  #importPanel .tablewrap { max-height: 50vh; overflow: auto; margin-top: 10px; }
   @media print {
     body.printing header, body.printing nav.tabs, body.printing #reportActions, body.printing .rphead .row,
     body.printing #panelResidents, body.printing #panelBuildings, body.printing #panelStaff, body.printing #panelSettings,
@@ -150,6 +154,7 @@
         <input id="q" class="field" type="search" placeholder="Find a resident…"
                autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
         <button class="btn small primary-in" id="showAdd" type="button">Add</button>
+        <button class="btn small ghost" id="showImport" type="button">Import</button>
       </div>
       <nav class="chips" id="statusFilter" aria-label="Filter by status">
         <button type="button" data-status="active"   aria-pressed="true">Active</button>
@@ -197,6 +202,26 @@
           <button class="btn ghost" id="afCancel" type="button">Cancel</button>
         </div>
       </form>
+
+      <section id="importPanel" class="formcard" hidden>
+        <h2>Import residents from a spreadsheet</h2>
+        <p class="hint">Save the sheet as a CSV file with these column headings, in any order:
+          <b>First name, Last name, Date of birth</b> (DD/MM/YYYY), and optionally
+          <b>ID type</b> (TRC or IRP), <b>ID number, Building, Floor, Room, Evacuation need</b>.
+          <a href="/resident-import-template.csv" download>Download the template</a>.
+          Anyone already on the register with the same name and date of birth is skipped,
+          so a sheet can be imported again after fixing the lines that failed.</p>
+        <input id="impFile" class="field" type="file" accept=".csv,text/csv">
+        <p id="impColumns" class="hint under" hidden></p>
+        <div id="impPreview" hidden>
+          <p id="impSummary" class="hint"></p>
+          <div class="tablewrap"><table id="impTable"></table></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary-in" id="impGo" type="button" disabled>Import</button>
+          <button class="btn ghost" id="impCancel" type="button">Cancel</button>
+        </div>
+      </section>
 
       <div id="residentList" class="list"></div>
     </section>
@@ -436,6 +461,133 @@ $("addForm").addEventListener("submit", async (e) => {
   if (!out) return;
   toast(`${body.first_name} ${body.last_name} added to the register`, "ok");
   $("addForm").reset(); setAddType(""); $("addForm").hidden = true;
+  state.status = "active";
+  loadResidents();
+});
+
+/* ---- import from a spreadsheet ---- */
+// A small CSV reader: quotes, doubled quotes, commas and newlines inside
+// quotes, CRLF, a BOM. Excel and Numbers both produce this shape.
+function parseCsv(text) {
+  const rows = []; let row = []; let cell = ""; let quoted = false;
+  const src = text.replace(/^\ufeff/, "");
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') { if (src[i + 1] === '"') { cell += '"'; i += 1; } else quoted = false; }
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && src[i + 1] === "\n") i += 1;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += ch;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+}
+
+// Column headings as people write them, mapped to the fields the server takes.
+const IMPORT_COLUMNS = [
+  ["first_name", /^(first|firstname|givenname|forename|given)$/],
+  ["last_name", /^(last|lastname|surname|familyname|family)$/],
+  ["date_of_birth", /^(dateofbirth|dob|birthdate|born|birthday)$/],
+  ["id_type", /^(idtype|type|cardtype|documenttype)$/],
+  ["id_number", /^(idnumber|id|number|idno|cardnumber|trcirp|trc|irp|documentnumber)$/],
+  ["building", /^(building|block|house)$/],
+  ["floor", /^(floor|level|storey)$/],
+  ["room", /^(room|roomnumber|roomno|bed)$/],
+  ["evac_need", /^(evacuation|evacuationneed|evacuationassistance|evac|assistance|peep|needshelp|need)$/],
+];
+function mapHeader(h) {
+  const key = String(h || "").toLowerCase().replace(/[^a-z]/g, "");
+  const hit = IMPORT_COLUMNS.find(([, re]) => re.test(key));
+  return hit ? hit[0] : null;
+}
+
+const imp = { rows: [], ready: [], last: [] };
+function resetImport() {
+  imp.rows = []; imp.ready = []; imp.last = [];
+  $("impFile").value = ""; $("impColumns").hidden = true; $("impPreview").hidden = true;
+  $("impGo").disabled = true; $("impGo").textContent = "Import";
+}
+$("showImport").addEventListener("click", () => {
+  resetImport();
+  $("addForm").hidden = true; $("importPanel").hidden = false; renderDetail(null);
+  $("impFile").focus();
+});
+$("impCancel").addEventListener("click", () => { resetImport(); $("importPanel").hidden = true; });
+
+// Send in batches the server's limit allows; a 200-row sheet is one request.
+async function importBatches(rows, dryRun) {
+  const results = [];
+  for (let i = 0; i < rows.length; i += 200) {
+    const out = await guarded(() => apiPost("/api/residents/import", { rows: rows.slice(i, i + 200), dry_run: dryRun }), (err) => toast("Import failed: " + err.message, "err"));
+    if (!out) return null;
+    results.push(...out.results);
+  }
+  return results;
+}
+
+function renderImportPreview(results) {
+  const byLine = new Map(results.map((r) => [r.line, r]));
+  const counts = { ready: 0, exists: 0, error: 0, added: 0 };
+  for (const r of results) counts[r.status] = (counts[r.status] || 0) + 1;
+  const parts = [];
+  if (counts.added) parts.push(`${counts.added} added`);
+  if (counts.ready) parts.push(`${counts.ready} ready to add`);
+  if (counts.exists) parts.push(`${counts.exists} already on the register`);
+  if (counts.error) parts.push(`${counts.error} with a problem to fix`);
+  $("impSummary").textContent = `${imp.rows.length} line${imp.rows.length === 1 ? "" : "s"}: ${parts.join(", ")}.`;
+  const head = ["Line", "Name", "Date of birth", "Room", "Result"];
+  const label = { ready: "Ready", exists: "Already here", error: "Problem", added: "Added" };
+  $("impTable").innerHTML = `<thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${
+    imp.rows.map((r) => {
+      const res = byLine.get(r.line) || { status: "error", message: "No answer for this line" };
+      const room = [r.building, r.floor, r.room].filter(Boolean).join(" · ");
+      return `<tr><td>${r.line}</td><td>${esc(`${r.first_name || ""} ${r.last_name || ""}`.trim())}</td><td>${esc(r.date_of_birth || "")}</td><td>${esc(room)}</td><td class="st-${esc(res.status)}"><b>${label[res.status] || res.status}</b>${res.message && res.status !== "ready" && res.status !== "added" ? ` — ${esc(res.message)}` : ""}</td></tr>`;
+    }).join("")}</tbody>`;
+  $("impPreview").hidden = false;
+  imp.last = results;
+  imp.ready = imp.rows.filter((r) => (byLine.get(r.line) || {}).status === "ready");
+  $("impGo").disabled = imp.ready.length === 0;
+  $("impGo").textContent = imp.ready.length ? `Import ${imp.ready.length} resident${imp.ready.length === 1 ? "" : "s"}` : "Nothing to import";
+}
+
+$("impFile").addEventListener("change", async () => {
+  const file = $("impFile").files[0];
+  if (!file) return;
+  const text = await file.text();
+  const table = parseCsv(text);
+  if (table.length < 2) { toast("The file has a heading row but no residents", "err"); return; }
+  const fields = table[0].map(mapHeader);
+  const known = fields.filter(Boolean);
+  const ignored = table[0].filter((h, i) => !fields[i] && String(h).trim());
+  const missing = ["first_name", "last_name", "date_of_birth"].filter((f) => !known.includes(f));
+  $("impColumns").hidden = false;
+  $("impColumns").textContent = `Columns recognised: ${known.map((k) => k.replace(/_/g, " ")).join(", ") || "none"}.${ignored.length ? ` Ignored: ${ignored.join(", ")}.` : ""}`;
+  if (missing.length) { toast(`The sheet needs columns for ${missing.map((m) => m.replace(/_/g, " ")).join(", ")}`, "err"); return; }
+  imp.rows = table.slice(1).map((cells, i) => {
+    const row = { line: i + 2 };
+    fields.forEach((f, j) => { if (f) row[f] = String(cells[j] || "").trim(); });
+    return row;
+  });
+  const results = await importBatches(imp.rows, true);
+  if (results) renderImportPreview(results);
+});
+
+$("impGo").addEventListener("click", async () => {
+  if (!imp.ready.length) return;
+  $("impGo").disabled = true;
+  const results = await importBatches(imp.ready, false);
+  if (!results) { $("impGo").disabled = false; return; }
+  const added = results.filter((r) => r.status === "added").length;
+  toast(`${added} resident${added === 1 ? "" : "s"} added to the register`, "ok");
+  // Show the final state of every line (the lines that were skipped or
+  // failed keep their preview verdict), then refresh the list behind.
+  const fresh = new Map(results.map((r) => [r.line, r]));
+  renderImportPreview(imp.last.map((r) => fresh.get(r.line) || r));
+  $("impGo").disabled = true; $("impGo").textContent = "Done";
   state.status = "active";
   loadResidents();
 });
