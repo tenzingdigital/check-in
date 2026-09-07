@@ -177,8 +177,10 @@
 
   /* The job line: one sentence under the search box saying which of the two
      acts this screen records, and where the other one lives. */
-  .jobline { display: flex; gap: 8px; align-items: baseline; margin: 8px 2px 0; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
-  .jobline b { color: var(--text); white-space: nowrap; }
+  /* The label runs into the sentence so wrapped lines and the hint beneath
+     share one left edge; a flex row left the text hanging past the label. */
+  .jobline { margin: 8px 2px 0; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
+  .jobline b { color: var(--text); white-space: nowrap; margin-right: 6px; }
   .jobline b.gate     { color: var(--accent); }
   .jobline b.register { color: var(--ok); }
 
