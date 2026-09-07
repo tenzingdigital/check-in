@@ -127,13 +127,19 @@ router.get('/', wrap(async (req, res) => {
     }
     if (!wantCompliance) return found;
 
+    // first_seen_at is today's row in daily_compliance, joined here rather
+    // than added to the view: attention_list() returns setof the view and
+    // depends on its physical column order.
     const { rows: comp } = await client.query(
-      `select id, state, required_today, seen_today, checkins_today,
-              open_breaches, consecutive_missed, absent_in_window,
-              absence_window_days, absence_window_limit,
-              warn_after_consecutive_nights, last_seen_on
-         from v_resident_compliance
-        where id = any($1::uuid[])`,
+      `select v.id, v.state, v.required_today, v.seen_today, v.checkins_today,
+              v.open_breaches, v.consecutive_missed, v.absent_in_window,
+              v.absence_window_days, v.absence_window_limit,
+              v.warn_after_consecutive_nights, v.last_seen_on,
+              dc.first_seen_at
+         from v_resident_compliance v
+         left join daily_compliance dc
+           on dc.resident_id = v.id and dc.compliance_date = site_today()
+        where v.id = any($1::uuid[])`,
       [found.map(r => r.id)],
     );
     const byId = new Map(comp.map(c => [c.id, c]));
@@ -150,13 +156,34 @@ router.get('/:id/compliance', wrap(async (req, res) => {
     // opening goes on the access log (migration 023) in the same transaction.
     await client.query('select note_view($1, $2)', [uuidParam(req.params.id, 'resident id'), 'register']);
     const { rows } = await client.query(
-      `select id, full_name, id_type, id_number, age_years, required_today,
-              seen_today, checkins_today, open_breaches, consecutive_missed,
-              absent_in_window, absence_window_days, absence_window_limit,
-              warn_after_consecutive_nights, last_seen_on, state
-         from v_resident_compliance where id = $1`,
+      `select v.id, v.full_name, v.id_type, v.id_number, v.age_years, v.required_today,
+              v.seen_today, v.checkins_today, v.open_breaches, v.consecutive_missed,
+              v.absent_in_window, v.absence_window_days, v.absence_window_limit,
+              v.warn_after_consecutive_nights, v.last_seen_on, v.state,
+              dc.first_seen_at
+         from v_resident_compliance v
+         left join daily_compliance dc
+           on dc.resident_id = v.id and dc.compliance_date = site_today()
+        where v.id = $1`,
       [uuidParam(req.params.id, 'resident id')],
     );
+    if (!rows[0]) return null;
+    // Every check-in recorded today, newest first, with the guard who
+    // recorded it. This is the troubleshooting view: it says which
+    // terminal's guard tapped, and when, including a double tap the
+    // 60-second dedupe folded into one presentation (which is why a day
+    // can say 1× with one event here and two taps at the desk).
+    const { rows: events } = await client.query(
+      `select e.occurred_at, p.full_name as recorded_by
+         from checkin_events e
+         join profiles p on p.id = e.guard_id
+        cross join (select local_timezone from app_settings where id) s
+        where e.resident_id = $1
+          and (e.occurred_at at time zone s.local_timezone)::date = site_today()
+        order by e.occurred_at desc, e.id desc`,
+      [uuidParam(req.params.id, 'resident id')],
+    );
+    rows[0].checkins_today_events = events;
     return rows[0];
   });
 
@@ -171,7 +198,7 @@ router.get('/:id/compliance', wrap(async (req, res) => {
 router.get('/:id/days', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: days } = await client.query(
-      `select compliance_date, required, presented
+      `select compliance_date, required, presented, first_seen_at
          from daily_compliance
         where resident_id = $1
           and compliance_date >= (site_today() - ($2::integer - 1))

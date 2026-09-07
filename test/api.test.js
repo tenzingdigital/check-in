@@ -365,6 +365,34 @@ async function main() {
     assert.equal(after.json.seen_today, true);
   });
 
+  await test("the time of the check-in, and who recorded it, are on the detail row", async () => {
+    const found = await api.fetch("/api/residents?q=brennan&compliance=1");
+    const resident = found.json[0];
+    assert.ok("first_seen_at" in resident, "the list row has no first_seen_at field");
+    assert.ok(resident.first_seen_at, "the list row's first_seen_at is empty after a check-in");
+    assert.ok(Math.abs(Date.now() - new Date(resident.first_seen_at)) < 60_000, `first_seen_at is ${resident.first_seen_at}, not within a minute of now`);
+
+    const detail = await api.fetch(`/api/residents/${resident.id}/compliance`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.json.first_seen_at, resident.first_seen_at, "detail and list disagree about first_seen_at");
+    assert.ok(Array.isArray(detail.json.checkins_today_events), "checkins_today_events is not an array");
+    assert.equal(detail.json.checkins_today_events.length, 1, "expected exactly one event after one check-in");
+    assert.equal(detail.json.checkins_today_events[0].recorded_by, "Gina Guard", "recorded_by is not the acting guard's name");
+    assert.ok(Math.abs(new Date(detail.json.checkins_today_events[0].occurred_at) - new Date(resident.first_seen_at)) < 1000);
+
+    // A second tap inside the 60-second dedupe window is one presentation.
+    const again = await api.fetch("/api/checkins", { method: "POST", body: { resident_id: resident.id } });
+    assert.equal(again.status, 200);
+    const detail2 = await api.fetch(`/api/residents/${resident.id}/compliance`);
+    assert.equal(detail2.json.checkins_today_events.length, 1, "the double tap recorded a second event");
+
+    const days = await api.fetch(`/api/residents/${resident.id}/days`);
+    const today = days.json.find((d) => d.presented);
+    assert.ok(today, "no presented day on the strip");
+    assert.ok("first_seen_at" in today, "the strip row has no first_seen_at");
+    assert.equal(today.first_seen_at, resident.first_seen_at);
+  });
+
   // A calendar day must reach the browser as one. The driver's default would
   // send a DATE column as a midnight timestamp, which the page cannot format
   // and which shifts by a day off UTC.
