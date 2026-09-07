@@ -128,6 +128,27 @@ safe like a resident; a Visitors report covers a date range. Held as long
 as the movement log. Children out at school remain residents signed out at
 the gate, which the gate already records.
 
+## Absences — the manager's list, off the guard's screen
+
+**Status: built 7 September 2026, on the working branch. No switch, no
+migration, no new data.**
+
+- The register's third tile ("Missed days") counted everyone who had ever
+  missed a required day and never cleared. It is gone; the register has
+  Not seen and Seen today, and a card says only what is true today.
+- Admin → Absences lists active residents with a run of consecutive missed
+  nights or a missed day in the rolling window, worst first, each count
+  beside the figure in Settings. Reached figures are marked; nothing is
+  decided.
+- Every check-in shows its time in the site's zone, and the detail sheet
+  lists today's check-ins with the guard who recorded each — the
+  troubleshooting view a manager asked for.
+- Note on the figures: the IPAS House Rules 2025 (3.2.14) put unauthorised
+  absence at 7 consecutive days, or 10 days in a rolling 4 weeks. The
+  consecutive-nights default in Settings is still 3, from the earlier
+  policy; each centre sets its own under Admin → Settings → House Rules
+  thresholds.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**

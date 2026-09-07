@@ -58,6 +58,13 @@ connection pill and the vocabulary pass ("Missed days", "Not yet seen",
 landed in the same batch, with its minutes under Settings. What remains of
 P2 is listed in place below.
 
+**7 September 2026.** The "Missed days" tile is gone from the register — a
+lifetime tally that never cleared, beside a green "Seen today" pill on the
+same card, read as a contradiction. The register now answers today only;
+the manager's worst-first list is Admin → Absences, with each count beside
+the figure in Settings. Cards and the detail sheet show the time of the
+check-in in the site's zone, and the sheet lists who recorded each one.
+
 ---
 
 ## Who is using this, and where

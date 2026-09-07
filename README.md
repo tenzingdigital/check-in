@@ -48,10 +48,13 @@ searches a registered resident by name, verifies the person visually, and taps
 one button to sign them in or out. Two tabs: Search and Log.
 
 **`checkin.html` — the check-in app.** The statutory daily register: did this
-resident present at the hut today? One list, filtered by the three tiles
-above it: not seen today, open breaches (worst first), seen today. A gate
-sign-in/out is a different act from a check-in and does not satisfy the daily
-requirement — see "Compliance is per calendar day" below.
+resident present at the hut today? One list, filtered by two tiles above it:
+not seen today, seen today. Each card says when the person was seen today and
+the detail sheet says who recorded it. History — runs of missed nights and
+days absent in the rolling window — is the manager's list under Admin →
+Absences, not the guard's screen. A gate sign-in/out is a different act from
+a check-in and does not satisfy the daily requirement — see "Compliance is
+per calendar day" below.
 
 Every event, at either app, is timestamped and attributed to the guard who
 recorded it. Both apps share `app-common.css` and `app-common.js`, loaded as
@@ -190,12 +193,12 @@ days when they were legally a minor. This is the reason the register stores a
 full date of birth rather than a boolean — see `docs/GDPR.md` for the
 necessity argument.
 
-The **Breaches** tile in the check-in app is the flow itself: tap it and the
-list shows only residents with an open breach, worst first — longest run of
-consecutive missed nights, then most absent in the rolling window. The
-**Not seen** tile is the working list for the day. What the hut does about a
-breach — call, escalate, welfare check — is a procedure, not a feature; the
-app tells you who and for how long.
+**Admin → Absences** is the flow itself: every active resident with a run of
+consecutive missed nights or a missed day inside the rolling window, worst
+first, with each count beside the figure in Settings ("5 of 7", "8 of 10").
+The **Not seen** tile on the register is the working list for the day. What
+the hut does about an absence — call, escalate, welfare check, the letter —
+is a procedure, not a feature; the app tells you who and for how long.
 
 ### Roles
 
