@@ -84,7 +84,7 @@
   #importPanel .tablewrap { max-height: 50vh; overflow: auto; margin-top: 10px; }
   @media print {
     body.printing header, body.printing nav.tabs, body.printing #reportActions, body.printing .rphead .row,
-    body.printing #panelResidents, body.printing #panelBuildings, body.printing #panelStaff, body.printing #panelSettings,
+    body.printing #panelResidents, body.printing #panelAbsences, body.printing #panelBuildings, body.printing #panelStaff, body.printing #panelSettings,
     body.printing #toast, body.printing #detail, body.printing #notForYou { display: none !important; }
     body.printing .tablewrap { border: 0; overflow: visible; }
     body.printing #rpTable th, body.printing #rpTable td { white-space: normal; border-color: #999; }
@@ -487,9 +487,10 @@ async function loadAbsences() {
 
 function renderAbsences(rows) {
   const s = state.settings || {};
-  const nightLimit = s.warn_after_consecutive_nights || 3;
-  const winLimit = s.absence_window_limit || 10;
-  const winDays = s.absence_window_days || 28;
+  const src = rows[0] || {};
+  const nightLimit = src.warn_after_consecutive_nights ?? s.warn_after_consecutive_nights ?? 3;
+  const winLimit = src.absence_window_limit ?? s.absence_window_limit ?? 10;
+  const winDays = src.absence_window_days ?? s.absence_window_days ?? 28;
   const withRooms = !!s.feature_buildings;
 
   const listed = rows
