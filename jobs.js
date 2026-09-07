@@ -37,6 +37,7 @@ const TENANT_JOBS = [
   ["purge-expired-job-runs", "select purge_expired_job_runs()"],
   ["purge-expired-roll-calls", "select purge_expired_roll_calls()"],
   ["purge-resident-views", "select purge_resident_views()"],
+  ["purge-expired-visits", "select purge_expired_visits()"],
   // app_settings (one row) and a small residents table can carry the
   // planner's default guess of ~300 rows forever. Cross-joined into every
   // view, that guess is how a 200-row query was costed at 85,000 rows and

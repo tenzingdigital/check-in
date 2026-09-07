@@ -53,7 +53,16 @@ validation.
 | Past drills and incidents<br><code>GET /api/roll-calls</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Start a roll call<br><code>POST /api/roll-calls</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Tick a person at the assembly point<br><code>POST /api/roll-calls/:id/marks</code> | — | ✓ | ✓ | ✓ | ✓ |
+| Mark a visitor or contractor safe<br><code>POST /api/roll-calls/:id/visit-marks</code> | — | ✓ | ✓ | ✓ | ✓ |
 | End a roll call<br><code>POST /api/roll-calls/:id/end</code> | — | ✓ | ✓ | ✓ | ✓ |
+
+## Visitors
+
+| What | Logged out | Guard | Supervisor | Admin | Platform admin |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Today's visitors, staff and contractors, and who is still on site<br><code>GET /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
+| Sign a visitor, contractor, supplier or staff member in<br><code>POST /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
+| Sign them out<br><code>POST /api/visits/undefined/leave</code> | — | ✓ | ✓ | ✓ | ✓ |
 
 ## Residents and buildings
 

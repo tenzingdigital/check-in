@@ -63,7 +63,13 @@ module.exports = [
   { area: 'Evacuation and roll call', name: 'Past drills and incidents', method: 'GET', path: () => '/api/roll-calls', expect: STAFF },
   { area: 'Evacuation and roll call', name: 'Start a roll call', method: 'POST', path: () => '/api/roll-calls', body: () => ({ id: crypto.randomUUID(), kind: 'drill' }), expect: STAFF },
   { area: 'Evacuation and roll call', name: 'Tick a person at the assembly point', method: 'POST', path: (fx) => `/api/roll-calls/${fx.rollCallId}/marks`, body: (fx) => ({ resident_id: fx.residentId }), expect: STAFF },
+  { area: 'Evacuation and roll call', name: 'Mark a visitor or contractor safe', method: 'POST', path: (fx) => `/api/roll-calls/${fx.rollCallId}/visit-marks`, body: (fx) => ({ visit_id: fx.visitId }), expect: STAFF },
   { area: 'Evacuation and roll call', name: 'End a roll call', method: 'POST', path: (fx) => `/api/roll-calls/${fx.rollCallId}/end`, body: () => ({}), expect: STAFF, fresh: 'rollcall' },
+
+  // ---- visitors (every staff member) ---------------------------------------
+  { area: 'Visitors', name: "Today's visitors, staff and contractors, and who is still on site", method: 'GET', path: () => '/api/visits', expect: STAFF },
+  { area: 'Visitors', name: 'Sign a visitor, contractor, supplier or staff member in', method: 'POST', path: () => '/api/visits', body: () => ({ kind: 'contractor', name: 'Matrix Electrician', company: 'Sparks Ltd' }), expect: STAFF },
+  { area: 'Visitors', name: 'Sign them out', method: 'POST', path: (fx) => `/api/visits/${fx.visitId}/leave`, body: () => ({}), expect: STAFF, fresh: 'visit' },
 
   // ---- residents and buildings (supervisors and admins) --------------------
   { area: 'Residents and buildings', name: 'Add a resident', method: 'POST', path: () => '/api/residents', body: () => ({ first_name: 'Matrix', last_name: `Row${crypto.randomInt(1e6)}`, date_of_birth: dob }), expect: SUPERVISOR },

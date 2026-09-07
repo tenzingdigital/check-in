@@ -36,6 +36,18 @@
   .needchip b { font-size: 18px; font-variant-numeric: tabular-nums; color: var(--text); }
   .needchip[aria-pressed="true"] { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 26%, var(--surface)); }
   body.printing .needchip { display: none; }
+  /* ---- visitors (migration 024) ---- */
+  .visitform { display: grid; gap: 8px; margin-top: 10px; }
+  .visitform .seg { display: flex; gap: 6px; }
+  .visitform .seg button {
+    flex: 1; padding: 10px 4px; border-radius: 10px; font-size: 13px; font-weight: 650;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .visitform .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .visitform .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .visitform .btn { padding: 14px 12px; font-size: 16px; }
+  .rollrow.gone { opacity: .55; }
+  .rollrow .kind { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
   @media print {
     body.printing header, body.printing .stats, body.printing nav.tabs, body.printing #panelSearch,
     body.printing #panelLog, body.printing #rollActions, body.printing .rollend, body.printing #toast,
@@ -110,6 +122,7 @@
       <button role="tab" id="tabSearch" aria-selected="true"  aria-controls="panelSearch">Search</button>
       <button role="tab" id="tabLog"    aria-selected="false" aria-controls="panelLog" data-tip="Every door movement for a day, newest first, with who recorded it. Pick another date at the top.">Log</button>
       <button role="tab" id="tabRoll"   aria-selected="false" aria-controls="panelRoll" hidden data-tip="Everyone recorded on site, by building, for a drill or a real evacuation. Works on every warden's phone at once and with no connection.">Roll call</button>
+      <button role="tab" id="tabVisitors" aria-selected="false" aria-controls="panelVisitors" hidden data-tip="Staff, visitors, contractors and suppliers: sign them in on arrival and out when they leave. Whoever is still on site is on the roll call.">Visitors</button>
     </nav>
 
     <!-- ---- search ---- -->
@@ -131,6 +144,24 @@
       </div>
       <p class="hint tight" id="logCount"></p>
       <div id="logList" class="list"></div>
+    </section>
+
+    <!-- ---- visitors (feature_visitors) ---- -->
+    <section id="panelVisitors" role="tabpanel" aria-labelledby="tabVisitors" hidden>
+      <p class="hint flush">Anyone on site who is not a resident: staff, visitors, contractors, suppliers. Sign them in when they arrive and out when they leave. The roll call counts whoever is still here.</p>
+      <form id="visitForm" class="visitform" autocomplete="off">
+        <div class="seg" role="group" aria-label="Who is this">
+          <button type="button" data-kind="visitor"    aria-pressed="true">Visitor</button>
+          <button type="button" data-kind="contractor" aria-pressed="false">Contractor</button>
+          <button type="button" data-kind="supplier"   aria-pressed="false">Supplier</button>
+          <button type="button" data-kind="staff"      aria-pressed="false">Staff</button>
+        </div>
+        <input id="vfName" class="field" type="text" placeholder="Name" maxlength="80" autocapitalize="words" required>
+        <input id="vfCompany" class="field" type="text" placeholder="Company or reason (optional)" maxlength="80">
+        <button class="btn primary-in" type="submit" id="vfSave">Sign in</button>
+      </form>
+      <div class="rollhead"><div><b id="visitOnSite">–</b> <span class="hint">on site now</span></div><span class="hint" id="visitToday"></span></div>
+      <div id="visitList"></div>
     </section>
 
     <!-- ---- roll call (feature_evacuation) ---- -->
@@ -496,7 +527,7 @@ async function loadLog(dateStr) {
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["search", "log", "roll"]) {
+  for (const t of ["search", "log", "roll", "visitors"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
@@ -504,6 +535,7 @@ function selectTab(name) {
   if (name === "search") $("q").focus();
   if (name === "log")    loadLog($("logDate").value || todayISODate());
   if (name === "roll")   { renderRoll(); syncRoll(); }
+  if (name === "visitors") loadVisits();
 }
 
 /* ========================================================================
@@ -536,7 +568,9 @@ async function syncRoll() {
   if (server && server.id) {
     const marks = state.roll && state.roll.id === server.id ? state.roll.marks : {};
     for (const m of server.marks || []) marks[m.resident_id] = m.marked_at;
-    state.roll = { id: server.id, kind: server.kind, started_at: server.started_at, marks };
+    const vmarks = state.roll && state.roll.id === server.id ? (state.roll.vmarks || {}) : {};
+    for (const m of server.visit_marks || []) vmarks[m.visit_id] = m.marked_at;
+    state.roll = { id: server.id, kind: server.kind, started_at: server.started_at, marks, vmarks };
   } else if (state.roll && server === null) {
     // Our roll call is not open on the server: either never sent (queued) or
     // ended elsewhere. Keep it only while something of ours is still queued.
@@ -544,9 +578,20 @@ async function syncRoll() {
     if (!queued) state.roll = null;
   }
   saveRoll();
+  // Whoever is on site who is not a resident, for the roll call. Cached on
+  // the device so the list survives the connection dropping mid-drill.
+  let visitsChanged = false;
+  if (state.settings?.feature_visitors) {
+    const onSite = await guarded(() => apiGet("/api/visits?on_site=1"), () => {});
+    if (onSite) {
+      visitsChanged = JSON.stringify(onSite) !== JSON.stringify(state.visitsOnSite || []);
+      state.visitsOnSite = onSite;
+      try { localStorage.setItem("visitsOnSite", JSON.stringify(onSite)); } catch (_) { /* storage blocked */ }
+    }
+  }
   // Redraw only when another warden's tick (or an end) changed something,
   // so the list under a thumb does not flicker every few seconds.
-  if (state.tab === "roll" && JSON.stringify(state.roll) !== before) renderRoll();
+  if (state.tab === "roll" && (visitsChanged || JSON.stringify(state.roll) !== before)) renderRoll();
 }
 
 // Several wardens, several phones, one list: while the roll call tab is
@@ -571,6 +616,11 @@ async function renderRoll() {
   const roll = state.roll;
   $("rollStart").hidden = !!roll;
   const rows = await rollRows();
+  if (!state.visitsOnSite) { try { state.visitsOnSite = JSON.parse(localStorage.getItem("visitsOnSite") || "[]"); } catch (_) { state.visitsOnSite = []; } }
+  const visits = state.settings?.feature_visitors && !state.rollNeedOnly ? (state.visitsOnSite || []) : [];
+  const vmarks = (roll && roll.vmarks) || {};
+  const vdone = roll ? visits.filter((v) => vmarks[v.id]).length : 0;
+  const total = rows.length + visits.length;
   const groups = new Map();
   for (const r of rows) {
     const key = state.settings?.feature_buildings && r.building ? r.building : "No room recorded";
@@ -589,7 +639,7 @@ async function renderRoll() {
   const key = (r) => households && r.household_id
     ? `${hhRank.get(r.household_id)}|${(r.household_label || "").toLowerCase()}|${r.household_id}|${r.is_adult === false ? 1 : 0}`
     : `${needRank(r)}|${String(r.last_name || r.full_name || "").toLowerCase()}|${r.id}|0`;
-  const accounted = roll ? rows.filter((r) => roll.marks[r.id]).length : 0;
+  const accounted = roll ? rows.filter((r) => roll.marks[r.id]).length + vdone : 0;
   // Assistance required, at a glance: how many on site need help, and during
   // a roll call how many of those are not yet safe. Tapping it shows only
   // them; tapping again shows everyone.
@@ -601,11 +651,11 @@ async function renderRoll() {
     </button>` : "";
   const head = roll ? `
     <div class="rollhead">
-      <div><b>${accounted} of ${rows.length}</b> <span class="hint">safe · ${roll.kind === "drill" ? "drill" : "roll call"} started ${esc(timeOfDay(roll.started_at))}</span></div>
-      <span class="hint">${rows.length - accounted} still to find</span>
+      <div><b>${accounted} of ${total}</b> <span class="hint">safe · ${roll.kind === "drill" ? "drill" : "roll call"} started ${esc(timeOfDay(roll.started_at))}</span></div>
+      <span class="hint">${total - accounted} still to find</span>
     </div>
     <div class="rollprog"><div id="rollProg"></div></div>${needChip}` : `
-    <div class="rollhead"><div><b>${rows.length}</b> <span class="hint">on site right now</span></div></div>${needChip}`;
+    <div class="rollhead"><div><b>${total}</b> <span class="hint">on site right now${visits.length ? `, ${visits.length} not resident${visits.length === 1 ? "" : "s"}` : ""}</span></div></div>${needChip}`;
   if (state.rollNeedOnly) {
     for (const [name, people] of groups) { const kept = people.filter((r) => needRank(r) === 0); if (kept.length) groups.set(name, kept); else groups.delete(name); }
   }
@@ -628,8 +678,20 @@ async function renderRoll() {
       </div>`).join("")}
     </div>`;
   }).join("");
+  const vgroup = visits.length ? `
+    <div class="rollgroup">
+      <h3><span>Staff, visitors and contractors</span><span>${roll ? `${vdone}/${visits.length}` : visits.length}</span></h3>
+      ${visits.map((v) => `
+      <div class="rollrow ${roll && vmarks[v.id] ? "done" : ""}">
+        <span class="who">
+          <span class="name">${esc(v.name)}</span>
+          <span class="meta"><span class="kind">${esc(KIND_LABEL[v.kind] || v.kind)}</span>${v.company ? " · " + esc(v.company) : ""} · arrived ${esc(timeOfDay(v.arrived_at))}</span>
+        </span>
+        ${roll ? `<button class="btn ${vmarks[v.id] ? "" : "ghost"}" type="button" data-vmark="${esc(v.id)}" aria-label="${vmarks[v.id] ? "Marked safe" : "Mark safe"}">${vmarks[v.id] ? "Safe ✓" : "Safe"}</button>` : ""}
+      </div>`).join("")}
+    </div>` : "";
   const foot = roll ? `<div class="rollend"><button class="btn ghost wide" type="button" id="rollEnd">End ${roll.kind === "drill" ? "drill" : "roll call"}</button></div>` : "";
-  body.innerHTML = head + (rows.length ? list : '<p class="empty">Nobody is recorded on site.</p>') + foot;
+  body.innerHTML = head + (total ? list + vgroup : '<p class="empty">Nobody is recorded on site.</p>') + foot;
   // Width through the CSSOM: a style="" attribute would be refused by the CSP.
   const prog = $("rollProg");
   if (prog) prog.style.width = `${rows.length ? Math.round(100 * accounted / rows.length) : 0}%`;
@@ -639,7 +701,7 @@ async function startRoll(kind) {
   if (state.roll) return;
   const id = crypto.randomUUID();
   const started_at = new Date().toISOString();
-  state.roll = { id, kind, started_at, marks: {} };
+  state.roll = { id, kind, started_at, marks: {}, vmarks: {} };
   saveRoll();
   renderRoll();
   let sent = false;
@@ -674,6 +736,83 @@ async function markRoll(residentId) {
     Offline.renderNet();
   }
 }
+
+// A non-resident marked safe. Online only: the visitor list is a server
+// fact, so a tick for one is sent straight away rather than queued.
+async function markVisit(visitId) {
+  const roll = state.roll;
+  if (!roll) return;
+  roll.vmarks = roll.vmarks || {};
+  if (roll.vmarks[visitId]) return;
+  if (!Offline.isOnline()) { toast("Marking a visitor safe needs a connection. Residents can still be ticked.", "err"); return; }
+  const out = await guarded(() => apiPost(`/api/roll-calls/${roll.id}/visit-marks`, { visit_id: visitId, ref: crypto.randomUUID(), at: new Date().toISOString() }), (err) => toast("Not recorded: " + err.message, "err"));
+  if (!out) return;
+  roll.vmarks[visitId] = out.marked_at || new Date().toISOString();
+  saveRoll();
+  renderRoll();
+}
+
+/* ========================================================================
+   Visitors — staff, visitors, contractors and suppliers (migration 024)
+   ====================================================================== */
+const KIND_LABEL = { staff: "Staff", visitor: "Visitor", contractor: "Contractor", supplier: "Supplier" };
+
+async function loadVisits() {
+  if (!Offline.isOnline()) { $("visitList").innerHTML = '<p class="empty">The visitor list needs a connection.</p>'; return; }
+  const rows = await guarded(() => apiGet("/api/visits"), (err) => showError("Could not load visitors: " + err.message));
+  if (!rows) return;
+  showError("");
+  state.visits = rows;
+  renderVisits();
+}
+
+function renderVisits() {
+  const rows = state.visits || [];
+  const here = rows.filter((v) => !v.left_at);
+  const gone = rows.filter((v) => v.left_at);
+  $("visitOnSite").textContent = String(here.length);
+  $("visitToday").textContent = rows.length ? `${rows.length} today` : "";
+  const row = (v) => `
+    <div class="rollrow ${v.left_at ? "gone" : ""}">
+      <span class="who">
+        <span class="name">${esc(v.name)}</span>
+        <span class="meta"><span class="kind">${esc(KIND_LABEL[v.kind] || v.kind)}</span>${v.company ? " · " + esc(v.company) : ""} · in ${esc(timeOfDay(v.arrived_at))}${v.arrived_by_name ? " by " + esc(v.arrived_by_name) : ""}${v.left_at ? ` · out ${esc(timeOfDay(v.left_at))}` : ""}</span>
+      </span>
+      ${v.left_at ? "" : `<button class="btn ghost" type="button" data-leave="${esc(v.id)}">Sign out</button>`}
+    </div>`;
+  $("visitList").innerHTML = (here.length ? `<div class="rollgroup"><h3><span>On site</span><span>${here.length}</span></h3>${here.map(row).join("")}</div>` : "")
+    + (gone.length ? `<div class="rollgroup"><h3><span>Left today</span><span>${gone.length}</span></h3>${gone.map(row).join("")}</div>` : "")
+    + (!rows.length ? '<p class="empty">Nobody signed in today.</p>' : "");
+}
+
+$("visitForm").querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+  state.visitKind = b.dataset.kind;
+  $("visitForm").querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+}));
+$("visitForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!Offline.isOnline()) { toast("Signing a visitor in needs a connection.", "err"); return; }
+  const body = { kind: state.visitKind || "visitor", name: $("vfName").value.trim(), company: $("vfCompany").value.trim() };
+  $("vfSave").disabled = true;
+  const out = await guarded(() => apiPost("/api/visits", body), (err) => toast("Not signed in: " + err.message, "err"));
+  $("vfSave").disabled = false;
+  if (!out) return;
+  toast(`${out.name} signed in`, "ok");
+  $("vfName").value = ""; $("vfCompany").value = ""; $("vfName").focus();
+  state.visits = [out, ...(state.visits || [])];
+  renderVisits();
+});
+$("visitList").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-leave]");
+  if (!b) return;
+  if (!Offline.isOnline()) { toast("Signing a visitor out needs a connection.", "err"); return; }
+  b.disabled = true;
+  const out = await guarded(() => apiPost(`/api/visits/${b.dataset.leave}/leave`, {}), (err) => toast("Not signed out: " + err.message, "err"));
+  if (!out) { b.disabled = false; return; }
+  toast(`${out.name} signed out`, "ok");
+  state.visits = (state.visits || []).map((v) => (v.id === out.id ? out : v));
+  renderVisits();
+});
 
 async function endRoll() {
   const roll = state.roll;
@@ -743,6 +882,7 @@ async function enterApp() {
   $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
   mountViewChooser({ current: "gate", canAdmin: profile.role === "admin" || profile.role === "supervisor", canOrg: !!profile.platform_admin });
   $("tabRoll").hidden = !settings?.feature_evacuation;
+  $("tabVisitors").hidden = !settings?.feature_visitors;
   loadRoll();
   syncRoll();
   mountTips();
@@ -867,6 +1007,7 @@ document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
 $("tabSearch").addEventListener("click", () => selectTab("search"));
 $("tabLog").addEventListener("click",    () => selectTab("log"));
 $("tabRoll").addEventListener("click",   () => selectTab("roll"));
+$("tabVisitors").addEventListener("click", () => selectTab("visitors"));
 $("rollDrill").addEventListener("click",    () => startRoll("drill"));
 $("rollIncident").addEventListener("click", () => startRoll("incident"));
 $("rollPrint").addEventListener("click", async () => {
@@ -878,6 +1019,8 @@ $("rollPrint").addEventListener("click", async () => {
 $("rollBody").addEventListener("click", (e) => {
   const mark = e.target.closest("[data-mark]");
   if (mark) return markRoll(mark.dataset.mark);
+  const vmark = e.target.closest("[data-vmark]");
+  if (vmark) return markVisit(vmark.dataset.vmark);
   if (e.target.closest("#rollEnd")) return endRoll();
   if (e.target.closest("#rollNeed")) { state.rollNeedOnly = !state.rollNeedOnly; return renderRoll(); }
 });

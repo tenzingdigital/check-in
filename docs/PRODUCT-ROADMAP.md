@@ -116,6 +116,18 @@ schema is dropped and its logins stop working.
   on who those people are before it is modelled.
 - Provisioning a new centre from the template, and deprovisioning one.
 
+## Stage 2b — Visitors, staff and contractors
+
+**Status: built 7 September 2026 (migration 024), behind the
+`feature_visitors` switch, on the working branch.** Donal's question
+three: staff, visitors, contractors and suppliers logged as on or off
+site. A Visitors tab on the gate signs anyone who is not a resident in on
+arrival (kind from a fixed list, name, optional company) and out when they
+leave; whoever is still on site is a group on the roll call and is marked
+safe like a resident; a Visitors report covers a date range. Held as long
+as the movement log. Children out at school remain residents signed out at
+the gate, which the gate already records.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**

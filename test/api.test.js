@@ -1293,6 +1293,66 @@ async function main() {
     assert.ok(rc.ended_at);
   });
 
+  console.log("\n== visitors, staff and contractors (migration 024) ==");
+
+  let visitId;
+  await test("a guard signs a contractor in and out; the day's list and the on-site list agree", async () => {
+    const off = await api.fetch("/api/session");
+    assert.equal(off.json.settings.feature_visitors, false, "the switch defaults off");
+    const bad = await api.fetch("/api/visits", { method: "POST", body: { kind: "spy", name: "X" } });
+    assert.equal(bad.status, 400);
+    const noName = await api.fetch("/api/visits", { method: "POST", body: { kind: "visitor", name: "  " } });
+    assert.equal(noName.status, 400);
+    const arrive = await api.fetch("/api/visits", { method: "POST", body: { kind: "contractor", name: "Pat Sparks", company: "Sparks Electrical" } });
+    assert.equal(arrive.status, 201, arrive.text);
+    visitId = arrive.json.id;
+    assert.equal(arrive.json.left_at, null);
+    assert.match(arrive.json.arrived_by_name, /Gina/);
+    const onSite = await api.fetch("/api/visits?on_site=1");
+    assert.ok(onSite.json.some((v) => v.id === visitId), "the contractor is not on the on-site list");
+    const today = await api.fetch("/api/visits");
+    assert.ok(today.json.some((v) => v.id === visitId));
+    const leave = await api.fetch(`/api/visits/${visitId}/leave`, { method: "POST", body: {} });
+    assert.equal(leave.status, 200, leave.text);
+    assert.ok(leave.json.left_at, "no departure time");
+    assert.match(leave.json.left_by_name, /Gina/);
+    const again = await api.fetch(`/api/visits/${visitId}/leave`, { method: "POST", body: {} });
+    assert.equal(again.status, 200, "a second sign-out is a no-op, not an error");
+    assert.equal(again.json.left_at, leave.json.left_at, "the first departure time stands");
+    const gone = await api.fetch("/api/visits?on_site=1");
+    assert.ok(!gone.json.some((v) => v.id === visitId), "still on the on-site list after leaving");
+    const missing = await api.fetch(`/api/visits/00000000-0000-4000-8000-000000000000/leave`, { method: "POST", body: {} });
+    assert.equal(missing.status, 404);
+    // Nobody writes the table directly.
+    const { rows } = await withIdentity(guardId, (c) => c.query(`select has_table_privilege('visits', 'insert') as ins, has_table_privilege('visits', 'update') as upd`));
+    assert.equal(rows[0].ins, false); assert.equal(rows[0].upd, false);
+  });
+
+  await test("a visitor on site is on the roll call and can be marked safe; the report lists the visit", async () => {
+    const arrive = await api.fetch("/api/visits", { method: "POST", body: { kind: "visitor", name: "Ann Visitor" } });
+    assert.equal(arrive.status, 201, arrive.text);
+    const rcId = require("crypto").randomUUID();
+    const start = await api.fetch("/api/roll-calls", { method: "POST", body: { id: rcId, kind: "drill" } });
+    assert.equal(start.status, 201, start.text);
+    const mark = await api.fetch(`/api/roll-calls/${rcId}/visit-marks`, { method: "POST", body: { visit_id: arrive.json.id } });
+    assert.equal(mark.status, 200, mark.text);
+    const active = await api.fetch("/api/roll-calls/active");
+    assert.ok(active.json.visit_marks.some((m) => m.visit_id === arrive.json.id), "the visitor's mark is not on the roll call");
+    const twice = await api.fetch(`/api/roll-calls/${rcId}/visit-marks`, { method: "POST", body: { visit_id: arrive.json.id } });
+    assert.equal(twice.status, 200, "a second tick is a no-op");
+    await api.fetch(`/api/roll-calls/${rcId}/end`, { method: "POST", body: {} });
+    await api.fetch(`/api/visits/${arrive.json.id}/leave`, { method: "POST", body: {} });
+    const rep = await supC.fetch(`/api/reports/visits?from=${siteToday()}&to=${siteToday()}&reason=HIQA+inspection&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    const ann = rep.json.rows.find((r) => r.name === "Ann Visitor");
+    assert.ok(ann, "the visit is not on the report");
+    assert.equal(ann.kind, "visitor"); assert.ok(ann.left, "no departure on the report");
+    // Purge follows the movement log: an old, finished visit goes; one still on site stays.
+    await withOwner((c) => c.query(`update public.visits set arrived_at = now() - interval '400 days', left_at = now() - interval '399 days' where id = $1`, [visitId]));
+    const purged = await withOwner((c) => c.query(`select public.purge_expired_visits() as n`));
+    assert.ok(purged.rows[0].n >= 1, "the old visit was not purged");
+  });
+
   console.log("\n== households ==");
 
   let kidId;
@@ -1380,7 +1440,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 7);
+    assert.equal(list.json.length, 8);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1977,6 +2037,11 @@ async function main() {
         const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [`target${Math.floor(Math.random() * 1e9)}@hut.example`, PASSWORD, "Target Staff", "guard"]));
         fx.staffId = rows[0].id;
       },
+      visit: async () => {
+        const v = await guardC.fetch("/api/visits", { method: "POST", body: { kind: "visitor", name: `Matrix Visitor ${Math.floor(Math.random() * 1e6)}` } });
+        assert.equal(v.status, 201, v.text);
+        fx.visitId = v.json.id;
+      },
       tenant: async () => {
         const n = Math.floor(Math.random() * 1e6);
         const t = await clients.platform.fetch("/api/tenants", { method: "POST", body: { name: `Centre ${n}`, slug: `centre-${n}`, admin_name: "First Admin", admin_email: `first${n}@hut.example` } });
@@ -1984,7 +2049,7 @@ async function main() {
         fx.tenantId = t.json.id; fx.tenantSlug = `centre-${n}`;
       },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "tenant"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "tenant"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 

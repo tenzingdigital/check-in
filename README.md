@@ -382,6 +382,12 @@ out of the two working apps:
   occupancy and the evacuation list as they stand, each as a CSV download
   or a printable page. A reason is required and every export is on the
   audit record with the range.
+- **Visitors, staff and contractors** (behind `feature_visitors`): a
+  Visitors tab on the gate signs anyone who is not a resident in on arrival
+  and out when they leave, with a kind from a fixed list, a name and an
+  optional company. Whoever is still on site is a group on the roll call,
+  marked safe like a resident, and a Visitors report covers a date range.
+  Kept as long as the movement log.
 - **Roll call on several phones at once**: every warden's Roll call tab
   shows the same drill, ticks made on one phone appear on the others within
   about five seconds, and a tick is per resident so nobody is counted

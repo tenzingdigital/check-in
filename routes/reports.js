@@ -98,6 +98,21 @@ const REPORTS = {
   },
 };
 
+// Staff, visitors, contractors and suppliers on site (migration 024).
+REPORTS.visits = {
+  title: 'Visitors, staff and contractors',
+  ranged: true,
+  sql: `select to_char(v.arrived_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as arrived,
+               to_char(v.left_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as "left",
+               v.kind, v.name, v.company, a.full_name as signed_in_by, l.full_name as signed_out_by
+          from visits v
+          left join profiles a on a.id = v.arrived_by
+          left join profiles l on l.id = v.left_by
+          cross join (select local_timezone from app_settings where id) s
+         where (v.arrived_at at time zone s.local_timezone)::date between $1 and $2
+         order by v.arrived_at desc`,
+};
+
 // Administrators only: who opened which resident's record (migration 023).
 REPORTS.access = {
   title: 'Who viewed which record',

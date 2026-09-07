@@ -37,7 +37,9 @@ async function rollCallWithMarks(client, id) {
   const { rows } = await client.query(
     `select rc.*, p.full_name as started_by_name,
             coalesce((select jsonb_agg(jsonb_build_object('resident_id', m.resident_id, 'marked_at', m.marked_at, 'marked_by', m.marked_by) order by m.marked_at)
-                        from roll_call_marks m where m.roll_call_id = rc.id), '[]'::jsonb) as marks
+                        from roll_call_marks m where m.roll_call_id = rc.id), '[]'::jsonb) as marks,
+            coalesce((select jsonb_agg(jsonb_build_object('visit_id', vm.visit_id, 'marked_at', vm.marked_at, 'marked_by', vm.marked_by) order by vm.marked_at)
+                        from roll_call_visit_marks vm where vm.roll_call_id = rc.id), '[]'::jsonb) as visit_marks
        from roll_calls rc
        left join profiles p on p.id = rc.started_by
       where rc.id = $1`, [id]);
@@ -83,6 +85,19 @@ router.post('/roll-calls/:id/marks', wrap(async (req, res) => {
   const ref = body.ref ? uuidParam(body.ref, 'ref') : null;
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(`select * from mark_roll_call($1, $2, $3, $4)`, [id, residentId, ref, when(body.at)]);
+    return rows[0];
+  });
+  res.json(row);
+}));
+
+// A non-resident on site, marked safe (migration 024).
+router.post('/roll-calls/:id/visit-marks', wrap(async (req, res) => {
+  const body = req.body || {};
+  const id = uuidParam(req.params.id, 'roll call id');
+  const visitId = uuidParam(body.visit_id, 'visit_id');
+  const ref = body.ref ? uuidParam(body.ref, 'ref') : null;
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(`select * from mark_roll_call_visit($1, $2, $3, $4)`, [id, visitId, ref, when(body.at)]);
     return rows[0];
   });
   res.json(row);

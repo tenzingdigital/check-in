@@ -203,6 +203,7 @@ CREATE TABLE __TENANT__.app_settings (
     feature_households boolean DEFAULT false NOT NULL,
     mfa_email boolean DEFAULT false NOT NULL,
     home_countries text DEFAULT 'IE'::text NOT NULL,
+    feature_visitors boolean DEFAULT false NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -818,6 +819,47 @@ $$;
 
 --
 
+-- Name: roll_call_visit_marks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.roll_call_visit_marks (
+    roll_call_id uuid NOT NULL,
+    visit_id uuid NOT NULL,
+    marked_at timestamp with time zone DEFAULT now() NOT NULL,
+    marked_by uuid,
+    client_ref uuid
+);
+
+
+--
+
+-- Name: mark_roll_call_visit(uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.mark_roll_call_visit(p_roll_call_id uuid, p_visit_id uuid, p_client_ref uuid DEFAULT NULL::uuid, p_at timestamp with time zone DEFAULT now()) RETURNS __TENANT__.roll_call_visit_marks
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v __TENANT__.roll_call_visit_marks;
+begin
+  if not __TENANT__.is_staff() then raise exception 'Not authorised to mark a roll call' using errcode = '42501'; end if;
+  if not exists (select 1 from __TENANT__.roll_calls where id = p_roll_call_id) then
+    raise exception 'No such roll call' using errcode = 'P0002';
+  end if;
+  if not exists (select 1 from __TENANT__.visits where id = p_visit_id) then
+    raise exception 'No such visit' using errcode = 'P0002';
+  end if;
+  insert into __TENANT__.roll_call_visit_marks (roll_call_id, visit_id, marked_at, marked_by, client_ref)
+  values (p_roll_call_id, p_visit_id, least(coalesce(p_at, now()), now()), auth.uid(), p_client_ref)
+  on conflict do nothing;
+  select * into v from __TENANT__.roll_call_visit_marks where roll_call_id = p_roll_call_id and visit_id = p_visit_id;
+  return v;
+end;
+$$;
+
+
+--
+
 -- Name: my_role(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1028,6 +1070,25 @@ declare v_days integer; v_n integer;
 begin
   select compliance_retention_days into v_days from __TENANT__.app_settings where id;
   delete from __TENANT__.roll_calls where started_at < now() - make_interval(days => v_days);
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
+-- Name: purge_expired_visits(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_expired_visits() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_days integer; v_n integer;
+begin
+  select event_retention_days into v_days from __TENANT__.app_settings where id;
+  delete from __TENANT__.visits where arrived_at < now() - make_interval(days => v_days) and left_at is not null;
   get diagnostics v_n = row_count;
   return v_n;
 end;
@@ -1359,6 +1420,72 @@ begin
   end if;
   perform __TENANT__.assert_late_entry_window(p_occurred_at);
   return __TENANT__.record_checkin_at(p_resident_id, p_occurred_at, true, p_client_ref);
+end;
+$$;
+
+
+--
+
+-- Name: visits; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.visits (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    kind text NOT NULL,
+    name text NOT NULL,
+    company text,
+    arrived_at timestamp with time zone DEFAULT now() NOT NULL,
+    arrived_by uuid,
+    left_at timestamp with time zone,
+    left_by uuid,
+    CONSTRAINT visits_company_check CHECK (((company IS NULL) OR (length(company) <= 80))),
+    CONSTRAINT visits_kind_check CHECK ((kind = ANY (ARRAY['staff'::text, 'visitor'::text, 'contractor'::text, 'supplier'::text]))),
+    CONSTRAINT visits_left_after_arrival CHECK (((left_at IS NULL) OR (left_at >= arrived_at))),
+    CONSTRAINT visits_name_check CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80)))
+);
+
+
+--
+
+-- Name: record_visit_arrival(text, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.record_visit_arrival(p_kind text, p_name text, p_company text DEFAULT NULL::text) RETURNS __TENANT__.visits
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v __TENANT__.visits;
+begin
+  if not __TENANT__.is_staff() then raise exception 'Not authorised to sign a visitor in' using errcode = '42501'; end if;
+  if p_kind not in ('staff', 'visitor', 'contractor', 'supplier') then
+    raise exception 'kind must be staff, visitor, contractor or supplier' using errcode = '22023';
+  end if;
+  if length(coalesce(btrim(p_name), '')) = 0 then raise exception 'A name is required' using errcode = '22023'; end if;
+  insert into __TENANT__.visits (kind, name, company, arrived_by)
+  values (p_kind, btrim(p_name), nullif(btrim(coalesce(p_company, '')), ''), auth.uid())
+  returning * into v;
+  return v;
+end;
+$$;
+
+
+--
+
+-- Name: record_visit_departure(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.record_visit_departure(p_id uuid) RETURNS __TENANT__.visits
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v __TENANT__.visits;
+begin
+  if not __TENANT__.is_staff() then raise exception 'Not authorised to sign a visitor out' using errcode = '42501'; end if;
+  update __TENANT__.visits set left_at = now(), left_by = auth.uid()
+   where id = p_id and left_at is null;
+  select * into v from __TENANT__.visits where id = p_id;
+  if v.id is null then raise exception 'No such visit' using errcode = 'P0002'; end if;
+  return v;
 end;
 $$;
 
@@ -1951,6 +2078,24 @@ ALTER TABLE ONLY __TENANT__.roll_call_marks
 
 --
 
+-- Name: roll_call_visit_marks roll_call_visit_marks_client_ref_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.roll_call_visit_marks
+    ADD CONSTRAINT roll_call_visit_marks_client_ref_key UNIQUE (client_ref);
+
+
+--
+
+-- Name: roll_call_visit_marks roll_call_visit_marks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.roll_call_visit_marks
+    ADD CONSTRAINT roll_call_visit_marks_pkey PRIMARY KEY (roll_call_id, visit_id);
+
+
+--
+
 -- Name: roll_calls roll_calls_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1974,6 +2119,15 @@ ALTER TABLE ONLY __TENANT__.rooms
 
 ALTER TABLE ONLY __TENANT__.rooms
     ADD CONSTRAINT rooms_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: visits visits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.visits
+    ADD CONSTRAINT visits_pkey PRIMARY KEY (id);
 
 
 --
@@ -2142,6 +2296,22 @@ CREATE INDEX roll_calls_open_idx ON __TENANT__.roll_calls USING btree (started_a
 --
 
 CREATE INDEX rooms_building_idx ON __TENANT__.rooms USING btree (building_id, sort, floor, number);
+
+
+--
+
+-- Name: visits_arrived_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX visits_arrived_idx ON __TENANT__.visits USING btree (arrived_at DESC);
+
+
+--
+
+-- Name: visits_on_site_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX visits_on_site_idx ON __TENANT__.visits USING btree (arrived_at DESC) WHERE (left_at IS NULL);
 
 
 --
@@ -2346,6 +2516,33 @@ ALTER TABLE ONLY __TENANT__.roll_call_marks
 
 --
 
+-- Name: roll_call_visit_marks roll_call_visit_marks_marked_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.roll_call_visit_marks
+    ADD CONSTRAINT roll_call_visit_marks_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: roll_call_visit_marks roll_call_visit_marks_roll_call_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.roll_call_visit_marks
+    ADD CONSTRAINT roll_call_visit_marks_roll_call_id_fkey FOREIGN KEY (roll_call_id) REFERENCES __TENANT__.roll_calls(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: roll_call_visit_marks roll_call_visit_marks_visit_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.roll_call_visit_marks
+    ADD CONSTRAINT roll_call_visit_marks_visit_id_fkey FOREIGN KEY (visit_id) REFERENCES __TENANT__.visits(id) ON DELETE CASCADE;
+
+
+--
+
 -- Name: roll_calls roll_calls_ended_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2369,6 +2566,24 @@ ALTER TABLE ONLY __TENANT__.roll_calls
 
 ALTER TABLE ONLY __TENANT__.rooms
     ADD CONSTRAINT rooms_building_id_fkey FOREIGN KEY (building_id) REFERENCES __TENANT__.buildings(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: visits visits_arrived_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.visits
+    ADD CONSTRAINT visits_arrived_by_fkey FOREIGN KEY (arrived_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: visits visits_left_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.visits
+    ADD CONSTRAINT visits_left_by_fkey FOREIGN KEY (left_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
 
 
 --
@@ -2601,6 +2816,21 @@ CREATE POLICY roll_call_marks_read ON __TENANT__.roll_call_marks FOR SELECT USIN
 
 --
 
+-- Name: roll_call_visit_marks; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.roll_call_visit_marks ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: roll_call_visit_marks roll_call_visit_marks_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY roll_call_visit_marks_read ON __TENANT__.roll_call_visit_marks FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
 -- Name: roll_calls; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2635,6 +2865,21 @@ CREATE POLICY rooms_read ON __TENANT__.rooms FOR SELECT USING (__TENANT__.is_sta
 --
 
 CREATE POLICY rooms_supervisor ON __TENANT__.rooms USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
+
+
+--
+
+-- Name: visits; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.visits ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: visits visits_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY visits_read ON __TENANT__.visits FOR SELECT USING (__TENANT__.is_staff());
 
 
 --
@@ -2884,6 +3129,25 @@ GRANT ALL ON FUNCTION __TENANT__.mark_roll_call(p_roll_call_id uuid, p_resident_
 
 --
 
+-- Name: TABLE roll_call_visit_marks; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.roll_call_visit_marks TO service_role;
+GRANT SELECT ON TABLE __TENANT__.roll_call_visit_marks TO authenticated;
+
+
+--
+
+-- Name: FUNCTION mark_roll_call_visit(p_roll_call_id uuid, p_visit_id uuid, p_client_ref uuid, p_at timestamp with time zone); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.mark_roll_call_visit(p_roll_call_id uuid, p_visit_id uuid, p_client_ref uuid, p_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.mark_roll_call_visit(p_roll_call_id uuid, p_visit_id uuid, p_client_ref uuid, p_at timestamp with time zone) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.mark_roll_call_visit(p_roll_call_id uuid, p_visit_id uuid, p_client_ref uuid, p_at timestamp with time zone) TO service_role;
+
+
+--
+
 -- Name: FUNCTION my_role(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -2991,6 +3255,15 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_roll_calls() TO service_role;
 
 --
 
+-- Name: FUNCTION purge_expired_visits(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_visits() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_visits() TO service_role;
+
+
+--
+
 -- Name: FUNCTION purge_resident_views(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -3063,6 +3336,35 @@ REVOKE ALL ON FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at tim
 REVOKE ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occurred_at timestamp with time zone, p_client_ref uuid) TO service_role;
+
+
+--
+
+-- Name: TABLE visits; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.visits TO service_role;
+GRANT SELECT ON TABLE __TENANT__.visits TO authenticated;
+
+
+--
+
+-- Name: FUNCTION record_visit_arrival(p_kind text, p_name text, p_company text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_visit_arrival(p_kind text, p_name text, p_company text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_visit_arrival(p_kind text, p_name text, p_company text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_visit_arrival(p_kind text, p_name text, p_company text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION record_visit_departure(p_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) TO service_role;
 
 
 --

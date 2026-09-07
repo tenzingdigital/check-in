@@ -197,4 +197,24 @@ select pg_temp.try('anon notes a view',                    format('select public
 reset role;
 
 \echo ''
+\echo '=========== K. VISITORS (migration 024) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+\echo '--- the guard signs a contractor in and out: allowed'
+select kind, name, company, left_at is null as on_site from public.record_visit_arrival('contractor', ' Pat Sparks ', 'Sparks Ltd');
+select id as visit_id from public.visits where name = 'Pat Sparks' \gset
+select left_at is not null as signed_out from public.record_visit_departure(:'visit_id');
+select pg_temp.try('guard inserts a visit directly',        'insert into public.visits (kind, name) values (''visitor'', ''Direct'')');
+select pg_temp.try('guard edits a visit directly',          format('update public.visits set name = ''Someone Else'' where id = %L', :'visit_id'));
+select pg_temp.try('guard deletes a visit',                 format('delete from public.visits where id = %L', :'visit_id'));
+select pg_temp.try('guard records a visit of an unknown kind', 'select public.record_visit_arrival(''spy'', ''X'', null)');
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon reads visits',                     'select * from public.visits');
+select pg_temp.try('anon signs a visitor in',               'select public.record_visit_arrival(''visitor'', ''X'', null)');
+reset role;
+
+\echo ''
 \echo '=========== DONE ==========='
