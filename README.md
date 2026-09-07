@@ -176,8 +176,8 @@ scheduling that job is not optional.
 
 Staff may attach a reason to a missed day with `annotate_compliance_day()`,
 but the reason never flips the outcome — a `breach_noted` day still counts as a
-breach and still appears in the attention list. Annotation only demotes a row
-in the attention list's ordering and greys it in the UI; it never removes it.
+breach and still counts under Admin → Absences. Annotation only demotes a row
+in `attention_list()`'s ordering and greys it in the UI; it never removes it.
 **Consecutive missed days, not the total, is the headline number** — three
 days running is a different kind of problem than three scattered Tuesdays over
 six months.

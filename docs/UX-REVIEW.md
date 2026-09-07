@@ -302,12 +302,13 @@ needs; consider showing three by default (Status, Today, Consecutive nights)
 and the rest on a tap. The House Rules note is the best copy in the product.
 The 30-day strip needs a legend (P2).
 
-### Daily register — Breaches view (was the Attention tab)
+### Daily register — Breaches view (was the Attention tab; removed 7 September)
 
 *Updated the same afternoon:* the Attention tab and the chip row were
-removed. The tiles are the only filter, and the Breaches tile lists
-worst-first exactly as the Attention tab did. The paragraph below describes
-the tab as reviewed; the ordering note still applies to the tile's list.
+removed and the Breaches tile listed worst-first as the tab did. *7
+September:* the tile went too; the worst-first list is Admin → Absences.
+The paragraph below describes the tab as reviewed; the ordering note now
+applies to that tab.
 
 ### Daily register — Attention (as reviewed)
 Does what it says. The pip count in the tab is alarming with demo data, but

@@ -137,11 +137,11 @@
   <div class="step"><b>2</b><span>Look at the person, then swipe the card either way, or tap the name and press <span class="ui">Check in</span>.</span></div>
   <div class="step"><b>3</b><span>The card drops off the Not seen list and the tile counts change. A second check-in on the same day is recorded but changes nothing.</span></div>
   <h3>The tiles</h3>
-  <p><span class="ui">Not seen</span> is today's work. <span class="ui">Missed days</span> is residents with a day they were required and not seen, worst first; it is always yesterday or earlier, because a day only closes at midnight. <span class="ui">Seen today</span> is who has already checked in.</p>
+  <p><span class="ui">Not seen</span> is today's work: residents required today who have not checked in. <span class="ui">Seen today</span> is who has already checked in, and each card says the time. Runs of missed nights and days absent in the rolling window are not on this screen; supervisors and admins read them under <span class="ui">Admin → Absences</span>.</p>
   <h3>Under 18s</h3>
-  <p>Residents under the site's adult age are listed but not required. Their cards say so, and they never appear under Missed days.</p>
+  <p>Residents under the site's adult age are listed but not required. Their cards say so, and they are never counted as not seen.</p>
   <h3>The detail sheet</h3>
-  <p>Tap a name for the sheet: the identity document type and number, the last 30 days as a strip (green seen, red missed, grey not required), and a note when a house rule applies, such as a run of missed nights. The note states the rule and the facts; it never gives a verdict. Supervisors and admins can add or change the ID number here.</p>
+  <p>Tap a name for the sheet: the identity document type and number, the time of today's check-in and every check-in recorded today with the name of whoever recorded it, consecutive missed nights and days absent in the rolling window each shown beside the figure in Settings ("2 of 3", "9 of 10"), the last 30 days as a strip (green seen, red missed, grey not required; long-press a green cell for the time), and a note when a count has reached a figure. The note states the count and the figure; it never gives a verdict. Supervisors and admins can add or change the ID number here.</p>
   <p class="warn">The ID number is shown on the sheet only, never in a list, and every opening of the sheet is logged with your name. That is by design: an inspector can ask who looked at a record.</p>
   <a class="top" href="#top">Back to the top</a>
 
@@ -173,6 +173,8 @@
   <div class="step"><b>2</b><span><span class="ui">Import</span>, choose the file. Every line gets a verdict: ready, already on the register, or the problem to fix, such as a date that does not exist or a room the site does not have.</span></div>
   <div class="step"><b>3</b><span>Tap <span class="ui">Import N residents</span>. Only the ready lines are added. Fix the sheet and import it again: anyone already here is skipped, never duplicated.</span></div>
   <p>Dates can be written day first (14/03/1988) or year first (1988-03-14). The evacuation column can be words, such as "needs help to move" or "wheelchair".</p>
+  <h3>Absences</h3>
+  <p>Every active resident with a run of consecutive missed nights or a missed day in the rolling window, worst first, each count beside the figure in Settings. A count that has reached its figure is marked. Nothing is decided here; the letter is the manager's.</p>
   <h3>Buildings and rooms</h3>
   <p>Describe the site once: buildings, floors and room numbers as painted on the doors, with a capacity. Assign residents to rooms on their edit sheet. The tab then shows occupancy per room and who is on site, which is the list a fire officer asks for.</p>
   <h3>Reports</h3>
@@ -202,7 +204,7 @@
   <details><summary>My login was refused because of where I am</summary><p>Supervisors and admins can only log in from the site's home countries. If you are travelling, ask an admin to add the country under Settings, or use a guard account.</p></details>
   <details><summary>A resident is missing from the list</summary><p>They may be marked departed: an admin can see them under Residents with the Departed filter and reactivate them. Or they were never added: Add or Import.</p></details>
   <details><summary>Something says Queued and stays that way</summary><p>The device has no connection. Check the pill in the header. The event is safe and will be sent when the connection returns.</p></details>
-  <details><summary>The nightly job is late</summary><p>A banner appears on the register when the midnight close-out has not run. Missed days may be behind by a day until it does. Tell your administrator; it is a hosting matter, not a data one.</p></details>
+  <details><summary>The nightly job is late</summary><p>A banner appears on the register when the close-out has not run by two in the morning, site time. Until it runs, yesterday is not yet on the record as missed, and Admin → Absences may be a day behind. Tell your administrator; it is a hosting matter, not a data one.</p></details>
   <a class="top" href="#top">Back to the top</a>
 
   <h2 id="privacy">Privacy on one page</h2>
