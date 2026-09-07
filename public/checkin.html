@@ -81,6 +81,11 @@
   }
   .policy p { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--text); }
   .policy p + p { margin-top: 8px; }
+
+  .events { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+  .events div { padding: 2px 0; }
+  .events b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .fact b small { font-weight: 400; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body class="app-register">
@@ -343,9 +348,9 @@ function idForm(r) {
     </form>`;
 }
 
-// The two House Rules thresholds, stated as facts with the rule named. This
-// reports; it does not decide, label, or send anything. Reaching a threshold
-// is the centre manager's call to make, which is where the House Rules put it.
+// Facts against the figures in Settings. The app never says a threshold
+// "was met" as a verdict; it states the count and the figure side by side
+// and the decision is the manager's (migrations/008).
 function policyNotes(r) {
   const notes = [];
   const nights = r.consecutive_missed || 0;
@@ -355,18 +360,36 @@ function policyNotes(r) {
   const windowDays = r.absence_window_days || 28;
 
   if (nights >= nightLimit) {
-    notes.push(`${nights} consecutive nights recorded. House Rules: an absence of
-      ${nightLimit} consecutive nights without explanation draws a warning letter.`);
+    notes.push(`${nights} consecutive nights recorded; the figure in Settings is ${nightLimit}.`);
   }
   if (inWindow >= windowLimit) {
-    notes.push(`${inWindow} days absent in the last ${windowDays}. House Rules:
-      ${windowLimit} days inside a ${windowDays}-day window is treated as absence
-      without authorisation.`);
+    notes.push(`${inWindow} days absent in the last ${windowDays}; the figure in Settings is ${windowLimit}.`);
   } else if (inWindow >= windowLimit - 2 && inWindow > 0) {
     notes.push(`${inWindow} of ${windowLimit} days in the last ${windowDays}.`);
   }
   if (!notes.length) return "";
   return `<div class="policy">${notes.map((n) => `<p>${esc(n.replace(/\s+/g, " "))}</p>`).join("")}</div>`;
+}
+
+// "Seen 23:31 (1×)": the first presentation today, in the site's zone, and
+// how many taps landed on the day. A queued check-in is not yet a time the
+// server has; it says so.
+function todayFact(r) {
+  if (r.queued) return "Queued";
+  if (!r.seen_today) return "Not yet";
+  const t = siteTime(r.first_seen_at, state.settings && state.settings.local_timezone);
+  return `Seen${t ? " " + esc(t) : ""} (${r.checkins_today || 1}×)`;
+}
+
+// Every check-in recorded today, newest first, with the guard who recorded
+// it. Shown only when there is one: this is the line a manager reads when
+// a resident says "I checked in" and the register says otherwise.
+function eventsToday(r) {
+  const evs = r.checkins_today_events || [];
+  if (!evs.length) return "";
+  const tz = state.settings && state.settings.local_timezone;
+  return `<div class="events"><span class="stripTitle">Today's check-ins</span>${evs.map((e) =>
+    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b> · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
 }
 
 function renderDetail(r) {
@@ -388,7 +411,10 @@ function renderDetail(r) {
     guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {}).then((fresh) => {
       if (!fresh) return;
       const row = state.rows.get(r.id) || r;
-      Object.assign(row, { id_type: fresh.id_type, id_number: fresh.id_number, has_id: !!fresh.id_number });
+      Object.assign(row, {
+        id_type: fresh.id_type, id_number: fresh.id_number, has_id: !!fresh.id_number,
+        first_seen_at: fresh.first_seen_at, checkins_today_events: fresh.checkins_today_events || [],
+      });
       if (state.selected && state.selected.id === r.id) renderDetail(row);
     });
   }
@@ -399,12 +425,15 @@ function renderDetail(r) {
     <div class="idline">${idLine(r)}</div>
 
     <div class="facts">
-      <div class="fact"><span>Status</span><b class="badge ${esc(r.state)}">${esc(stateLabel(r.state))}</b></div>
-      <div class="fact"><span>Today</span><b>${r.seen_today ? `Seen (${r.checkins_today}×)` : "Not yet"}</b></div>
+      <div class="fact"><span>Status</span><b class="badge ${esc(viewState(r))}">${esc(stateLabel(viewState(r)))}</b></div>
+      <div class="fact"><span>Today</span><b>${todayFact(r)}</b></div>
       <div class="fact"><span>Last seen</span><b>${esc(lastSeenText(r))}</b></div>
-      <div class="fact"><span>Consecutive nights</span><b>${r.consecutive_missed || 0}</b></div>
-      <div class="fact"><span>Absent in ${r.absence_window_days || 28} days</span><b>${r.absent_in_window || 0}</b></div>
+      <div class="fact"><span>Consecutive nights</span><b>${r.consecutive_missed || 0} <small>of ${r.warn_after_consecutive_nights || 3}</small></b></div>
+      <div class="fact"><span>Absent in ${r.absence_window_days || 28} days</span><b>${r.absent_in_window || 0} <small>of ${r.absence_window_limit || 10}</small></b></div>
+      <div class="fact"><span>Missed days on record</span><b>${r.open_breaches || 0}</b></div>
     </div>
+
+    ${eventsToday(r)}
 
     ${policyNotes(r)}
 
@@ -710,9 +739,12 @@ function openIdEditor(r) {
 // than to this terminal's clock, so the strip lines up with the register.
 async function loadStrip(residentId) {
   const data = await guarded(() => apiGet(`/api/residents/${residentId}/days`), (err) => Offline.noteFailure(err));
-  return (data || []).map(d =>
-    `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(d.compliance_date)}"></i>`
-  ).join("");
+  const tz = state.settings && state.settings.local_timezone;
+  return (data || []).map(d => {
+    const t = d.presented ? siteTime(d.first_seen_at, tz) : "";
+    const title = t ? `${d.compliance_date} · ${t}` : d.compliance_date;
+    return `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(title)}"></i>`;
+  }).join("");
 }
 
 /* ========================================================================
