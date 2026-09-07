@@ -995,3 +995,44 @@ select public.note_report('register', 'inspection', current_date - 7, current_da
 reset role;
 select count(*) as n from public.admin_audit where table_name = 'reports' and row_id = 'register' and action = 'export' and note like 'inspection [%' \gset rp_
 select pg_temp.expect('the export is on the record with its range', (:'rp_n')::integer, 1);
+
+\echo ''
+\echo '=========== CLOSE-OUT GRACE (migration 025) ==========='
+\echo '--- close-out grace: yesterday is not due until 02:00 site time'
+-- The function exists and answers one of the two dates the rule allows.
+-- Which one depends on the clock, so the assertion is on the invariant,
+-- not the hour: before 02:00 site time it is the day before yesterday,
+-- from 02:00 it is yesterday, and it is never anything else.
+select public.close_out_due_through() as due \gset
+select date_part('hour', now() at time zone (select local_timezone from public.app_settings where id))::integer as site_hour \gset
+select pg_temp.expect('close_out_due_through: yesterday, or the day before until 02:00 site time',
+  (:'due')::date,
+  case when :site_hour < 2 then public.site_today() - 2 else public.site_today() - 1 end);
+
+-- And the view follows it: a register whose last closed day IS the due day
+-- is not behind, one whose last closed day is the day before the due day is.
+reset role;
+insert into public.residents (id, first_name, last_name, date_of_birth, registered_at)
+values ('66666666-6666-6666-6666-666666666666', 'Grace', 'Window', '1990-01-01', now() - interval '10 days')
+on conflict (id) do nothing;
+-- Earlier fixtures in this file leave closed rows dated yesterday (the
+-- attention-list section's Haddad row, the late-entry section's row); before
+-- 02:00 site time close_out_due_through() is the day before yesterday, so
+-- those rows would outrank the grace row below as "the latest closed day".
+-- This is the last block in the file and nothing after it depends on
+-- earlier fixtures, so clear every closed row later than the due day, for
+-- every resident, before inserting the grace row.
+delete from public.daily_compliance
+ where closed_at is not null and compliance_date > public.close_out_due_through();
+delete from public.daily_compliance where resident_id = '66666666-6666-6666-6666-666666666666';
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
+values ('66666666-6666-6666-6666-666666666666', public.close_out_due_through(), true, false, null, 0, now());
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select close_out_behind as behind_when_due_day_closed from public.v_system_health \gset
+reset role;
+-- Only this fixture's row may be the latest closed day for the assertion to
+-- mean anything: assert that first.
+select pg_temp.expect('fixture: the grace row is the latest closed day',
+  (select max(compliance_date) from public.daily_compliance where closed_at is not null), public.close_out_due_through());
+select pg_temp.expect('v_system_health: not behind when the due day is closed', (:'behind_when_due_day_closed')::boolean, false);

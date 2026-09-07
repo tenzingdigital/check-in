@@ -500,6 +500,23 @@ $$;
 
 --
 
+-- Name: close_out_due_through(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.close_out_due_through() RETURNS date
+    LANGUAGE sql STABLE
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  select case
+    when date_part('hour', now() at time zone (select local_timezone from __TENANT__.app_settings where id)) < 2
+      then __TENANT__.site_today() - 2
+    else __TENANT__.site_today() - 1
+  end;
+$$;
+
+
+--
+
 -- Name: roll_calls; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1935,9 +1952,9 @@ CREATE VIEW __TENANT__.v_system_health AS
           WHERE ((NOT job_runs.ok) AND (job_runs.ran_at > (now() - '2 days'::interval)))) AS recent_failures,
     COALESCE((( SELECT max(daily_compliance.compliance_date) AS max
            FROM __TENANT__.daily_compliance
-          WHERE (daily_compliance.closed_at IS NOT NULL)) < (__TENANT__.site_today() - 1)), (EXISTS ( SELECT 1
+          WHERE (daily_compliance.closed_at IS NOT NULL)) < __TENANT__.close_out_due_through()), (EXISTS ( SELECT 1
            FROM __TENANT__.daily_compliance
-          WHERE (daily_compliance.compliance_date < (__TENANT__.site_today() - 1))))) AS close_out_behind
+          WHERE (daily_compliance.compliance_date < __TENANT__.close_out_due_through())))) AS close_out_behind
   WHERE __TENANT__.is_staff();
 
 
@@ -3017,6 +3034,16 @@ REVOKE ALL ON FUNCTION __TENANT__.audit_row() FROM PUBLIC;
 REVOKE ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) TO service_role;
+
+
+--
+
+-- Name: FUNCTION close_out_due_through(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.close_out_due_through() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO service_role;
 
 
 --
