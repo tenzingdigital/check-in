@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>CheckSteady — Gate</title>
 <style>
   /* ---- roll call (migration 017) ---- */
@@ -76,7 +77,7 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>CheckSteady — Gate</h1>
+  <h1>CheckSteady <span>Gate</span></h1>
   <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -92,8 +93,10 @@
   <header>
     <div class="bar">
       <div class="brand">
-        <span id="siteName">CheckSteady</span>
-        <small id="guardName">&nbsp;</small>
+        <div>
+          <span>CheckSteady</span>
+          <small><b id="siteName"></b> <span id="guardName">&nbsp;</span></small>
+        </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
         <span aria-current="page">Gate</span>
@@ -877,7 +880,7 @@ async function enterApp() {
   state.userId = profile.id;
   state.settings = settings;
 
-  $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
+  $("guardName").textContent = `· ${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
   $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
   mountViewChooser({ current: "gate", canAdmin: profile.role === "admin" || profile.role === "supervisor", canOrg: !!profile.platform_admin });

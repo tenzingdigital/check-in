@@ -191,6 +191,9 @@ a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .lede { font-size: clamp(1.05rem, 1.6vw, 1.3rem); }
 .hero-benefit { color: var(--text-2); max-width: 56ch; margin-top: -6px; }
 
+.sitenav .brand { display: inline-flex; align-items: center; gap: 8px; }
+.sitenav .mark { width: 26px; height: 26px; }
+
 /* The icon row under the hero: the six things the product does, each with
    a line-drawn icon in a tinted circle. Six across on a desk, two by three on
    a phone. */

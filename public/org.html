@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>CheckSteady — Organisation</title>
 
 <!--
@@ -30,7 +31,7 @@
 <body class="app-org">
 
 <section id="login" class="login" hidden>
-  <h1>CheckSteady — Organisation</h1>
+  <h1>CheckSteady <span>Organisation</span></h1>
   <p>Platform administrator sign-in required.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -44,8 +45,10 @@
   <header>
     <div class="bar">
       <div class="brand">
-        <span>Organisation</span>
-        <small id="guardName">&nbsp;</small>
+        <div>
+          <span>CheckSteady</span>
+          <small><b>Organisation</b> <span id="guardName">&nbsp;</span></small>
+        </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
         <a href="/admin.html">Site admin</a>
@@ -139,7 +142,7 @@ async function enterApp() {
   try { session = await apiGet("/api/session"); }
   catch (err) { return showLogin(err.status === 401 ? "" : err.message); }
   state.profile = session.profile;
-  $("guardName").textContent = `${session.profile.full_name} · ${session.profile.platform_admin ? "platform administrator" : session.profile.role}`;
+  $("guardName").textContent = `· ${session.profile.full_name} · ${session.profile.platform_admin ? "platform administrator" : session.profile.role}`;
   $("login").hidden = true;
   $("app").hidden = false;
   rememberView("org");

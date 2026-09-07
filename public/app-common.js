@@ -379,6 +379,18 @@ function nudgeFirstCard(container, app) {
   } catch (_) { /* storage blocked */ }
 }
 
+// The mark and the product name, drawn once here so every page shows the
+// same thing: CheckSteady on the big line, the centre and the person on the
+// small line. The header used to show only the centre's name, which left a
+// person on a shared tablet unsure which product they were in.
+const MARK_SVG = '<svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16"/><path d="M18 33l10 10 18-20"/></svg>';
+function mountBrand() {
+  for (const el of document.querySelectorAll(".brand, .login h1")) {
+    if (!el.querySelector(".mark")) el.insertAdjacentHTML("afterbegin", MARK_SVG);
+  }
+}
+document.addEventListener("DOMContentLoaded", mountBrand);
+
 // Tips: one sentence that explains a control, on demand.
 //
 // Two ways in. A small "?" button (class tip, data-tip="…") next to a label

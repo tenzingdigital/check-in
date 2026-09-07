@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>CheckSteady — Admin</title>
 
 <!--
@@ -31,12 +32,17 @@
   .formcard .field[type="number"] { max-width: 180px; }
   .formcard { box-shadow: var(--lift); }
   /* The role card under the Role field: two short lists, can and cannot. */
-  .rolehelp { display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
-  .rolehelp b { font-size: 14px; }
+  .rolehelp { padding: 10px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+  .rolehelp summary { cursor: pointer; font-size: 13.5px; list-style: none; display: flex; align-items: center; gap: 8px; }
+  .rolehelp summary::-webkit-details-marker { display: none; }
+  .rolehelp summary::after { content: "Show"; margin-left: auto; font-size: 12px; color: var(--accent); font-weight: 600; flex: none; }
+  .rolehelp[open] summary::after { content: "Hide"; }
+  .rolehelp b { font-size: 13.5px; }
+  .rolehelp .lists { display: grid; gap: 8px; margin-top: 10px; }
   .rolehelp ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; color: var(--text); }
   .rolehelp .no { color: var(--muted); }
   .rolehelp .no li::marker { color: var(--muted); }
-  @media (min-width: 520px) { .rolehelp { grid-template-columns: 1fr 1fr; } .rolehelp b { grid-column: 1 / -1; } }
+  @media (min-width: 520px) { .rolehelp .lists { grid-template-columns: 1fr 1fr; } }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .selfend { align-self: end; margin-top: 0; }
   .grid3 { display: grid; grid-template-columns: 1fr 2fr 80px; gap: 8px; }
@@ -111,7 +117,7 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>CheckSteady — Admin</h1>
+  <h1>CheckSteady <span>Admin</span></h1>
   <p>Supervisor or administrator sign-in required.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -127,8 +133,10 @@
   <header>
     <div class="bar">
       <div class="brand">
-        <span id="siteName">CheckSteady</span>
-        <small id="guardName">&nbsp;</small>
+        <div>
+          <span>CheckSteady</span>
+          <small><b id="siteName"></b> <span id="guardName">&nbsp;</span></small>
+        </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
         <a href="/index.html">Gate</a>
@@ -290,7 +298,7 @@
         </div>
         <!-- What the chosen role can and cannot do, in words, before the
              invitation goes: the most common question when adding someone. -->
-        <div id="sfRoleHelp" class="rolehelp" aria-live="polite"></div>
+        <details id="sfRoleHelp" class="rolehelp"></details>
         <div><label class="lbl" for="sfEmail">Email</label><input id="sfEmail" class="field" type="email" required></div>
         <div class="actions">
           <button class="btn primary-in" id="sfAdd" type="submit">Add and send login link</button>
@@ -901,10 +909,15 @@ const ROLE_HELP = {
 };
 function renderRoleHelp() {
   const r = ROLE_HELP[$("sfRole").value] || ROLE_HELP.guard;
+  // One line always; the lists on request, so the form stays short on a phone.
+  const wasOpen = $("sfRoleHelp").open;
   $("sfRoleHelp").innerHTML = `
-    <b>${esc(r.title)}</b>
-    <ul>${r.can.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-    <ul class="no">${r.cannot.map((x) => `<li>Cannot ${esc(x.charAt(0).toLowerCase() + x.slice(1))}</li>`).join("")}</ul>`;
+    <summary><b>${esc(r.title)}</b></summary>
+    <div class="lists">
+      <ul>${r.can.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      <ul class="no">${r.cannot.map((x) => `<li>Cannot ${esc(x.charAt(0).toLowerCase() + x.slice(1))}</li>`).join("")}</ul>
+    </div>`;
+  $("sfRoleHelp").open = wasOpen;
 }
 $("sfRole").addEventListener("change", renderRoleHelp);
 renderRoleHelp();
@@ -1220,7 +1233,7 @@ async function enterApp() {
   state.profile = profile;
   state.userId = profile.id;
   state.settings = settings;
-  $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
+  $("guardName").textContent = `· ${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
 
   $("login").hidden = true;
