@@ -877,3 +877,297 @@ git push origin HEAD
 ```
 
 If the rebase conflicts in `public/checkin.html` or `public/admin.html`, resolve by keeping both sides' intent (the other session's header or tip changes, and this plan's tile/tab changes), re-run `./check.sh`, then push.
+
+---
+
+### Task 8: The close-out banner waits for the job's own hour
+
+Added 8 September 2026 from a screenshot taken at 00:09: every register
+terminal showed "The nightly close-out has not run" in red. It had not —
+`hut-nightly` runs at `30 0 * * *` UTC (`render.yaml`), which is 01:30 in
+Dublin for half the year — but `v_system_health.close_out_behind` compares
+the last closed day with *yesterday* from the first second of the new day.
+A false alarm every night is how a real one gets ignored.
+
+**Files:**
+- Create: `migrations/025_close_out_grace.sql`
+- Regenerate: `tenant/template.sql` (via `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./tools/gen-tenant-template.sh`; the HTTP suite fails if this is forgotten — `test/api.test.js:560-586`)
+- Test: `test/compliance.sql` (append a block at the end, before any final summary lines)
+
+**Interfaces:**
+- Consumes: `public.site_today()`, `public.app_settings.local_timezone` (single row, `where id`), `public.daily_compliance`, `public.job_runs`, `public.is_staff()`.
+- Produces: `public.close_out_due_through()` → `date`; `v_system_health.close_out_behind` now compares against it. No column of the view changes name or order; `public/checkin.html` needs no change.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `test/compliance.sql`:
+
+```sql
+\echo '--- close-out grace: yesterday is not due until 02:00 site time'
+-- The function exists and answers one of the two dates the rule allows.
+-- Which one depends on the clock, so the assertion is on the invariant,
+-- not the hour: before 02:00 site time it is the day before yesterday,
+-- from 02:00 it is yesterday, and it is never anything else.
+select public.close_out_due_through() as due \gset
+select date_part('hour', now() at time zone (select local_timezone from public.app_settings where id))::integer as site_hour \gset
+select pg_temp.expect('close_out_due_through: yesterday, or the day before until 02:00 site time',
+  (:'due')::date,
+  case when :site_hour < 2 then public.site_today() - 2 else public.site_today() - 1 end);
+-- And the view follows it: a register whose last closed day IS the due day
+-- is not behind, one whose last closed day is the day before the due day is.
+reset role;
+insert into public.residents (id, first_name, last_name, date_of_birth, registered_at)
+values ('66666666-6666-6666-6666-666666666666', 'Grace', 'Window', '1990-01-01', now() - interval '10 days')
+on conflict (id) do nothing;
+delete from public.daily_compliance where resident_id = '66666666-6666-6666-6666-666666666666';
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
+values ('66666666-6666-6666-6666-666666666666', public.close_out_due_through(), true, false, null, 0, now());
+set role authenticated;
+select close_out_behind as behind_when_due_day_closed from public.v_system_health \gset
+reset role;
+-- Only this fixture's row may be the latest closed day for the assertion to
+-- mean anything: assert that first.
+select pg_temp.expect('fixture: the grace row is the latest closed day',
+  (select max(compliance_date) from public.daily_compliance where closed_at is not null), public.close_out_due_through());
+select pg_temp.expect('v_system_health: not behind when the due day is closed', (:'behind_when_due_day_closed')::boolean, false);
+```
+
+Before writing, read the top of `test/compliance.sql` to match how it sets and resets roles (`set role authenticated;` / `reset role;`) and how `pg_temp.expect` is called (name, actual, expected), and check whether other closed rows in the fixture have a later `compliance_date` than the due day — if they do (for example a row closed for today), the fixture assertion fails; in that case delete those later closed rows in this block first, since it is the last block in the file.
+
+- [ ] **Step 2: Run the database suite to see it fail**
+
+Run: `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./test/sql.sh 2>&1 | tail -15`
+Expected: fails at `close_out_due_through` — `function public.close_out_due_through() does not exist`.
+
+- [ ] **Step 3: The migration**
+
+Create `migrations/025_close_out_grace.sql`:
+
+```sql
+-- 025: the close-out banner waits for the job's own hour.
+--
+-- v_system_health.close_out_behind compared the last closed day with
+-- yesterday from the first second of the new day, but hut-nightly runs at
+-- 00:30 UTC (render.yaml), which is 01:30 in Dublin for half the year. So
+-- every register terminal showed "The nightly close-out has not run" in red
+-- from midnight until the job ran — a false alarm every night, which is how
+-- a real one gets ignored (seen on a phone at 00:09 on 8 September 2026).
+--
+-- The rule now: until 02:00 site time, the day that must be closed is the
+-- day before yesterday; from 02:00, yesterday. 02:00 leaves the job half an
+-- hour of headroom in summer and an hour and a half in winter. Same
+-- columns, same order; the register page needs no change.
+set search_path = public, extensions;
+
+create or replace function public.close_out_due_through()
+returns date
+language sql stable
+set search_path = public
+as $$
+  select case
+    when date_part('hour', now() at time zone (select local_timezone from public.app_settings where id)) < 2
+      then public.site_today() - 2
+    else public.site_today() - 1
+  end;
+$$;
+
+comment on function public.close_out_due_through() is
+  'The latest day the nightly close-out should have closed by now: yesterday, or the day before until 02:00 site time (hut-nightly runs at 00:30 UTC).';
+
+revoke all on function public.close_out_due_through() from anon, public;
+grant execute on function public.close_out_due_through() to authenticated;
+
+create or replace view public.v_system_health as
+select
+  (select max(compliance_date) from public.daily_compliance where closed_at is not null) as last_closed_day,
+  public.site_today() as site_today,
+  (select max(ran_at) from public.job_runs where job = 'close-out-compliance-days' and ok) as last_close_out_run,
+  (select max(ran_at) from public.job_runs where ok) as last_job_run,
+  (select count(*)::integer from public.job_runs where not ok and ran_at > now() - interval '2 days') as recent_failures,
+  coalesce(
+    (select max(compliance_date) from public.daily_compliance where closed_at is not null) < public.close_out_due_through(),
+    -- No closed day at all: behind only once there has been a full day to close.
+    exists (select 1 from public.daily_compliance where compliance_date < public.close_out_due_through())
+  ) as close_out_behind
+where public.is_staff();
+```
+
+Compare the view body with the current definition in `migrations/012_audit_and_health.sql` (search `create or replace view public.v_system_health`) and with any later migration that redefined it (`grep -ln "v_system_health" migrations/*.sql`): every column other than `close_out_behind` must be copied exactly from the latest definition, in the same order, or `create or replace view` fails.
+
+- [ ] **Step 4: Regenerate the tenant template**
+
+Run: `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./tools/gen-tenant-template.sh 2>&1 | tail -3`
+Expected: `tenant/template.sql` changes; `git diff --stat tenant/template.sql` shows the view and the new function with `__TENANT__.` prefixes and nothing unrelated. If the diff includes unrelated churn, stop and report DONE_WITH_CONCERNS rather than committing it.
+
+- [ ] **Step 5: Run the database and HTTP suites**
+
+Run: `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./test/sql.sh 2>&1 | tail -5` then `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./test/api.sh 2>&1 | tail -3`
+Expected: both pass. (A pre-existing clock-dependent day-boundary assertion around `test/compliance.sql:284` can fail close to midnight; if it is the only failure, note it and re-run after 00:30 site time or report it as such.)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add migrations/025_close_out_grace.sql tenant/template.sql test/compliance.sql
+git commit -m "The close-out banner waits for the job's own hour
+
+hut-nightly runs at 00:30 UTC, 01:30 Dublin in summer, but the health view
+called the close-out late from midnight — a red banner on every terminal
+every night until the job ran. Until 02:00 site time the day due is the
+day before yesterday. Same view columns; the page is unchanged.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QMp1iENRi9GJLzm3baLCQy"
+```
+
+---
+
+### Task 9: The help page and two doc passages catch up
+
+Added 8 September 2026 from the Task 6 review: `public/help.html` still
+documents the three-tile register, and two passages in the docs still say
+"attention list" and "Breaches tile".
+
+**Files:**
+- Modify: `public/help.html` (the register section, and one troubleshooting entry)
+- Modify: `README.md` (the annotation paragraph under the compliance-day table)
+- Modify: `docs/UX-REVIEW.md` (the "Daily register — Breaches view" heading and its paragraph)
+
+- [ ] **Step 1: help.html, the register section**
+
+Replace the `<h3>The tiles</h3>` paragraph:
+
+```html
+  <h3>The tiles</h3>
+  <p><span class="ui">Not seen</span> is today's work: residents required today who have not checked in. <span class="ui">Seen today</span> is who has already checked in, and each card says the time. Runs of missed nights and days absent in the rolling window are not on this screen; supervisors and admins read them under <span class="ui">Admin → Absences</span>.</p>
+```
+
+Replace the `<h3>Under 18s</h3>` paragraph's last clause so the sentence reads:
+
+```html
+  <p>Residents under the site's adult age are listed but not required. Their cards say so, and they are never counted as not seen.</p>
+```
+
+Replace the `<h3>The detail sheet</h3>` paragraph:
+
+```html
+  <p>Tap a name for the sheet: the identity document type and number, the time of today's check-in and every check-in recorded today with the name of whoever recorded it, consecutive missed nights and days absent in the rolling window each shown beside the figure in Settings ("2 of 3", "9 of 10"), the last 30 days as a strip (green seen, red missed, grey not required; long-press a green cell for the time), and a note when a count has reached a figure. The note states the count and the figure; it never gives a verdict. Supervisors and admins can add or change the ID number here.</p>
+```
+
+- [ ] **Step 2: help.html, the troubleshooting entry**
+
+Replace the "The nightly job is late" entry:
+
+```html
+  <details><summary>The nightly job is late</summary><p>A banner appears on the register when the close-out has not run by two in the morning, site time. Until it runs, yesterday is not yet on the record as missed, and Admin → Absences may be a day behind. Tell your administrator; it is a hosting matter, not a data one.</p></details>
+```
+
+- [ ] **Step 3: help.html, the Admin section**
+
+Find the Admin section (`<h2 id="admin"` or similar; `grep -n 'id="admin"' public/help.html`). If it lists the tabs (Residents, Buildings, Reports, Staff, Settings), add an Absences entry after Residents in the same markup as its neighbours, with this text:
+
+```
+Absences: every active resident with a run of consecutive missed nights or a missed day in the rolling window, worst first, each count beside the figure in Settings. A count that has reached its figure is marked. Nothing is decided here; the letter is the manager's.
+```
+
+If the Admin section does not enumerate tabs, add one sentence to its opening paragraph: "The Absences tab is the manager's list: who is near a House Rules figure, worst first."
+
+- [ ] **Step 4: README annotation paragraph**
+
+Replace the paragraph beginning "Staff may attach a reason to a missed day" so it reads:
+
+```
+Staff may attach a reason to a missed day with `annotate_compliance_day()`,
+but the reason never flips the outcome — a `breach_noted` day still counts as a
+breach and still counts under Admin → Absences. Annotation only demotes a row
+in `attention_list()`'s ordering and greys it in the UI; it never removes it.
+```
+
+- [ ] **Step 5: UX review heading**
+
+Replace the heading and paragraph "### Daily register — Breaches view (was the Attention tab)" … "the ordering note still applies to the tile's list." with:
+
+```
+### Daily register — Breaches view (was the Attention tab; removed 7 September)
+
+*Updated the same afternoon:* the Attention tab and the chip row were
+removed and the Breaches tile listed worst-first as the tab did. *7
+September:* the tile went too; the worst-first list is Admin → Absences.
+The paragraph below describes the tab as reviewed; the ordering note now
+applies to that tab.
+```
+
+- [ ] **Step 6: Check and commit**
+
+Run: `grep -n "three tiles\|Missed days\|attention list\|Breaches tile" public/help.html README.md docs/UX-REVIEW.md` — expected: no hits in help.html; README and UX-REVIEW hits only in historical, dated passages (the 4 September findings list, and the "as reviewed" section).
+Run the parse snippet on help.html (`node -e "const fs=require('fs');const h=fs.readFileSync('public/help.html','utf8');console.log(h.length)"` is enough — the page has no script to parse; just confirm it is well-formed by opening the changed blocks).
+
+```bash
+git add public/help.html README.md docs/UX-REVIEW.md
+git commit -m "help: the register has two tiles, the sheet shows the time, Absences is under Admin
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QMp1iENRi9GJLzm3baLCQy"
+```
+
+---
+
+### Task 10: The test cluster runs in UTC on every host
+
+Added 8 September 2026. `test/compliance.sql`'s day-boundary block (around
+line 255-284) derives a synthetic timezone offset from
+`clock_timestamp()::time`, which is rendered in the cluster's session
+timezone. `test/cluster.sh` never sets one, so the throwaway cluster
+inherits the host's zone: UTC in CI and containers, `Europe/Dublin` on a
+Mac. On a Mac the offset is computed against Irish time and applied as if
+UTC, and the assertion fails at every hour of the day — three implementers
+in this plan lost time to it and called it a "midnight flake".
+
+**Files:**
+- Modify: `test/cluster.sh` (the `pg_ctl … start` line, around line 65)
+
+- [ ] **Step 1: Reproduce**
+
+Run: `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./test/sql.sh 2>&1 | grep -nE "day boundary|FAIL|expected" | head -5`
+Expected: the "day boundary: seed timestamp lands on the day before the synthetic today" assertion fails.
+
+- [ ] **Step 2: Pin the cluster's timezone**
+
+In `test/cluster.sh`, the start line currently reads:
+
+```bash
+  if ! as_pg "'$PGBIN/pg_ctl' -D '$WORK/data' -o '-p $port -k $WORK' -l '$WORK/pg.log' -w start" >/dev/null; then
+```
+
+Change the `-o` options to add `-c timezone=UTC -c log_timezone=UTC`:
+
+```bash
+  if ! as_pg "'$PGBIN/pg_ctl' -D '$WORK/data' -o '-p $port -k $WORK -c timezone=UTC -c log_timezone=UTC' -l '$WORK/pg.log' -w start" >/dev/null; then
+```
+
+Add this comment directly above it:
+
+```bash
+  # UTC, whatever the host's zone. The compliance suite's day-boundary block
+  # derives a synthetic offset from clock_timestamp()::time, which is rendered
+  # in the session zone; on a Mac in Europe/Dublin that assertion failed at
+  # every hour of the day while CI (UTC) stayed green. Production is UTC too.
+```
+
+- [ ] **Step 3: Run the database suite**
+
+Run: `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./test/sql.sh 2>&1 | tail -4`
+Expected: PASS, no failures. Then `PGBIN=/opt/homebrew/opt/postgresql@16/bin ./test/api.sh 2>&1 | tail -2` — expected PASS (the HTTP suite uses the same cluster).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add test/cluster.sh
+git commit -m "test: the throwaway cluster runs in UTC on every host
+
+The day-boundary block derives its synthetic offset from the session clock.
+On a Mac in Europe/Dublin the cluster inherited the host zone and the
+assertion failed at every hour; CI, in UTC, never saw it.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QMp1iENRi9GJLzm3baLCQy"
+```
