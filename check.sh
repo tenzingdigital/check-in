@@ -40,6 +40,10 @@ for (const f of ['public/index.html','public/checkin.html','public/admin.html'])
     if (/^https?:|^\/\//.test(m[1])) throw new Error(f+' loads '+m[1]+' from a third-party origin');
   }
 }
+{
+  const h=fs.readFileSync('public/checkin.html','utf8');
+  if (/data-filter=\"breach\"|statOpenBreach/.test(h)) throw new Error('public/checkin.html: the Missed days tile is back — the register answers today only; history lives on Admin → Absences (spec 2026-09-07)');
+}
 for (const f of ['public/app-common.js','public/offline.js','public/sw.js']) {
   new vm.Script(fs.readFileSync(f,'utf8'), {filename: f});
 }

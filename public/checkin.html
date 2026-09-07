@@ -33,13 +33,11 @@
   .badge.seen_today    { color: var(--ok); }
   .badge.expected      { color: var(--muted); }
   .badge.due_today     { color: var(--warn); }
-  .badge.exempt        { color: var(--exempt); }
-  .badge.breach_open   { color: var(--bad); }
+  .badge.exempt, .badge.not_required { color: var(--muted); }
   .badge.never         { color: var(--bad); }
-  .badge.not_required  { color: var(--muted); }
 
-  .card.breach_open, .card.never    { border-left: 4px solid var(--bad); }
-  .card.due_today                   { border-left: 4px solid var(--warn); }
+  .card.never          { border-left: 4px solid var(--bad); }
+  .card.due_today      { border-left: 4px solid var(--warn); }
 
   /* ---- 30-day strip ---- */
   .stripTitle { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
@@ -119,12 +117,12 @@
 <a class="help" href="/help.html" aria-label="Help and guide" title="Help">?</a>
       <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
-    <!-- The three tiles are the questions a manager asks; tapping one shows
-         exactly those residents in the Check in list. Tap again for all. -->
+    <!-- The two tiles are the questions a guard asks about today; tapping
+         one shows exactly those residents in the Check in list. Tap again
+         for all. History lives on Admin → Absences. -->
   </header>
     <div class="stats">
       <button class="stat" type="button" data-filter="not_seen" aria-pressed="false" data-tip="Residents required today who have not checked in yet. This is the list the register opens on; a check-in drops the card off it. Hold any tile for this note."><b id="statNotSeen">–</b><span>Not seen</span></button>
-      <button class="stat" type="button" data-filter="breach"   aria-pressed="false" data-tip="Residents with a day they were required and not seen, worst first. The day closes at midnight, so this is yesterday and earlier, never today."><b id="statOpenBreach">–</b><span>Missed days</span></button>
       <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false" data-tip="Residents already checked in today. Tap to see them; tap again for the default list."><b id="statCheckins">–</b><span>Seen today</span></button>
     </div>
 
@@ -133,10 +131,8 @@
     <div id="syncNotice" class="alert warn" hidden></div>
     <div id="healthNotice" class="alert" hidden></div>
 
-    <!-- One list, one filter. The three tiles above are the filter; the line
-         under the search box says which is on and offers the way back. The
-         old Attention tab is the Breaches tile: same residents, same
-         worst-first order. -->
+    <!-- One list, one filter. The two tiles above are the filter; the line
+         under the search box says which is on and offers the way back. -->
     <section id="panelCheckin">
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
@@ -168,7 +164,7 @@ const state = {
   settings:  null,   // app_settings row
   selected:  null,   // resident row shown in the detail panel
   busy:      false,
-  filter:    "not_seen",   // which tile is pressed: all | not_seen | breach | seen
+  filter:    "not_seen",   // which tile is pressed: all | not_seen | seen
   searchRows:  [],    // the last list response, refiltered client-side
   searchQuery: "",
   loaded:    false,   // false until the first list has arrived — before that, every count is unknown, not zero
@@ -184,14 +180,16 @@ const state = {
 // $, esc(), toast(), ago() come from app-common.js. showError() too — this
 // page reuses its default element id ("appError"), same as index.html.
 
-// Plain words on the cards. A "breach" in the policy is a missed day on the
-// screen; the manager's report can use the formal term.
+// Plain words on the cards, about TODAY. The server's `state` ranks an open
+// past breach above seen_today — right for the manager's list, wrong for a
+// guard with the person at the window. viewState() keeps the server's
+// exempt/not_required, and otherwise answers only "seen today, never seen,
+// due, or expected".
 const STATE_LABEL = {
   seen_today:   "Seen today",
   expected:     "Expected",
   due_today:    "Due today",
   exempt:       "Under 18 — not required",
-  breach_open:  "Missed days",
   never:        "Not yet seen",
   not_required: "Not required",
 };
@@ -200,12 +198,32 @@ function stateLabel(s) {
   return STATE_LABEL[s] || s;
 }
 
+function pastDueHour() {
+  const h = state.settings && Number.isFinite(state.settings.due_soon_after_hour) ? state.settings.due_soon_after_hour : null;
+  if (h === null) return false;
+  const tz = state.settings.local_timezone;
+  try {
+    const now = Number(new Intl.DateTimeFormat("en-GB", { timeZone: tz || undefined, hour: "2-digit", hour12: false }).format(new Date()));
+    return now >= h;
+  } catch (_) { return new Date().getHours() >= h; }
+}
+
+function viewState(r) {
+  if (r.state === "exempt" || r.state === "not_required") return r.state;
+  if (r.seen_today) return "seen_today";
+  if (!r.last_seen_on) return "never";
+  return pastDueHour() ? "due_today" : "expected";
+}
+
 // last_seen_on only ever counts CLOSED days (see v_resident_compliance) — a
 // resident who checked in an hour ago has seen_today=true but last_seen_on
 // still null, because today hasn't closed yet. seen_today is the only safe
-// source for "have they presented today"; last_seen_on is history, not today.
+// source for "have they presented today"; first_seen_at is when.
 function lastSeenText(r) {
-  if (r.seen_today) return "Today";
+  if (r.seen_today) {
+    const t = siteTime(r.first_seen_at, state.settings && state.settings.local_timezone);
+    return t ? `Today ${t}` : "Today";
+  }
   if (r.last_seen_on) return formatDate(r.last_seen_on);
   return "Never";
 }
@@ -221,15 +239,18 @@ function formatDate(yyyy_mm_dd) {
    ====================================================================== */
 
 function residentCard(r) {
-  const cls = ["card", esc(r.state)];
+  const vs = viewState(r);
+  const cls = ["card", esc(vs)];
 
   const bits = [];
   if (r.room_label && state.settings?.feature_buildings) bits.push(esc(r.room_label));
   bits.push(`last seen ${esc(lastSeenText(r))}`);
 
-  // "3 missed days" says more than "Missed days"; the count is on the row.
-  const n = Number(r.open_breaches || 0);
-  const label = r.state === "breach_open" && n > 0 ? `${n} missed day${n === 1 ? "" : "s"}` : stateLabel(r.state);
+  // The pill on the right already says seen / not yet. The badge appears
+  // only when it adds something the pill does not.
+  const badge = (vs === "exempt" || vs === "not_required" || vs === "due_today" || vs === "never")
+    ? ` · <span class="badge ${esc(vs)}">${esc(stateLabel(vs))}</span>`
+    : "";
 
   // The strip behind the card says what a right swipe does (see .swipe-bg).
   return `<div class="swipe">
@@ -238,7 +259,7 @@ function residentCard(r) {
     <button class="${cls.join(" ")}" data-id="${esc(r.id)}" type="button">
       <span class="who">
         <span class="name">${esc(r.full_name)}</span>
-        <span class="meta">${bits.join(" · ")} · <span class="badge ${esc(r.state)}">${esc(label)}</span></span>
+        <span class="meta">${bits.join(" · ")}${badge}</span>
       </span>
       ${r.queued
         ? `<span class="pill queued">Queued</span>`
@@ -416,7 +437,7 @@ function renderDetail(r) {
 
 // Header tiles are counted from the list itself. The list endpoint already
 // returns every resident with state, open_breaches, required_today and
-// seen_today, and the three tiles are exactly the three filters applied to
+// seen_today, and the two tiles are exactly the two filters applied to
 // those rows — so the numbers on the tiles and the list under a pressed tile
 // cannot disagree, and a page load costs the database ONE evaluation of
 // v_resident_compliance rather than four (the list, attention_list(), and
@@ -428,21 +449,15 @@ function refreshSummary() {
   if (!state.loaded) return;
   const rows = state.searchQuery ? state.allRows : state.searchRows;   // counts describe the whole register, not a name filter
   const all = rows || [];
-  const breaches = all.filter(FILTERS.breach).length;
   const notSeen  = all.filter(FILTERS.not_seen).length;
   const seen     = all.filter(FILTERS.seen).length;
-  $("statOpenBreach").textContent = breaches;
   $("statNotSeen").textContent  = notSeen;
   $("statCheckins").textContent = seen;
 
-  // Colour follows the number, not the tile. Zero breaches is calm, not an
-  // alarm. "Not seen" is neutral while the day is young, amber once the
-  // due-soon hour has passed and people are still missing.
-  const pastCutoff = state.settings && Number.isFinite(state.settings.due_soon_after_hour)
-    ? new Date().getHours() >= state.settings.due_soon_after_hour
-    : false;
-  tone($("statOpenBreach").parentElement, breaches > 0 ? "bad" : "ok");
-  tone($("statNotSeen").parentElement, notSeen === 0 ? "ok" : pastCutoff ? "warn" : "neutral");
+  // Colour follows the number, not the tile. "Not seen" is neutral while
+  // the day is young, amber once the due-soon hour has passed and people
+  // are still missing.
+  tone($("statNotSeen").parentElement, notSeen === 0 ? "ok" : pastDueHour() ? "warn" : "neutral");
 }
 
 // The register only proves who was missed if the nightly close-out runs. If
@@ -526,10 +541,9 @@ async function runSearch(q) {
 const FILTERS = {
   all:      () => true,
   not_seen: (r) => r.required_today && !r.seen_today,
-  breach:   (r) => (r.open_breaches || 0) > 0,
   seen:     (r) => !!r.seen_today,
 };
-const FILTER_LABEL = { all: "everyone", not_seen: "not seen today", breach: "with missed days", seen: "seen today" };
+const FILTER_LABEL = { all: "everyone", not_seen: "not seen today", seen: "seen today" };
 
 function setFilter(name) {
   state.filter = FILTERS[name] ? name : "not_seen";
@@ -537,18 +551,10 @@ function setFilter(name) {
   renderSearch();
 }
 
-// The Breaches view is the old Attention tab: worst first — longest run of
-// consecutive missed nights, then most absent in the window, then most open
-// breaches — so a manager reads the top of the list and knows who to call.
-// Every other view stays alphabetical, because a guard at the window is
-// looking for a name.
+// Every view is alphabetical: a guard at the window is looking for a name.
+// The manager's worst-first list is Admin → Absences.
 function orderFor(filter, rows) {
-  if (filter !== "breach") return rows;
-  return [...rows].sort((a, b) =>
-    (b.consecutive_missed || 0) - (a.consecutive_missed || 0) ||
-    (b.absent_in_window || 0) - (a.absent_in_window || 0) ||
-    (b.open_breaches || 0) - (a.open_breaches || 0) ||
-    String(a.full_name).localeCompare(String(b.full_name)));
+  return rows;
 }
 
 function renderSearch() {
@@ -577,7 +583,7 @@ function renderSearch() {
     line.hidden = true;
     line.innerHTML = "";
   } else {
-    line.innerHTML = `Showing ${shown.length} ${FILTER_LABEL[active]}${active === "breach" ? ", worst first" : ""} · <button class="linkish" type="button" id="showAll">Show everyone</button>`;
+    line.innerHTML = `Showing ${shown.length} ${FILTER_LABEL[active]} · <button class="linkish" type="button" id="showAll">Show everyone</button>`;
     line.hidden = false;
     $("showAll").onclick = () => setFilter("all");
   }
@@ -585,7 +591,6 @@ function renderSearch() {
   const empty = q
     ? `No resident matching “${q}”.`
     : state.filter === "not_seen" ? "Everyone who is required today has been seen."
-    : state.filter === "breach"   ? "Nobody has missed days outstanding."
     : state.filter === "seen"     ? "Nobody has been seen yet today."
     : "No residents on the register.";
   renderList($("searchResults"), shown, empty);
@@ -601,7 +606,7 @@ function applyCheckin(residentId, dc) {
   if (!r) return;
   r.seen_today = true;
   r.checkins_today = dc && dc.checkin_count ? dc.checkin_count : (r.checkins_today || 0) + 1;
-  if (r.state !== "breach_open") r.state = "seen_today";
+  if (dc && dc.first_seen_at) r.first_seen_at = dc.first_seen_at;
   renderSearch();
   refreshSummary();
 }
