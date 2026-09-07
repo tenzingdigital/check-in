@@ -742,8 +742,8 @@ served CSP matches the served HTML.
 
 - **Notifying residents that they are due.** Sending SMS or email would add a
   processor, a new category of contact data, and a delivery-failure mode that
-  looks like non-compliance. The check-in app has the Breaches tile; the
-  escalation procedure is an operational matter.
+  looks like non-compliance. Admin → Absences lists who is near a threshold;
+  the escalation procedure is an operational matter.
 - **Photos on the register.** Would make visual verification stronger, and would
   also turn this into a system holding biometric-adjacent data. Worth doing
   deliberately, with a DPIA, not by default.
