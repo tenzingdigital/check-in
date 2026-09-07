@@ -62,7 +62,11 @@ start_cluster() {
 
   echo "==> initialising scratch cluster in $WORK"
   as_pg "'$PGBIN/initdb' -D '$WORK/data' -U postgres --auth=trust" >"$WORK/initdb.log" 2>&1
-  if ! as_pg "'$PGBIN/pg_ctl' -D '$WORK/data' -o '-p $port -k $WORK' -l '$WORK/pg.log' -w start" >/dev/null; then
+  # UTC, whatever the host's zone. The compliance suite's day-boundary block
+  # derives a synthetic offset from clock_timestamp()::time, which is rendered
+  # in the session zone; on a Mac in Europe/Dublin that assertion failed at
+  # every hour of the day while CI (UTC) stayed green. Production is UTC too.
+  if ! as_pg "'$PGBIN/pg_ctl' -D '$WORK/data' -o '-p $port -k $WORK -c timezone=UTC -c log_timezone=UTC' -l '$WORK/pg.log' -w start" >/dev/null; then
     echo "error: the scratch cluster did not start. Last lines of its log:" >&2
     tail -5 "$WORK/pg.log" >&2 || true
     echo "       if the port is in use, a previous run leaked a cluster:" >&2
