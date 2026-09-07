@@ -371,6 +371,9 @@ async function main() {
     assert.ok("first_seen_at" in resident, "the list row has no first_seen_at field");
     assert.ok(resident.first_seen_at, "the list row's first_seen_at is empty after a check-in");
     assert.ok(Math.abs(Date.now() - new Date(resident.first_seen_at)) < 60_000, `first_seen_at is ${resident.first_seen_at}, not within a minute of now`);
+    for (const k of ["consecutive_missed", "absent_in_window", "open_breaches", "last_seen_on", "seen_today"]) {
+      assert.ok(k in resident, `the list row has no ${k}; Admin → Absences reads it from the list`);
+    }
 
     const detail = await api.fetch(`/api/residents/${resident.id}/compliance`);
     assert.equal(detail.status, 200);

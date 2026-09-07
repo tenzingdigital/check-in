@@ -73,9 +73,11 @@
   .rphead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 0; }
   .rphead h2 { margin: 0; font-size: 18px; }
   .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-  #rpTable, #impTable { border-collapse: collapse; width: 100%; font-size: 13px; }
-  #rpTable th, #rpTable td, #impTable th, #impTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  #rpTable th, #impTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  #rpTable, #impTable, #absTable { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #rpTable th, #rpTable td, #impTable th, #impTable td, #absTable th, #absTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  #rpTable th, #impTable th, #absTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  #absTable td.at { color: var(--bad); font-weight: 600; }
+  #absTable td.num { font-variant-numeric: tabular-nums; }
   #impTable td.st-error { color: var(--bad); white-space: normal; }
   #impTable td.st-exists { color: var(--muted); }
   #impTable td.st-ready, #impTable td.st-added { color: var(--ok); }
@@ -163,6 +165,7 @@
 
     <nav class="tabs" role="tablist" id="adminTabs" hidden>
       <button role="tab" id="tabResidents" aria-selected="true"  aria-controls="panelResidents">Residents</button>
+      <button role="tab" id="tabAbsences"  aria-selected="false" aria-controls="panelAbsences">Absences</button>
       <button role="tab" id="tabBuildings" aria-selected="false" aria-controls="panelBuildings">Buildings</button>
       <button role="tab" id="tabReports"   aria-selected="false" aria-controls="panelReports">Reports</button>
       <button role="tab" id="tabStaff"     aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
@@ -245,6 +248,14 @@
       </section>
 
       <div id="residentList" class="list"></div>
+    </section>
+
+    <!-- ---- absences (supervisors and admins): the list a manager reads
+         before writing a letter. Numbers the register already computes,
+         beside the figures in Settings. ---- -->
+    <section id="panelAbsences" role="tabpanel" aria-labelledby="tabAbsences" hidden>
+      <p class="hint flush" id="absIntro"></p>
+      <div class="tablewrap mt14"><table id="absTable"></table></div>
     </section>
 
     <!-- ---- buildings and rooms (supervisors and admins) ---- -->
@@ -451,6 +462,66 @@ async function loadResidents() {
   box.innerHTML = shown.length
     ? shown.map(residentCard).join("")
     : `<p class="empty">${q ? `No resident matching “${esc(q)}”.` : state.status === "departed" ? "Nobody has departed." : "No residents on the register yet. Tap Add."}</p>`;
+}
+
+/* ========================================================================
+   Absences (supervisors and admins)
+   ====================================================================== */
+
+// Active residents with a run of missed nights or a missed day inside the
+// rolling window, worst first. Everything here is already on the list row
+// (v_resident_compliance via /api/residents?compliance=1); this tab only
+// puts the counts beside the figures in Settings. Residents whose only
+// misses are older than the window are not listed — their total is on the
+// register's detail sheet.
+async function loadAbsences() {
+  $("absIntro").textContent = "Loading…";
+  const rows = await guarded(
+    () => apiGet("/api/residents?q=&limit=1000&compliance=1"),
+    (err) => { Offline.noteFailure(err); showError("Could not load absences: " + err.message); },
+  );
+  if (!rows) return;
+  showError("");
+  renderAbsences(rows);
+}
+
+function renderAbsences(rows) {
+  const s = state.settings || {};
+  const nightLimit = s.warn_after_consecutive_nights || 3;
+  const winLimit = s.absence_window_limit || 10;
+  const winDays = s.absence_window_days || 28;
+  const withRooms = !!s.feature_buildings;
+
+  const listed = rows
+    .filter((r) => r.status === "active" && ((r.consecutive_missed || 0) > 0 || (r.absent_in_window || 0) > 0))
+    .sort((a, b) =>
+      (b.consecutive_missed || 0) - (a.consecutive_missed || 0) ||
+      (b.absent_in_window || 0) - (a.absent_in_window || 0) ||
+      String(a.full_name).localeCompare(String(b.full_name)));
+
+  $("absIntro").textContent =
+    `Facts against the figures in Settings: ${nightLimit} consecutive nights, ${winLimit} days in ${winDays}. ` +
+    `The app never decides that a threshold was met; the decision, and the letter, are the manager's.`;
+
+  if (!listed.length) {
+    $("absTable").innerHTML = `<tbody><tr><td class="hint">Nobody has a run of missed nights or a missed day in the last ${winDays} days.</td></tr></tbody>`;
+    return;
+  }
+
+  const lastSeen = (r) => r.seen_today ? "Today" : (r.last_seen_on || "Never");
+  const head = ["Name", ...(withRooms ? ["Room"] : []), "Consecutive nights", `Absent in ${winDays} days`, "Last seen"];
+  $("absTable").innerHTML =
+    `<thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>` +
+    `<tbody>${listed.map((r) => {
+      const n = r.consecutive_missed || 0, w = r.absent_in_window || 0;
+      return `<tr>` +
+        `<td>${esc(r.full_name)}</td>` +
+        (withRooms ? `<td>${esc(r.room_label || "")}</td>` : "") +
+        `<td class="num${n >= nightLimit ? " at" : ""}">${n} of ${nightLimit}</td>` +
+        `<td class="num${w >= winLimit ? " at" : ""}">${w} of ${winLimit}</td>` +
+        `<td>${esc(lastSeen(r))}</td>` +
+      `</tr>`;
+    }).join("")}</tbody>`;
 }
 
 /* ---- add ---- */
@@ -1204,13 +1275,14 @@ $("stReload").addEventListener("click", loadSettings);
    ====================================================================== */
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["residents", "buildings", "reports", "staff", "settings"]) {
+  for (const t of ["residents", "absences", "buildings", "reports", "staff", "settings"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
   }
   renderDetail(null);
   if (name === "residents") loadResidents();
+  if (name === "absences") loadAbsences();
   if (name === "buildings") loadBuildings();
   if (name === "reports") loadReports();
   if (name === "staff") loadStaff();
@@ -1310,6 +1382,7 @@ $("residentList").addEventListener("click", (e) => {
   if (card) openResident(card.dataset.id);
 });
 $("tabResidents").addEventListener("click", () => selectTab("residents"));
+$("tabAbsences").addEventListener("click", () => selectTab("absences"));
 $("tabBuildings").addEventListener("click", () => selectTab("buildings"));
 $("tabReports").addEventListener("click", () => selectTab("reports"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));
