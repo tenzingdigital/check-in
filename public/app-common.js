@@ -59,6 +59,21 @@ function ago(iso) {
   return `${d} days ago`;
 }
 
+// Hours and minutes in the SITE's zone, which is the clock the register
+// closes on. Never the terminal's zone: a terminal set to the wrong zone is
+// exactly the fault a manager is trying to see when they ask "what time
+// did that check-in actually land". tz is app_settings.local_timezone.
+function siteTime(iso, tz) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat("en-GB", { timeZone: tz || undefined, hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+  } catch (_) {
+    return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+  }
+}
+
 /* ========================================================================
    API client
 
