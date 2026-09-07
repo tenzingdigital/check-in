@@ -55,6 +55,44 @@ lifetime tally answers neither.
 - The nightly-close-out banner text stays: close-out still writes the
   missed days the Absences view reads.
 
+### 1b. The time of the check-in is on the sheet (owner's request, 7 Sep)
+
+"I want a timestamp on the resident check-in for the 24-hour register so I
+can help myself troubleshoot." The data already exists: `daily_compliance`
+holds `first_seen_at` for the day and `checkin_events` holds every
+`occurred_at` with its `guard_id`. Nothing new is stored.
+
+- **Detail sheet, Today fact:** "Seen 23:31 (1×)" instead of "Seen (1×)",
+  from today's `first_seen_at` in the site timezone. Offline with a queued
+  check-in: "Queued 23:31".
+- **Detail sheet, a "Today's check-ins" line under the facts:** each event
+  today as `time · recorded by <name>`, newest first. This is the
+  troubleshooting view: it says which terminal's guard recorded what and
+  when, including the second tap of a double-fire. Shown only when there is
+  at least one event.
+- **Cards:** "last seen Today 23:31" when seen today, from `first_seen_at`.
+- **The 30-day strip:** each cell's `title` becomes "2026-09-07 · 23:31"
+  when presented, so a long-press on a phone or hover on a laptop shows
+  the time.
+- **Routes, no migration:** `GET /api/residents/:id/compliance` adds
+  `first_seen_at` (today's row) and `checkins_today_events`
+  (`[{ occurred_at, recorded_by }]`, today's `checkin_events` joined to
+  `profiles.full_name`, on the site day, newest first). The list route with
+  `compliance=1` adds `first_seen_at` by joining `daily_compliance` for
+  `site_today()` in the route's own query, not by touching the view (whose
+  physical column order `attention_list()` depends on). `GET /:id/days`
+  adds `first_seen_at` per row. `record_checkin()` already returns the day
+  row, so `applyCheckin()` takes `first_seen_at` from it.
+- **Time display:** hours and minutes in the site's timezone
+  (`settings.local_timezone`), the same clock the register closes on,
+  formatted with `Intl.DateTimeFormat` and `timeZone`. Never the
+  terminal's own zone; a terminal set to the wrong zone is exactly the
+  fault this is meant to reveal.
+- **Test:** in `test/api.test.js`, after a recorded check-in, the detail
+  row carries a `first_seen_at` within a minute of now and one
+  `checkins_today_events` entry whose `recorded_by` is the acting guard's
+  name; a second check-in inside the 60-second dedupe window adds no event.
+
 ### 2. Admin gains an Absences tab (`public/admin.html`)
 
 For supervisors and administrators, beside Residents. The list a manager
