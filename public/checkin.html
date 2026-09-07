@@ -44,8 +44,9 @@
   .strip { line-height: 0; }
   .cell { display: inline-block; width: 10px; height: 18px; margin: 1px; border-radius: 2px; }
   .cell.ok  { background: var(--ok); }
-  .cell.miss { background: var(--bad); cursor: pointer; }
+  .cell.miss { background: var(--bad); }
   .cell.na  { background: var(--surface-2); }
+  .strip .cell[title] { cursor: pointer; }
   .legend { margin: 6px 0 0; font-size: 12px; line-height: 1.4; }
   .legend .cell { width: 10px; height: 12px; vertical-align: middle; margin: 0 4px 0 10px; cursor: default; }
   .legend .cell:first-child { margin-left: 0; }
@@ -457,6 +458,9 @@ function renderDetail(r) {
     const stripEl = $("strip");
     if (!stripEl) return;
     stripEl.innerHTML = html || '<span class="hint">No history yet.</span>';
+    // A tap on a cell shows what the title says: the date, and for a
+    // presented day the time. title alone never surfaces on a phone.
+    stripEl.onclick = (e) => { const c = e.target.closest(".cell[title]"); if (c) toast(c.title); };
   });
 }
 
@@ -562,7 +566,7 @@ async function runSearch(q) {
   refreshSummary();
 }
 
-// The three header tiles and the chip row are one filter, applied here to
+// The two header tiles and the chip row are one filter, applied here to
 // the rows already on screen. Client-side on purpose: the counts on the
 // chips always describe the rows the current query matched, switching never
 // costs a round trip, and it works offline against the cached copy. The
@@ -630,6 +634,7 @@ function renderSearch() {
 // seconds on the live database — long enough for a guard to think the swipe
 // did nothing and swipe again (and each new swipe cancelled the refresh the
 // last one had started). record_checkin() returns the day's register row.
+// The sheet closes after a recorded tap (checkin() calls renderDetail(null)); a reopen refetches the detail row, so checkins_today_events is not refreshed here. Keep the sheet closing.
 function applyCheckin(residentId, dc) {
   const r = state.rows.get(residentId);
   if (!r) return;

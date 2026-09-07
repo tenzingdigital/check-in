@@ -486,6 +486,11 @@ async function loadAbsences() {
 }
 
 function renderAbsences(rows) {
+  if (!rows.length) {
+    $("absIntro").textContent = "No residents on the register yet.";
+    $("absTable").innerHTML = "";
+    return;
+  }
   const s = state.settings || {};
   const src = rows[0] || {};
   const nightLimit = src.warn_after_consecutive_nights ?? s.warn_after_consecutive_nights ?? 3;
