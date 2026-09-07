@@ -30,6 +30,13 @@
      screen; the label above it still reads at full width. */
   .formcard .field[type="number"] { max-width: 180px; }
   .formcard { box-shadow: var(--lift); }
+  /* The role card under the Role field: two short lists, can and cannot. */
+  .rolehelp { display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+  .rolehelp b { font-size: 14px; }
+  .rolehelp ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; color: var(--text); }
+  .rolehelp .no { color: var(--muted); }
+  .rolehelp .no li::marker { color: var(--muted); }
+  @media (min-width: 520px) { .rolehelp { grid-template-columns: 1fr 1fr; } .rolehelp b { grid-column: 1 / -1; } }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .selfend { align-self: end; margin-top: 0; }
   .grid3 { display: grid; grid-template-columns: 1fr 2fr 80px; gap: 8px; }
@@ -276,19 +283,22 @@
           <div><label class="lbl" for="sfName">Full name</label><input id="sfName" class="field" type="text" required></div>
           <div><label class="lbl" for="sfRole">Role <button class="tip" type="button" data-tip="Guard: records at the gate and on the register. Supervisor: also manages residents, buildings and reports. Admin: also manages staff and settings, exports and erases records, and reads the access log." aria-label="What each role can do">?</button></label>
             <select id="sfRole" class="field">
-              <option value="guard">guard</option>
-              <option value="supervisor">supervisor</option>
-              <option value="admin">admin</option>
+              <option value="guard">Guard</option>
+              <option value="supervisor">Supervisor</option>
+              <option value="admin">Admin</option>
             </select></div>
         </div>
+        <!-- What the chosen role can and cannot do, in words, before the
+             invitation goes: the most common question when adding someone. -->
+        <div id="sfRoleHelp" class="rolehelp" aria-live="polite"></div>
         <div><label class="lbl" for="sfEmail">Email</label><input id="sfEmail" class="field" type="email" required></div>
         <div class="actions">
           <button class="btn primary-in" id="sfAdd" type="submit">Add and send login link</button>
         </div>
         <p class="hint flush">
           No password is typed here. The new colleague gets a one-day link by email to choose their own;
-          nobody else ever sees it. <b>admin</b> manages staff, residents and settings, <b>supervisor</b>
-          manages residents, <b>guard</b> signs residents in and out and records check-ins.
+          nobody else ever sees it. A role can be changed later from the list below.
+          <a href="/help.html#roles">Compare all three roles</a>.
         </p>
       </form>
       <div id="linkNotice" class="alert warn" hidden></div>
@@ -868,6 +878,36 @@ function showLinkResult(out, who) {
   $("linkOut").addEventListener("focus", (e) => e.target.select());
   $("linkOut").addEventListener("click", (e) => e.target.select());
 }
+
+// What each role can and cannot do, shown as the role is chosen. The
+// authoritative list is test/permissions.js (docs/PERMISSIONS.md); this is
+// the same thing in the words a manager uses.
+const ROLE_HELP = {
+  guard: {
+    title: "A guard records at the door and on the register.",
+    can: ["Sign residents in and out at the gate", "Record the daily check-in", "Open a resident's sheet: name, age, ID number (each opening is logged)", "Run a roll call and mark people safe", "Sign visitors and contractors in and out", "Read the day's movement log"],
+    cannot: ["See a date of birth", "Add, edit or remove residents", "Export a report or a record", "Change settings or turn features on", "Manage staff accounts"],
+  },
+  supervisor: {
+    title: "A supervisor manages the register as well as recording on it.",
+    can: ["Everything a guard can", "Add, edit and depart residents; import a spreadsheet", "Buildings and rooms; assign rooms, evacuation needs and families", "Export reports (a reason is required and logged)", "Add or change a resident's ID number"],
+    cannot: ["Manage staff accounts", "Change settings or feature switches", "Export or erase a resident's whole record", "See who viewed a record", "Log in from outside the home countries"],
+  },
+  admin: {
+    title: "An admin runs the site: people, settings and residents' rights.",
+    can: ["Everything a supervisor can", "Invite, disable and re-role staff", "Site settings, retention and feature switches", "Export or erase a resident's whole record (Art. 15 and 17)", "The 'Who viewed which record' report"],
+    cannot: ["Disable or demote their own account", "Log in from outside the home countries", "See another centre's residents"],
+  },
+};
+function renderRoleHelp() {
+  const r = ROLE_HELP[$("sfRole").value] || ROLE_HELP.guard;
+  $("sfRoleHelp").innerHTML = `
+    <b>${esc(r.title)}</b>
+    <ul>${r.can.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    <ul class="no">${r.cannot.map((x) => `<li>Cannot ${esc(x.charAt(0).toLowerCase() + x.slice(1))}</li>`).join("")}</ul>`;
+}
+$("sfRole").addEventListener("change", renderRoleHelp);
+renderRoleHelp();
 
 $("staffForm").addEventListener("submit", async (e) => {
   e.preventDefault();

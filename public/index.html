@@ -776,7 +776,7 @@ function renderVisits() {
     <div class="rollrow ${v.left_at ? "gone" : ""}">
       <span class="who">
         <span class="name">${esc(v.name)}</span>
-        <span class="meta"><span class="kind">${esc(KIND_LABEL[v.kind] || v.kind)}</span>${v.company ? " · " + esc(v.company) : ""} · in ${esc(timeOfDay(v.arrived_at))}${v.arrived_by_name ? " by " + esc(v.arrived_by_name) : ""}${v.left_at ? ` · out ${esc(timeOfDay(v.left_at))}` : ""}</span>
+        <span class="meta"><span class="kind">${esc(KIND_LABEL[v.kind] || v.kind)}</span>${v.company ? " · " + esc(v.company) : ""} · in ${esc(timeOfDay(v.arrived_at))}${v.left_at ? ` · out ${esc(timeOfDay(v.left_at))}` : ""}</span>
       </span>
       ${v.left_at ? "" : `<button class="btn ghost" type="button" data-leave="${esc(v.id)}">Sign out</button>`}
     </div>`;

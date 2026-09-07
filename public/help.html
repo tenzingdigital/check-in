@@ -36,6 +36,11 @@
   .guide details { margin: 8px 0; }
   .guide summary { cursor: pointer; font-weight: 600; font-size: 15px; padding: 8px 0; }
   .guide details p { margin: 4px 0 8px; }
+  .guide .tablewrap { overflow-x: auto; margin: 10px 0; }
+  .guide table.roles { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  .guide table.roles th, .guide table.roles td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  .guide table.roles th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .guide table.roles td:not(:first-child), .guide table.roles th:not(:first-child) { text-align: center; white-space: nowrap; }
   @media (max-width: 480px) { .guide .toc { grid-template-columns: 1fr; } }
   @media print { header, .guide .top, .guide .toc { display: none !important; } .guide h2 { break-before: page; } }
 </style>
@@ -57,7 +62,8 @@
   <p class="lede">Written so that a new staff member can start on a shift with no training. Each part is a task, in the order you meet it. Two things to know before anything else: the <span class="gate">Gate</span> records people passing the door, and the <span class="register">Daily register</span> records the once-a-day check-in. They are different acts, and the app keeps them apart on purpose.</p>
 
   <ul class="toc">
-    <li><a href="#start">Start here<small>Logging in, choosing a screen, who can do what</small></a></li>
+    <li><a href="#start">Start here<small>Logging in, choosing a screen</small></a></li>
+    <li><a href="#roles">Who can do what<small>Guard, supervisor and admin, side by side</small></a></li>
     <li><a href="#gate">The gate<small>Sign in and out, tiles, the log</small></a></li>
     <li><a href="#register">The daily register<small>Today's check-in, missed days, ID numbers</small></a></li>
     <li><a href="#rollcall">Roll call and evacuation<small>Drills, marking people safe, several phones</small></a></li>
@@ -78,9 +84,36 @@
   <div class="card"><b>Guard</b> Records at the gate and on the register, runs a roll call, reads the log. Sees names, ages and states, never a date of birth.</div>
   <div class="card"><b>Supervisor</b> Everything a guard does, plus adding and editing residents, importing a spreadsheet, buildings and rooms, and exporting reports.</div>
   <div class="card"><b>Admin</b> Everything a supervisor does, plus staff accounts, the site's settings and feature switches, a resident's full record export and erasure, and the log of who viewed which record.</div>
-  <p>A refusal always says so in words. If a button does nothing for you, it is not yours to press, and the person who can is named in the message.</p>
+  <p>A refusal always says so in words. If a button does nothing for you, it is not yours to press, and the person who can is named in the message. The full table is under <a href="#roles">Who can do what</a>.</p>
   <h3>The screen explains itself</h3>
   <p>Hold a tile or a tab for a sentence about what it counts. A round <span class="ui">?</span> beside a label opens the same kind of note. The first time you open each screen on a device, a short card at the top says the three things that matter; tap <span class="ui">Got it</span> and it never returns.</p>
+  <a class="top" href="#top">Back to the top</a>
+
+  <h2 id="roles">Who can do what</h2>
+  <p class="lede">Three roles, each including the one before it. A platform administrator is an admin of their own site who can also add and close centres, and sees no other centre's residents.</p>
+  <div class="tablewrap"><table class="roles">
+    <thead><tr><th>Can they…</th><th>Guard</th><th>Supervisor</th><th>Admin</th></tr></thead>
+    <tbody>
+      <tr><td>Sign residents in and out at the gate</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Record the daily check-in</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Open a resident's sheet (name, age, ID number; logged)</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>See a date of birth</td><td>—</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Run a roll call and mark people safe</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Sign visitors and contractors in and out</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Read the day's movement log</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Add, edit and depart residents; import a spreadsheet</td><td>—</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Add or change an ID number</td><td>—</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Buildings and rooms; rooms, needs and families on a record</td><td>—</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Export reports (reason required, logged)</td><td>—</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Invite, disable and re-role staff</td><td>—</td><td>—</td><td>✓</td></tr>
+      <tr><td>Site settings, retention, feature switches</td><td>—</td><td>—</td><td>✓</td></tr>
+      <tr><td>Export or erase a resident's whole record</td><td>—</td><td>—</td><td>✓</td></tr>
+      <tr><td>See who viewed which record</td><td>—</td><td>—</td><td>✓</td></tr>
+      <tr><td>Need an email code to log in (where the site requires it)</td><td>—</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Log in from outside the home countries</td><td>with a code</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <p>Every row is enforced in the database, not the screen: a button a role should not press is refused even if someone finds the request behind it. <span class="ui">docs/PERMISSIONS.md</span> in the repository is the complete list, tested on every change.</p>
   <a class="top" href="#top">Back to the top</a>
 
   <h2 id="gate">The gate <span class="who">every staff member</span></h2>
