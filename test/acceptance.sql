@@ -217,4 +217,33 @@ select pg_temp.try('anon signs a visitor in',               'select public.recor
 reset role;
 
 \echo ''
+\echo '=========== L. AUTHORISED ABSENCES AND ROOM HISTORY (migration 028) ==========='
+reset role;
+insert into public.residents (first_name, last_name, date_of_birth) values ('Kid', 'Okonkwo', current_date - interval '9 years');
+select id as kid_id from public.residents where first_name = 'Kid' and last_name = 'Okonkwo' \gset
+\echo '--- a guard may read absences but not record one, nor write either table by hand'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select count(*) as guard_can_read_absences from public.authorised_absences;
+select pg_temp.try('guard authorises an absence',           format('select public.authorise_absence(%L, current_date, current_date + 2, ''holiday'')', :'okonkwo_id'));
+select pg_temp.try('guard inserts an absence directly',     format('insert into public.authorised_absences (resident_id, from_date, to_date, reason) values (%L, current_date, current_date, ''holiday'')', :'okonkwo_id'));
+select pg_temp.try('guard inserts room history directly',   format('insert into public.room_assignments (resident_id, room_label) values (%L, ''X'')', :'okonkwo_id'));
+reset role;
+\echo '--- a supervisor records one; a child needs a guardian''s agreement; overlaps are refused'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select reason, to_date - from_date + 1 as days, approved_by is not null as approved from public.authorise_absence(:'okonkwo_id', current_date, current_date + 2, 'holiday');
+select public.absence_authorised(:'okonkwo_id', current_date + 1) as tomorrow_authorised, public.absence_authorised(:'okonkwo_id', current_date + 3) as day_after_not;
+select pg_temp.try('supervisor overlaps an absence',        format('select public.authorise_absence(%L, current_date + 1, current_date + 4, ''family'')', :'okonkwo_id'));
+select pg_temp.try('child absence without a guardian',      format('select public.authorise_absence(%L, current_date, current_date, ''family'')', :'kid_id'));
+select guardian_agreed from public.authorise_absence(:'kid_id', current_date, current_date, 'family', true);
+select pg_temp.try('an unknown reason',                     format('select public.authorise_absence(%L, current_date + 10, current_date + 10, ''skiing'')', :'okonkwo_id'));
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon reads absences',                   'select * from public.authorised_absences');
+select pg_temp.try('anon reads room history',               'select * from public.room_assignments');
+reset role;
+
+\echo ''
 \echo '=========== DONE ==========='

@@ -11,6 +11,9 @@
 //   absent      everyone off site now, with when and by whom they were signed out
 //   overnight   who was off site at midnight, night by night (migration 027)
 //   away        every sign OUT with the sign IN that followed: the check-out/check-in list
+//   absences    authorised absences overlapping the range (migration 028)
+//   roll-call-marks  who was marked safe on each roll call, by whom
+//   room-history     every room each resident has had
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -111,7 +114,10 @@ REPORTS.absent = {
                to_char(v.last_event_at at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
                to_char(v.last_event_at at time zone s.local_timezone, 'HH24:MI') as time_out,
                g.full_name as signed_out_by,
-               case when v.last_event_at is null then 'never signed in' else '' end as note
+               concat_ws('; ', case when v.last_event_at is null then 'never signed in' end,
+                         (select 'authorised: ' || a.reason || ' until ' || coalesce(a.ended_on, a.to_date)
+                            from authorised_absences a where a.resident_id = v.id
+                             and site_today() between a.from_date and coalesce(a.ended_on, a.to_date) limit 1)) as note
           from v_resident_status v
           left join v_resident_room rm on rm.id = v.id
           left join lateral (
@@ -129,7 +135,8 @@ REPORTS.overnight = {
                btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
                to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
                to_char(o.off_site_since at time zone s.local_timezone, 'HH24:MI') as time_out,
-               case when o.off_site_since is null then 'never signed in' else '' end as note
+               concat_ws('; ', case when o.off_site_since is null then 'never signed in' end,
+                         case when absence_authorised(o.resident_id, o.night) then 'authorised' end) as note
           from overnight_absences o
           join residents r on r.id = o.resident_id
           left join v_resident_room rm on rm.id = r.id
@@ -171,6 +178,65 @@ REPORTS.away = {
           and ev.occurred_at >= ($1::date::timestamp) at time zone s.tz
           and ev.occurred_at <  (($2::date + 1)::timestamp) at time zone s.tz
         order by ev.occurred_at desc, r.last_name, r.first_name`,
+};
+
+// Authorised absences overlapping the range, and who was marked safe on
+// each roll call, and every room a resident has had (migration 028).
+REPORTS.absences = {
+  title: 'Authorised absences',
+  ranged: true,
+  sql: `select btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
+               a.from_date::text as "from", coalesce(a.ended_on, a.to_date)::text as "to",
+               case when a.ended_on is not null and a.ended_on < a.to_date then 'cut short (planned to ' || a.to_date || ')' else '' end as note,
+               a.reason, a.guardian_agreed, p.full_name as approved_by,
+               to_char(a.created_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as recorded
+          from authorised_absences a
+          join residents r on r.id = a.resident_id
+          left join v_resident_room rm on rm.id = r.id
+          left join profiles p on p.id = a.approved_by
+          cross join (select local_timezone from app_settings where id) s
+         where daterange(a.from_date, coalesce(a.ended_on, a.to_date), '[]') && daterange($1::date, $2::date, '[]')
+         order by a.from_date desc, r.last_name, r.first_name`,
+};
+REPORTS['roll-call-marks'] = {
+  title: 'Roll call: who was marked safe',
+  ranged: true,
+  sql: `with s as (select local_timezone as tz from app_settings where id)
+        select to_char(rc.started_at at time zone s.tz, 'YYYY-MM-DD HH24:MI') as roll_call, rc.kind,
+               x.who, x.name, x.room,
+               to_char(x.marked_at at time zone s.tz, 'HH24:MI') as marked_safe_at, x.marked_by
+          from roll_calls rc
+          cross join s
+          join lateral (
+            select 'resident' as who, btrim(r.first_name) || ' ' || btrim(r.last_name) as name,
+                   (select ra.room_label from room_assignments ra
+                     where ra.resident_id = r.id and ra.from_at <= m.marked_at and (ra.to_at is null or ra.to_at > m.marked_at)
+                     order by ra.from_at desc limit 1) as room,
+                   m.marked_at, p.full_name as marked_by
+              from roll_call_marks m join residents r on r.id = m.resident_id left join profiles p on p.id = m.marked_by
+             where m.roll_call_id = rc.id
+            union all
+            select v.kind, v.name, v.company, vm.marked_at, p.full_name
+              from roll_call_visit_marks vm join visits v on v.id = vm.visit_id left join profiles p on p.id = vm.marked_by
+             where vm.roll_call_id = rc.id
+          ) x on true
+         where (rc.started_at at time zone s.tz)::date between $1 and $2
+         order by rc.started_at desc, x.marked_at`,
+};
+REPORTS['room-history'] = {
+  title: 'Room history',
+  ranged: true,
+  sql: `select btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, ra.room_label as room,
+               to_char(ra.from_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as "from",
+               to_char(ra.to_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as "to",
+               p.full_name as moved_by
+          from room_assignments ra
+          join residents r on r.id = ra.resident_id
+          left join profiles p on p.id = ra.changed_by
+          cross join (select local_timezone from app_settings where id) s
+         where (ra.from_at at time zone s.local_timezone)::date <= $2
+           and (ra.to_at is null or (ra.to_at at time zone s.local_timezone)::date >= $1)
+         order by ra.from_at desc, r.last_name, r.first_name`,
 };
 
 // Staff, visitors, contractors and suppliers on site (migration 024).

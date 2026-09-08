@@ -1542,7 +1542,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 11);
+    assert.equal(list.json.length, 14);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1715,6 +1715,150 @@ async function main() {
     assert.ok(asGuard.rows[0].n >= 1);
     const cannotRun = await withIdentity(guardId, (c) => c.query(`select public.snapshot_overnight_absences()`).then(() => "ran", (e) => e.code));
     assert.equal(cannotRun, "42501", "a staff member could run the snapshot");
+  });
+
+  console.log("\n== authorised absences, room history, search by room (migration 028) ==");
+
+  let roomFinderId, kRoom1, kRoom2;
+  await test("a room number finds its residents at the Door, and the room history follows every move", async () => {
+    const b = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Kestrel" } });
+    assert.equal(b.status, 201, b.text);
+    const rooms = await supC.fetch(`/api/buildings/${b.json.id}/rooms`, { method: "POST", body: { rooms: [{ number: "K1", capacity: 2 }, { number: "K2", capacity: 2 }] } });
+    assert.equal(rooms.status, 201, rooms.text);
+    [kRoom1, kRoom2] = rooms.json.map((r) => r.id);
+    const made = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Roomy", last_name: "Finder", date_of_birth: "1988-03-03", room_id: kRoom1 } });
+    assert.equal(made.status, 201, made.text);
+    roomFinderId = made.json.id;
+
+    const byRoom = await api.fetch("/api/residents?q=k1");
+    assert.equal(byRoom.status, 200, byRoom.text);
+    assert.ok(byRoom.json.some((r) => r.id === roomFinderId), "typing the room number did not find the resident");
+    assert.equal(byRoom.json[0].id, roomFinderId, "an exact room match should rank first");
+    const byBuilding = await api.fetch("/api/residents?q=kestrel");
+    assert.ok(byBuilding.json.some((r) => r.id === roomFinderId), "typing the building did not find the resident");
+    const byName = await api.fetch("/api/residents?q=roomy");
+    assert.ok(byName.json.some((r) => r.id === roomFinderId), "name search still works");
+
+    let hist = await api.fetch(`/api/residents/${roomFinderId}/rooms`);
+    assert.equal(hist.status, 200, hist.text);
+    assert.equal(hist.json.length, 1);
+    assert.match(hist.json[0].room_label, /Kestrel · K1/); assert.equal(hist.json[0].to_at, null);
+    const moved = await supC.fetch(`/api/residents/${roomFinderId}`, { method: "PATCH", body: { room_id: kRoom2 } });
+    assert.equal(moved.status, 200, moved.text);
+    hist = await api.fetch(`/api/residents/${roomFinderId}/rooms`);
+    assert.equal(hist.json.length, 2, "a move should add a row");
+    assert.match(hist.json[0].room_label, /K2/); assert.equal(hist.json[0].to_at, null);
+    assert.match(hist.json[1].room_label, /K1/); assert.ok(hist.json[1].to_at, "the old room should be closed");
+    assert.match(hist.json[0].changed_by, /Sup/);
+    const gone = await supC.fetch(`/api/residents/${roomFinderId}`, { method: "PATCH", body: { status: "departed" } });
+    assert.equal(gone.status, 200, gone.text);
+    hist = await api.fetch(`/api/residents/${roomFinderId}/rooms`);
+    assert.ok(hist.json.every((r) => r.to_at), "leaving should close the open room");
+    const back = await supC.fetch(`/api/residents/${roomFinderId}`, { method: "PATCH", body: { status: "active" } });
+    assert.equal(back.status, 200, back.text);
+    hist = await api.fetch(`/api/residents/${roomFinderId}/rooms`);
+    assert.equal(hist.json.length, 3, "coming back reopens the room as a new row");
+    const today = siteToday();
+    const rep = await supC.fetch(`/api/reports/room-history?from=${today}&to=${today}&reason=test&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.ok(rep.json.rows.filter((r) => /Roomy Finder/.test(r.resident)).length >= 3);
+    const asGuard = await withIdentity(guardId, (c) => c.query(`insert into public.room_assignments (resident_id, room_label) values ($1, 'X')`, [roomFinderId]).then(() => "inserted", (e) => e.code));
+    assert.equal(asGuard, "42501", "a staff member could write room history by hand");
+  });
+
+  let absenceId;
+  await test("a supervisor records an authorised absence; a child needs a guardian's agreement; no overlaps", async () => {
+    const today = siteToday();
+    const plus = (n) => new Date(Date.parse(today) + n * 86400000).toISOString().slice(0, 10);
+    const asGuard = await api.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: today, to_date: plus(2), reason: "holiday" } });
+    assert.equal(asGuard.status, 403);
+    const badReason = await supC.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: today, to_date: plus(2), reason: "skiing" } });
+    assert.equal(badReason.status, 400);
+    const backwards = await supC.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: plus(2), to_date: today, reason: "holiday" } });
+    assert.equal(backwards.status, 400);
+    const made = await supC.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: today, to_date: plus(2), reason: "holiday" } });
+    assert.equal(made.status, 201, made.text);
+    absenceId = made.json.id;
+    assert.equal(made.json.reason, "holiday"); assert.match(made.json.approved_by || "", /Sup/);
+    const overlap = await supC.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: plus(1), to_date: plus(5), reason: "family" } });
+    assert.equal(overlap.status, 409, overlap.text);
+
+    const list = await api.fetch(`/api/residents/${roomFinderId}/absences`);
+    assert.equal(list.status, 200); assert.equal(list.json.length, 1);
+
+    // The lists say away; the register does not count them as not seen.
+    const door = await api.fetch("/api/residents?q=roomy");
+    const me = door.json.find((r) => r.id === roomFinderId);
+    assert.deepEqual(me.away, { reason: "holiday", until: plus(2) });
+    const reg = await api.fetch("/api/residents?q=roomy&compliance=1");
+    const mine = reg.json.find((r) => r.id === roomFinderId);
+    assert.equal(mine.required_today, false); assert.equal(mine.state, "away");
+    const absent = await supC.fetch(`/api/reports/absent?reason=test&format=json`);
+    const row = absent.json.rows.find((r) => /Roomy Finder/.test(r.resident));
+    assert.ok(row && /authorised: holiday/.test(row.note), "the absent-now report should say the absence is authorised");
+    const rep = await supC.fetch(`/api/reports/absences?from=${today}&to=${today}&reason=test&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.ok(rep.json.rows.some((r) => /Roomy Finder/.test(r.resident) && r.reason === "holiday"));
+    const { rows: authorised } = await withOwner((c) => c.query(`select public.absence_authorised($1, $2::date) as a, public.absence_authorised($1, $3::date) as b`, [roomFinderId, plus(1), plus(3)]));
+    assert.equal(authorised[0].a, true); assert.equal(authorised[0].b, false);
+
+    // A child: refused without a guardian's agreement, recorded with it.
+    const kid = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Kid", last_name: "Finder", date_of_birth: plus(-365 * 10) } });
+    assert.equal(kid.status, 201, kid.text);
+    const noGuardian = await supC.fetch(`/api/residents/${kid.json.id}/absences`, { method: "POST", body: { from_date: today, to_date: plus(1), reason: "family" } });
+    assert.equal(noGuardian.status, 400, noGuardian.text);
+    assert.match(noGuardian.json.error || noGuardian.text, /guardian/);
+    const withGuardian = await supC.fetch(`/api/residents/${kid.json.id}/absences`, { method: "POST", body: { from_date: today, to_date: plus(1), reason: "family", guardian_agreed: true } });
+    assert.equal(withGuardian.status, 201, withGuardian.text);
+    assert.equal(withGuardian.json.guardian_agreed, true);
+  });
+
+  await test("an absence can be cut short or cancelled, and the export carries both records", async () => {
+    const today = siteToday();
+    const plus = (n) => new Date(Date.parse(today) + n * 86400000).toISOString().slice(0, 10);
+    const asGuard = await api.fetch(`/api/residents/${roomFinderId}/absences/${absenceId}/end`, { method: "POST", body: { last_day: today } });
+    assert.equal(asGuard.status, 403);
+    const ended = await supC.fetch(`/api/residents/${roomFinderId}/absences/${absenceId}/end`, { method: "POST", body: { last_day: today } });
+    assert.equal(ended.status, 200, ended.text);
+    assert.equal(ended.json.ended_on, today); assert.equal(ended.json.cancelled, false);
+    const planned = await supC.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: plus(10), to_date: plus(12), reason: "medical" } });
+    assert.equal(planned.status, 201, planned.text);
+    const cancelled = await supC.fetch(`/api/residents/${roomFinderId}/absences/${planned.json.id}/end`, { method: "POST", body: { last_day: "1900-01-01" } });
+    assert.equal(cancelled.status, 200, cancelled.text);
+    assert.equal(cancelled.json.cancelled, true);
+    const list = await api.fetch(`/api/residents/${roomFinderId}/absences`);
+    assert.equal(list.json.length, 1, "a cancelled absence should be gone");
+    const missing = await supC.fetch(`/api/residents/${roomFinderId}/absences/999999/end`, { method: "POST", body: {} });
+    assert.equal(missing.status, 404);
+    const adminId = (await withOwner((c) => c.query(`select id from auth.users where email = 'head@hut.example'`))).rows[0]?.id;
+    if (adminId) {
+      const exp = await withIdentity(adminId, (c) => c.query(`select public.export_resident_record($1) as j`, [roomFinderId]));
+      assert.equal(exp.rows[0].j.authorised_absences.length, 1);
+      assert.ok(exp.rows[0].j.rooms.length >= 3);
+    }
+  });
+
+  await test("the roll-call report lists who was marked safe, by whom, in the room they had at the time", async () => {
+    const id = require("crypto").randomUUID();
+    const started = await api.fetch("/api/roll-calls", { method: "POST", body: { id, kind: "drill" } });
+    assert.equal(started.status, 201, started.text);
+    const mark = await api.fetch(`/api/roll-calls/${id}/marks`, { method: "POST", body: { resident_id: roomFinderId } });
+    assert.equal(mark.status, 200, mark.text);
+    const v = await api.fetch("/api/visits", { method: "POST", body: { kind: "contractor", name: "Safe Sparks" } });
+    assert.equal(v.status, 201, v.text);
+    const vm = await api.fetch(`/api/roll-calls/${id}/visit-marks`, { method: "POST", body: { visit_id: v.json.id } });
+    assert.equal(vm.status, 200, vm.text);
+    const end = await api.fetch(`/api/roll-calls/${id}/end`, { method: "POST", body: {} });
+    assert.equal(end.status, 200, end.text);
+    const today = siteToday();
+    const rep = await supC.fetch(`/api/reports/roll-call-marks?from=${today}&to=${today}&reason=drill+record&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    const me = rep.json.rows.find((r) => /Roomy Finder/.test(r.name));
+    assert.ok(me, "the marked resident is missing");
+    assert.equal(me.who, "resident"); assert.match(me.room || "", /K2/); assert.equal(me.marked_by, "Gina Guard");
+    assert.match(me.marked_safe_at, /^\d{2}:\d{2}$/);
+    const spark = rep.json.rows.find((r) => /Safe Sparks/.test(r.name));
+    assert.ok(spark && spark.who === "contractor", "the marked contractor is missing");
   });
 
   console.log("\n== who viewed which record (migration 023) ==");
@@ -2217,6 +2361,13 @@ async function main() {
         assert.equal(v.status, 201, v.text);
         fx.visitId = v.json.id;
       },
+      absence: async () => {
+        await makers.resident();
+        const d = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+        const a = await supM.fetch(`/api/residents/${fx.residentId}/absences`, { method: "POST", body: { from_date: d, to_date: d, reason: "holiday" } });
+        assert.equal(a.status, 201, a.text);
+        fx.absenceId = a.json.id;
+      },
       tenant: async () => {
         const n = Math.floor(Math.random() * 1e6);
         const t = await clients.platform.fetch("/api/tenants", { method: "POST", body: { name: `Centre ${n}`, slug: `centre-${n}`, admin_name: "First Admin", admin_email: `first${n}@hut.example` } });
@@ -2224,7 +2375,7 @@ async function main() {
         fx.tenantId = t.json.id; fx.tenantSlug = `centre-${n}`;
       },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "tenant"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "absence", "tenant"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 

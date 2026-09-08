@@ -120,14 +120,14 @@
   <h2 id="gate">The door <span class="who">every staff member</span></h2>
   <p>The door answers one question: who is on site right now? Every sign-in and sign-out is a movement with a time and your name on it.</p>
   <h3>Sign someone in or out</h3>
-  <div class="step"><b>1</b><span>Find the person. The whole list is on screen; type part of a name to filter. Spelling, accents and name order are forgiven.</span></div>
+  <div class="step"><b>1</b><span>Find the person. The whole list is on screen; type part of a name, or a room number such as <span class="ui">B1</span>, to filter. Spelling, accents and name order are forgiven.</span></div>
   <div class="step"><b>2</b><span>Look at the person. The app records that you checked; it does not check for you.</span></div>
   <div class="step"><b>3</b><span>Swipe the card <span class="ui">right</span> to sign IN, <span class="ui">left</span> to sign OUT. The strip behind the card says which. Or tap the name and use the <span class="ui">Sign IN</span> and <span class="ui">Sign OUT</span> buttons.</span></div>
   <p>The card updates the moment the movement is recorded. Nothing can be edited afterwards: a mistake is corrected by recording the opposite movement, and both stay on the log.</p>
   <h3>The three tiles</h3>
   <p><span class="ui">On site</span>, <span class="ui">Off site</span> and <span class="ui">Moved today</span> count the list below them. Tap a tile to see only those residents; tap it again for everyone. The line under the search box says which filter is on.</p>
   <h3>Several people at once</h3>
-  <p>A family coming back from school, a minibus arriving: tap <span class="ui">Select several</span>, tick each person, then <span class="ui">Sign IN</span> or <span class="ui">Sign OUT</span> in the bar at the bottom. Each person still gets their own movement with the time and your name. <span class="ui">Cancel</span> or <span class="ui">Stop selecting</span> puts the list back to normal.</p>
+  <p>A family coming back from school, a minibus arriving: tap <span class="ui">Select several</span>, tick each person, then <span class="ui">Sign IN</span> or <span class="ui">Sign OUT</span> in the bar at the bottom. Ticking someone who is in a family ticks the whole family that is on screen. Each person still gets their own movement with the time and your name. <span class="ui">Cancel</span> or <span class="ui">Stop selecting</span> puts the list back to normal.</p>
   <h3>Since when</h3>
   <p>Every card says <span class="ui">on site since 14:20</span> or <span class="ui">off site since Thu 4 Sep 09:10</span>: the time of the person's last movement, with the day once it is not today. <span class="ui">No movement on record</span> means they have never been signed in.</p>
   <h3>The log</h3>
@@ -144,6 +144,8 @@
   <div class="step"><b>3</b><span>The card drops off the Not seen list and the tile counts change. A second check-in on the same day is recorded but changes nothing.</span></div>
   <h3>The tiles</h3>
   <p><span class="ui">Not seen</span> is today's work: residents required today who have not checked in. <span class="ui">Seen today</span> is who has already checked in, and each card says the time. Runs of missed nights and days absent in the rolling window are not on this screen; supervisors and admins read them under <span class="ui">Admin → Absences</span>.</p>
+  <h3>Away with the centre's agreement</h3>
+  <p>A resident on an authorised absence (a holiday, a family matter, hospital) shows <span class="ui">Away until</span> a date on their card, on the Door and the register, and is not counted as not seen. The daily rule does not apply on those days, so they never count as missed. A supervisor records the absence on the person's edit sheet under Admin.</p>
   <h3>Under 18s</h3>
   <p>Residents under the site's adult age are listed but not required. Their cards say so, and they are never counted as not seen.</p>
   <h3>The detail sheet</h3>
@@ -174,6 +176,10 @@
   <h3>Residents</h3>
   <p><span class="ui">Add</span> takes a first name, last name and date of birth, and optionally the ID document, a room and an evacuation need. The date of birth is used only for the adult rule and is never shown to guards.</p>
   <p>Tap a resident for the edit sheet: change details, move rooms, set an evacuation need, link family members, mark them <span class="ui">departed</span> when they leave (the record stays for the retention period), or as an admin export or erase the whole record.</p>
+  <h3>Authorised absences</h3>
+  <p>On a resident's edit sheet: the first and last day away and a reason from the list (holiday, family, medical, education, work, other). For a child, tick that a parent or guardian agreed; the app refuses the absence without it. If the person comes back early, <span class="ui">Back early: end today</span> ends it; a planned absence that never happened is cancelled. Nothing else is held: no destination, no notes. The register shows those days as not required.</p>
+  <h3>Rooms so far</h3>
+  <p>The same sheet lists every room the person has had, with the dates and who moved them. It fills in by itself as rooms change and closes when someone leaves; nothing to maintain.</p>
   <h3>Make a family</h3>
   <p>Where Households is on: tap <span class="ui">Make a family</span> above the list, tick each person who lives as one family, then <span class="ui">Make a family</span> in the bar at the bottom. If one of them is already in a family, the others join it. A family stays together on the roll call, children marked, and a room reads as a family. On any edit sheet the family's members are chips; tap one to open that person, or add someone from the drop-down.</p>
   <h3>Import a spreadsheet</h3>
@@ -186,7 +192,7 @@
   <h3>Buildings and rooms</h3>
   <p>Describe the site once: buildings, floors and room numbers as painted on the doors, with a capacity. Assign residents to rooms on their edit sheet. The tab then shows occupancy per room: each person is a chip with a filled dot for on site, a hollow dot for off site, <span class="ui">child</span> where they are under the adult age and their evacuation need where that feature is on. Tap a chip to open their record. That is the list a fire officer asks for.</p>
   <h3>Reports</h3>
-  <p>The daily register, attendance, the movement log, <span class="ui">Out and back</span>, the drill record, visitors and <span class="ui">Absent overnight</span> for a date range; occupancy, the evacuation list and <span class="ui">Absent now</span> as they stand. Each can be viewed and printed, or downloaded as a spreadsheet. A reason is required and every export is logged with it. Administrators also have <span class="ui">Who viewed which record</span>.</p>
+  <p>The daily register, attendance, the movement log, <span class="ui">Out and back</span>, the drill record, <span class="ui">Roll call: who was marked safe</span>, visitors, <span class="ui">Authorised absences</span>, <span class="ui">Room history</span> and <span class="ui">Absent overnight</span> for a date range; occupancy, the evacuation list and <span class="ui">Absent now</span> as they stand. Each can be viewed and printed, or downloaded as a spreadsheet. A reason is required and every export is logged with it. Administrators also have <span class="ui">Who viewed which record</span>.</p>
   <p><span class="ui">Out and back</span> is the check-out and check-in list: one row per absence with the building, room, date and time out, date and time back, hours away, and who signed each. A row with the in-columns blank is someone still out. <span class="ui">Absent now</span> is everyone off site at this moment, with when they left and who signed them out. <span class="ui">Absent overnight</span> is who was off site at midnight on each night in the range: the app takes that snapshot itself just after midnight, site time, and keeps it as long as the register, so the answer for a night months ago is still there after the movement log has been cleared.</p>
   <h3>Staff <span class="who">admins</span></h3>
   <p>Invite a staff member with their email and role. They receive a link to choose their own password; nobody is ever told a password. Disable an account when someone leaves: their sessions end at once. Roles can be changed at any time; you cannot demote or disable yourself.</p>

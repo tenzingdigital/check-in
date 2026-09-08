@@ -195,6 +195,34 @@ branch.** The feedback from the IPAS centre managers, item by item:
 - *Tablets and the evacuation feature*: already there. The app is a web
   page that fits any screen; the roll call is Stage 2.
 
+## Stage 2d — The Brighton call
+
+**Status: built 8 September 2026 (migration 028), on the working
+branch.** The action items from the Brighton Accommodation call, against
+what already existed:
+
+- *Historical and current absence, searchable by resident and room*: Stage
+  2c. *Visitors and staff on roll calls*, *staff sign-in with a
+  resident-only count*, *under-18s in movement and evacuation views but
+  not required on the register*: already so.
+- *Room-number search*: `search_residents()` matches the room as painted
+  and any part of the building-and-room label; the offline filter too.
+- *Bulk actions for families*: ticking one member in Select several ticks
+  the family on screen.
+- *Evacuation reports showing who was marked safe*: the "Roll call: who
+  was marked safe" report, residents and visitors, with the room they had
+  at the time (from room history), printable and exportable like the rest.
+- *Authorised absences, holiday blocks, child safeguarding*: a supervisor
+  records first and last day, a reason from a fixed list and, for a child,
+  a parent or guardian's agreement; `close_out_compliance_days()` writes
+  those days as not required. Held: the category, never the story.
+- *Room-assignment history*: `room_assignments`, kept by a trigger, closed
+  on leaving, backfilled from the audit trail, with a report.
+- *Role permissions for security users*: docs/PERMISSIONS.md, generated
+  from the tests.
+- Waiting on Brighton: the absence-tracking email, the IPAS weekly-register
+  template, room-layout examples.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**

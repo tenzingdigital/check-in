@@ -218,6 +218,8 @@ const Offline = (() => {
     return rows.filter((r) =>
       norm(r.full_name).includes(nq) ||
       norm(`${r.last_name || ""} ${r.first_name || ""}`).includes(nq) ||
+      (r.room && norm(r.room) === nq) ||
+      (r.room_label && norm(r.room_label).includes(nq)) ||
       (r.id_number && norm(r.id_number).includes(nq)));
   }
 

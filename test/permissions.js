@@ -48,6 +48,8 @@ module.exports = [
   { area: 'Gate and register', name: 'The 30-day strip under the sheet', method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/days`, expect: STAFF },
   { area: 'Gate and register', name: "A resident's household members", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/household`, expect: STAFF },
   { area: 'Gate and register', name: "A resident's history: every movement and check-in over a range", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/history`, expect: STAFF },
+  { area: 'Gate and register', name: "A resident's authorised absences", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/absences`, expect: STAFF },
+  { area: 'Gate and register', name: "A resident's room history", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/rooms`, expect: STAFF },
   { area: 'Gate and register', name: 'The movement log over a range, filtered by name or room', method: 'GET', path: () => '/api/gate-events?from=2026-01-01&to=2026-01-07&q=a', expect: STAFF },
   { area: 'Gate and register', name: 'Who is on site now (summary)', method: 'GET', path: () => '/api/summary', expect: STAFF },
   { area: 'Gate and register', name: "The day's movement log", method: 'GET', path: () => '/api/gate-events', expect: STAFF },
@@ -76,6 +78,8 @@ module.exports = [
   // ---- residents and buildings (supervisors and admins) --------------------
   { area: 'Residents and buildings', name: 'Add a resident', method: 'POST', path: () => '/api/residents', body: () => ({ first_name: 'Matrix', last_name: `Row${crypto.randomInt(1e6)}`, date_of_birth: dob }), expect: SUPERVISOR },
   { area: 'Residents and buildings', name: 'Import residents from a spreadsheet (preview and for real)', method: 'POST', path: () => '/api/residents/import', body: () => ({ dry_run: true, rows: [{ first_name: 'Sheet', last_name: 'Row', date_of_birth: '01/01/1990' }] }), expect: SUPERVISOR },
+  { area: 'Residents and buildings', name: 'Authorise an absence (a holiday, a family matter)', method: 'POST', path: (fx) => `/api/residents/${fx.residentId}/absences`, body: () => ({ from_date: '2030-01-01', to_date: '2030-01-03', reason: 'holiday' }), expect: SUPERVISOR, fresh: 'resident' },
+  { area: 'Residents and buildings', name: 'Cut an authorised absence short or cancel it', method: 'POST', path: (fx) => `/api/residents/${fx.residentId}/absences/${fx.absenceId}/end`, body: () => ({ last_day: '1900-01-01' }), expect: SUPERVISOR, fresh: 'absence' },
   { area: 'Residents and buildings', name: "Change a resident's details, room, need or family", method: 'PATCH', path: (fx) => `/api/residents/${fx.residentId}`, body: () => ({ first_name: 'Matrix' }), expect: SUPERVISOR },
   { area: 'Residents and buildings', name: "Open a resident's full record (date of birth, the edit sheet; logged)", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/record`, expect: { anon: 'unauth', guard: 'hidden', supervisor: 'allow', admin: 'allow' }, note: 'A guard reads residents through a view that carries age, never the date of birth; the table itself does not exist for them' },
   { area: 'Residents and buildings', name: 'Add a building', method: 'POST', path: () => '/api/buildings', body: () => ({ name: `Wing ${crypto.randomInt(1e6)}` }), expect: SUPERVISOR },

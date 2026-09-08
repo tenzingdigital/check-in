@@ -31,7 +31,8 @@ router.get('/checkin-summary', wrap(async (req, res) => {
       client.query('select * from attention_list($1)', [MAX_ATTENTION]),
       client.query(
         `select count(*) filter (where seen_today)::integer as seen_today,
-                count(*) filter (where required_today and not seen_today)::integer as not_seen
+                count(*) filter (where required_today and not seen_today
+                                   and not absence_authorised(id, site_today()))::integer as not_seen
            from v_resident_compliance`,
       ),
     ]);

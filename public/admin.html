@@ -72,6 +72,13 @@
   .person.current { border-color: var(--accent); }
   .person .tag { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .person .need { margin-left: 2px; white-space: nowrap; }
+  .abslist { display: flex; flex-direction: column; gap: 6px; }
+  /* Two lines: when and the badge, then what and who. A long date span
+     must not squeeze the words into a column. */
+  .abslist .logrow { flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .abslist .logrow time { min-width: 0; }
+  .abslist .logrow .body { flex: 1 1 100%; }
+  .abslist .linkish { font-size: 13px; font-weight: 600; margin-top: 2px; }
   .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 4px 0 8px; }
   .legend .nowrap { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
   .legend .person { min-height: 26px; padding: 2px 8px 2px 6px; font-size: 12px; cursor: default; border-color: transparent; background: transparent; }
@@ -838,6 +845,31 @@ function renderDetail(rec, summary) {
       <p class="hint flush">Holds only which residents share a household. Nothing else about the family is recorded.</p>
     </div>` : ""}
 
+    ${!departed ? `
+    <div class="formcard" id="absCard">
+      <h2>Authorised absence <button class="tip" type="button" data-tip="Days ${esc(rec.first_name)} is away with the centre's agreement: a holiday, a family matter, hospital. The daily rule does not apply on those days, so they never count as missed. A reason from the list, no notes." aria-label="About authorised absences">?</button></h2>
+      <div id="absList" class="hint flush">Loading…</div>
+      <form id="absForm" class="mt8" autocomplete="off">
+        <div class="grid2">
+          <div><label class="lbl" for="abFrom">First day away</label><input id="abFrom" class="field" type="date" required value="${todayISODate()}"></div>
+          <div><label class="lbl" for="abTo">Last day away</label><input id="abTo" class="field" type="date" required value="${todayISODate()}"></div>
+        </div>
+        <label class="lbl" for="abReason">Reason</label>
+        <select id="abReason" class="field">
+          <option value="holiday">Holiday</option><option value="family">Family</option><option value="medical">Medical</option>
+          <option value="education">Education</option><option value="work">Work</option><option value="other">Other</option>
+        </select>
+        <label class="check mt8" id="abGuardianWrap" ${((summary && summary.age_years) ?? 99) < (state.settings?.adult_age_years ?? 18) ? "" : "hidden"}><input id="abGuardian" type="checkbox"> <span><b>A parent or guardian agreed.</b> Required for a child.</span></label>
+        <div class="actions"><button class="btn sm" type="submit" id="abSave">Record absence</button></div>
+      </form>
+    </div>` : ""}
+
+    ${featureOn("feature_buildings") ? `
+    <div class="formcard">
+      <h2>Rooms so far</h2>
+      <div id="roomHist" class="hint flush">Loading…</div>
+    </div>` : ""}
+
     <div id="detailHistory"></div>
 
     ${canStaff() ? `
@@ -906,6 +938,58 @@ function renderDetail(rec, summary) {
       const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { household_with: withId }), (err) => toast("Not changed: " + err.message, "err"));
       if (!out) return;
       toast("Added to the family", "ok"); $("hhWith").value = ""; renderMembers(); loadResidents();
+    });
+  }
+
+  if ($("absCard")) {
+    const REASON = { holiday: "Holiday", family: "Family", medical: "Medical", education: "Education", work: "Work", other: "Other" };
+    const renderAbs = async () => {
+      const rows = await guarded(() => apiGet(`/api/residents/${rec.id}/absences`), () => {});
+      const box = $("absList");
+      if (!rows) return;
+      if (!rows.length) { box.innerHTML = "None recorded."; return; }
+      const today = todayISODate();
+      box.innerHTML = `<div class="abslist">${rows.map((a) => {
+        const until = a.ended_on || a.to_date;
+        const live = a.from_date <= today && until >= today;
+        const future = a.from_date > today;
+        return `<div class="logrow wide">
+          <time>${esc(dayLabel(a.from_date))} – ${esc(dayLabel(until))}</time>
+          <span class="dir ${live ? "out" : "chk"}">${live ? "AWAY" : future ? "PLANNED" : "PAST"}</span>
+          <span class="body">${esc(REASON[a.reason] || a.reason)}${a.guardian_agreed ? " · guardian agreed" : ""}${a.ended_on && a.ended_on < a.to_date ? ` · cut short (planned to ${esc(dayLabel(a.to_date))})` : ""}
+            <span class="by">recorded by ${esc(a.approved_by || "—")}</span>
+            ${live || future ? `<button class="linkish" type="button" data-end="${a.id}">${live ? "Back early: end today" : "Cancel"}</button>` : ""}</span>
+        </div>`; }).join("")}</div>`;
+      box.querySelectorAll("button[data-end]").forEach((b) => b.addEventListener("click", async () => {
+        const a = rows.find((x) => String(x.id) === b.dataset.end);
+        const last = a.from_date > today ? "1900-01-01" : today;
+        const out = await guarded(() => apiPost(`/api/residents/${rec.id}/absences/${a.id}/end`, { last_day: last }), (err) => toast("Not changed: " + err.message, "err"));
+        if (!out) return;
+        toast(out.cancelled ? "Absence cancelled" : "Absence ended; from tomorrow the daily rule applies", "ok");
+        renderAbs(); loadResidents();
+      }));
+    };
+    renderAbs();
+    $("absForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("abSave").disabled = true;
+      const out = await guarded(() => apiPost(`/api/residents/${rec.id}/absences`, {
+        from_date: $("abFrom").value, to_date: $("abTo").value, reason: $("abReason").value, guardian_agreed: $("abGuardian").checked,
+      }), (err) => toast("Not recorded: " + err.message, "err"));
+      $("abSave").disabled = false;
+      if (!out) return;
+      toast("Absence recorded", "ok");
+      renderAbs(); loadResidents();
+    });
+  }
+  if ($("roomHist")) {
+    guarded(() => apiGet(`/api/residents/${rec.id}/rooms`), () => {}).then((rows) => {
+      const box = $("roomHist"); if (!rows) return;
+      if (!rows.length) { box.innerHTML = "No room recorded yet."; return; }
+      box.innerHTML = `<div class="abslist">${rows.map((r) => `<div class="logrow wide">
+          <time>${esc(dayTime(r.from_at))}${r.to_at ? ` – ${esc(dayTime(r.to_at))}` : " – now"}</time>
+          <span class="body">${esc(r.room_label)}<span class="by">moved by ${esc(r.changed_by || "—")}</span></span>
+        </div>`).join("")}</div>`;
     });
   }
 

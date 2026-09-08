@@ -408,7 +408,16 @@ delete from public.checkin_events;
 insert into public.residents (first_name, last_name, date_of_birth, status, departed_on)
 values ('Cormac', 'Doyle', '1980-06-15', 'departed', public.site_today() - 3);
 
+-- Migration 028: a resident away with the centre's agreement for three of
+-- the ten days. Those days are written as not required; the rest as usual.
+insert into public.residents (first_name, last_name, date_of_birth)
+values ('Aoife', 'Walsh', '1985-02-02');
+
 update public.residents set registered_at = now() - interval '10 days';
+
+select id as away_id from public.residents where last_name='Walsh' \gset
+insert into public.authorised_absences (resident_id, from_date, to_date, reason)
+values (:'away_id', public.site_today() - 6, public.site_today() - 4, 'holiday');
 
 select id as adult_id    from public.residents where last_name='Brennan' \gset
 select id as departed_id from public.residents where last_name='Doyle'    \gset
@@ -458,6 +467,14 @@ select pg_temp.expect('departed resident: has a register row ON their departure 
   (:'has_row_on_departure_day')::boolean, true);
 select pg_temp.expect('departed resident: no register row for the day AFTER departure',
   (:'has_row_after_departure')::boolean, false);
+
+\echo '--- an authorised absence: those days are not required, the days around them are'
+select count(*) filter (where not required) as not_required_days,
+       count(*) filter (where required) as required_days
+  from public.daily_compliance
+ where resident_id = :'away_id' and compliance_date between public.site_today() - 7 and public.site_today() - 3 \gset
+select pg_temp.expect('authorised absence: 3 days not required', (:not_required_days)::integer, 3);
+select pg_temp.expect('authorised absence: the 2 days around it required', (:required_days)::integer, 2);
 
 \echo '--- idempotency: a second run writes nothing and overwrites nothing'
 select public.close_out_compliance_days() as second_run_rows \gset
@@ -870,6 +887,18 @@ select count(*) as n from public.admin_audit where table_name in ('buildings', '
 select pg_temp.expect('building and room inserts are audited', (:'a_n')::integer, 2);
 select count(*) as n from public.admin_audit where table_name = 'residents' and row_id = :'late_id'::text and new_row->>'room_id' = :'room_id' \gset m_
 select pg_temp.expect('the move is audited on the resident', (:'m_n')::integer, 1);
+
+\echo '--- migration 028: the move is kept as room history, and leaving the room closes it'
+select count(*) filter (where to_at is null) as open_rows, max(room_label) as label
+  from public.room_assignments where resident_id = :'late_id' \gset h_
+select pg_temp.expect('room history: one open row after the move', (:'h_open_rows')::integer, 1);
+select pg_temp.expect('room history: carries the label as painted', :'h_label'::text, 'Castle · 1F · 12'::text);
+update public.residents set room_id = null where id = :'late_id';
+select count(*) filter (where to_at is null) as open_rows, count(*) as all_rows
+  from public.room_assignments where resident_id = :'late_id' \gset h2_
+select pg_temp.expect('room history: leaving the room closes it', (:'h2_open_rows')::integer, 0);
+select pg_temp.expect('room history: the closed row is kept', (:'h2_all_rows')::integer, 1);
+update public.residents set room_id = :'room_id' where id = :'late_id';
 
 \echo '--- a departed resident no longer occupies the room'
 set role authenticated;

@@ -30,6 +30,23 @@
 -- the transaction that provisions the schema.
 set local check_function_bodies = false;
 
+-- Name: absence_authorised(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.absence_authorised(p_resident_id uuid, p_day date) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  select exists (
+    select 1 from __TENANT__.authorised_absences a
+     where a.resident_id = p_resident_id
+       and p_day between a.from_date and coalesce(a.ended_on, a.to_date)
+  );
+$$;
+
+
+--
+
 -- Name: admin_create_staff(text, text, text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -421,6 +438,75 @@ $$;
 
 --
 
+-- Name: authorised_absences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.authorised_absences (
+    id bigint NOT NULL,
+    resident_id uuid NOT NULL,
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    reason text NOT NULL,
+    guardian_agreed boolean DEFAULT false NOT NULL,
+    approved_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ended_on date,
+    CONSTRAINT authorised_absences_check CHECK ((to_date >= from_date)),
+    CONSTRAINT authorised_absences_check1 CHECK (((ended_on IS NULL) OR ((ended_on >= from_date) AND (ended_on <= to_date)))),
+    CONSTRAINT authorised_absences_check2 CHECK (((to_date - from_date) <= 366)),
+    CONSTRAINT authorised_absences_reason_check CHECK ((reason = ANY (ARRAY['holiday'::text, 'family'::text, 'medical'::text, 'education'::text, 'work'::text, 'other'::text])))
+);
+
+
+--
+
+-- Name: authorise_absence(uuid, date, date, text, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.authorise_absence(p_resident_id uuid, p_from date, p_to date, p_reason text, p_guardian_agreed boolean DEFAULT false) RETURNS __TENANT__.authorised_absences
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_res   __TENANT__.residents;
+  v_adult integer;
+  v_row   __TENANT__.authorised_absences;
+begin
+  if not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin can authorise an absence' using errcode = '42501';
+  end if;
+  select * into v_res from __TENANT__.residents where id = p_resident_id;
+  if not found then
+    raise exception 'Resident not found' using errcode = 'P0002';
+  end if;
+  if v_res.status <> 'active' then
+    raise exception 'Only an active resident can be authorised to be away' using errcode = '23514';
+  end if;
+  if p_to < p_from then
+    raise exception 'The last day must not be before the first' using errcode = '22023';
+  end if;
+  if p_to - p_from > 366 then
+    raise exception 'An authorised absence covers at most a year' using errcode = '22023';
+  end if;
+  select adult_age_years into v_adult from __TENANT__.app_settings where id;
+  if v_res.date_of_birth > (p_from - make_interval(years => v_adult))::date and not coalesce(p_guardian_agreed, false) then
+    raise exception 'A child''s absence needs a parent or guardian''s agreement recorded' using errcode = '23514';
+  end if;
+  if exists (select 1 from __TENANT__.authorised_absences a
+              where a.resident_id = p_resident_id
+                and daterange(a.from_date, coalesce(a.ended_on, a.to_date), '[]') && daterange(p_from, p_to, '[]')) then
+    raise exception 'Overlaps an authorised absence already recorded' using errcode = '23505';
+  end if;
+  insert into __TENANT__.authorised_absences (resident_id, from_date, to_date, reason, guardian_agreed, approved_by)
+  values (p_resident_id, p_from, p_to, p_reason, coalesce(p_guardian_agreed, false), auth.uid())
+  returning * into v_row;
+  return v_row;
+end;
+$$;
+
+
+--
+
 -- Name: close_out_compliance_days(date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -477,7 +563,11 @@ begin
       r.id, v_day,
       __TENANT__.compliance_required(
         r.date_of_birth, (r.registered_at at time zone v_tz)::date,
-        r.departed_on, v_day, v_adult),
+        r.departed_on, v_day, v_adult)
+        -- Migration 028: a day inside an authorised absence is a day the
+        -- rule did not apply. The row is still written, so the register
+        -- shows the day as not required rather than missing.
+        and not __TENANT__.absence_authorised(r.id, v_day),
       false, null, 0, now()
     from __TENANT__.residents r
     where (r.registered_at at time zone v_tz)::date <= v_day
@@ -513,6 +603,40 @@ CREATE FUNCTION __TENANT__.close_out_due_through() RETURNS date
       then __TENANT__.site_today() - 2
     else __TENANT__.site_today() - 1
   end;
+$$;
+
+
+--
+
+-- Name: end_absence(bigint, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date DEFAULT NULL::date) RETURNS __TENANT__.authorised_absences
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_row  __TENANT__.authorised_absences;
+  v_last date := coalesce(p_last_day, __TENANT__.site_today() - 1);
+begin
+  if not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin can change an authorised absence' using errcode = '42501';
+  end if;
+  select * into v_row from __TENANT__.authorised_absences where id = p_id;
+  if not found then
+    raise exception 'Absence not found' using errcode = 'P0002';
+  end if;
+  if v_last < v_row.from_date then
+    delete from __TENANT__.authorised_absences where id = p_id;
+    v_row.ended_on := v_row.from_date - 1;   -- signals "cancelled" to the caller
+    return v_row;
+  end if;
+  update __TENANT__.authorised_absences
+     set ended_on = least(v_last, to_date)
+   where id = p_id
+   returning * into v_row;
+  return v_row;
+end;
 $$;
 
 
@@ -691,6 +815,26 @@ begin
       from __TENANT__.resident_views v
       left join __TENANT__.profiles p on p.id = v.actor_id
       where v.resident_id = r.id
+    ), '[]'::jsonb),
+    -- Authorised absences and the rooms they have had (migration 028).
+    'authorised_absences', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'from', a.from_date, 'to', a.to_date, 'reason', a.reason,
+               'guardian_agreed', a.guardian_agreed, 'ended_on', a.ended_on,
+               'approved_by', p.full_name, 'recorded_at', a.created_at
+             ) order by a.from_date)
+      from __TENANT__.authorised_absences a
+      left join __TENANT__.profiles p on p.id = a.approved_by
+      where a.resident_id = r.id
+    ), '[]'::jsonb),
+    'rooms', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'room', ra.room_label, 'from', ra.from_at, 'to', ra.to_at,
+               'changed_by', p.full_name
+             ) order by ra.from_at)
+      from __TENANT__.room_assignments ra
+      left join __TENANT__.profiles p on p.id = ra.changed_by
+      where ra.resident_id = r.id
     ), '[]'::jsonb),
     -- Every change an administrator made to this record, and every export
     -- of it. Art. 15 is "everything held about me"; that includes who
@@ -991,6 +1135,25 @@ declare v_days integer; v_n integer;
 begin
   select compliance_retention_days into v_days from __TENANT__.app_settings where id;
   delete from __TENANT__.admin_audit where at < now() - make_interval(days => v_days);
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
+-- Name: purge_expired_authorised_absences(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_expired_authorised_absences() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_days integer; v_n integer;
+begin
+  select compliance_retention_days into v_days from __TENANT__.app_settings where id;
+  delete from __TENANT__.authorised_absences where to_date < __TENANT__.site_today() - v_days;
   get diagnostics v_n = row_count;
   return v_n;
 end;
@@ -1575,6 +1738,21 @@ $$;
 
 --
 
+-- Name: room_label_of(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.room_label_of(p_room_id uuid) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  select b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number
+    from __TENANT__.rooms rm join __TENANT__.buildings b on b.id = rm.building_id
+   where rm.id = p_room_id;
+$$;
+
+
+--
+
 -- Name: search_residents(text, boolean, integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1590,6 +1768,13 @@ CREATE FUNCTION __TENANT__.search_residents(q text, include_departed boolean DEF
     and (
       n.nq = ''
       or v.search_key like '%' || n.nq || '%'
+      -- Migration 028: the room as painted on the door (B1, K12), or any
+      -- part of the building-and-room label. Security works by room.
+      or exists (select 1 from __TENANT__.v_resident_room x
+                  where x.id = v.id
+                    and (lower(x.room) = n.nq
+                         or lower(x.room_label) like '%' || n.nq || '%'
+                         or lower(x.building || ' ' || x.room) like '%' || n.nq || '%'))
       or (
         word_similarity(n.nq, v.search_key) >= 0.4
         and not exists (
@@ -1600,7 +1785,8 @@ CREATE FUNCTION __TENANT__.search_residents(q text, include_departed boolean DEF
       )
     )
   order by
-    case when v.search_key like n.nq || '%'         then 0
+    case when exists (select 1 from __TENANT__.v_resident_room x where x.id = v.id and lower(x.room) = n.nq) then 0
+         when v.search_key like n.nq || '%'         then 0
          when v.search_key like '%' || n.nq || '%'  then 1
          else 2 end,
     word_similarity(n.nq, v.search_key) desc,
@@ -1670,6 +1856,44 @@ $$;
 
 --
 
+-- Name: track_room_assignment(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.track_room_assignment() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_was_open boolean;
+begin
+  if tg_op = 'INSERT' then
+    if new.room_id is not null and new.status = 'active' then
+      insert into __TENANT__.room_assignments (resident_id, room_id, room_label, changed_by)
+      values (new.id, new.room_id, __TENANT__.room_label_of(new.room_id), auth.uid());
+    end if;
+    return new;
+  end if;
+  -- UPDATE: nothing to do unless the room or the status moved.
+  if new.room_id is not distinct from old.room_id and new.status = old.status then
+    return new;
+  end if;
+  v_was_open := old.room_id is not null and old.status = 'active';
+  if v_was_open and (new.room_id is distinct from old.room_id or new.status <> 'active') then
+    update __TENANT__.room_assignments set to_at = now()
+     where resident_id = new.id and to_at is null;
+  end if;
+  if new.room_id is not null and new.status = 'active'
+     and (new.room_id is distinct from old.room_id or old.status <> 'active') then
+    insert into __TENANT__.room_assignments (resident_id, room_id, room_label, changed_by)
+    values (new.id, new.room_id, __TENANT__.room_label_of(new.room_id), auth.uid());
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+
 -- Name: admin_audit; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1700,6 +1924,27 @@ ALTER TABLE __TENANT__.admin_audit ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
     NO MAXVALUE
     CACHE 1
 );
+
+
+--
+
+-- Name: authorised_absences_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE __TENANT__.authorised_absences_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+
+-- Name: authorised_absences_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE __TENANT__.authorised_absences_id_seq OWNED BY __TENANT__.authorised_absences.id;
 
 
 --
@@ -1894,6 +2139,44 @@ ALTER TABLE __TENANT__.resident_views ALTER COLUMN id ADD GENERATED ALWAYS AS ID
 
 --
 
+-- Name: room_assignments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.room_assignments (
+    id bigint NOT NULL,
+    resident_id uuid NOT NULL,
+    room_id uuid,
+    room_label text NOT NULL,
+    from_at timestamp with time zone DEFAULT now() NOT NULL,
+    to_at timestamp with time zone,
+    changed_by uuid,
+    CONSTRAINT room_assignments_check CHECK (((to_at IS NULL) OR (to_at >= from_at)))
+);
+
+
+--
+
+-- Name: room_assignments_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE __TENANT__.room_assignments_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+
+-- Name: room_assignments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE __TENANT__.room_assignments_id_seq OWNED BY __TENANT__.room_assignments.id;
+
+
+--
+
 -- Name: rooms; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2049,6 +2332,22 @@ CREATE VIEW __TENANT__.v_system_health AS
 
 --
 
+-- Name: authorised_absences id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.authorised_absences ALTER COLUMN id SET DEFAULT nextval('__TENANT__.authorised_absences_id_seq'::regclass);
+
+
+--
+
+-- Name: room_assignments id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.room_assignments ALTER COLUMN id SET DEFAULT nextval('__TENANT__.room_assignments_id_seq'::regclass);
+
+
+--
+
 -- Name: admin_audit admin_audit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2063,6 +2362,15 @@ ALTER TABLE ONLY __TENANT__.admin_audit
 
 ALTER TABLE ONLY __TENANT__.app_settings
     ADD CONSTRAINT app_settings_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: authorised_absences authorised_absences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.authorised_absences
+    ADD CONSTRAINT authorised_absences_pkey PRIMARY KEY (id);
 
 
 --
@@ -2220,6 +2528,15 @@ ALTER TABLE ONLY __TENANT__.roll_calls
 
 --
 
+-- Name: room_assignments room_assignments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.room_assignments
+    ADD CONSTRAINT room_assignments_pkey PRIMARY KEY (id);
+
+
+--
+
 -- Name: rooms rooms_building_floor_number_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2259,6 +2576,14 @@ CREATE INDEX admin_audit_at_idx ON __TENANT__.admin_audit USING btree (at);
 --
 
 CREATE INDEX admin_audit_row_idx ON __TENANT__.admin_audit USING btree (table_name, row_id);
+
+
+--
+
+-- Name: authorised_absences_resident_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX authorised_absences_resident_idx ON __TENANT__.authorised_absences USING btree (resident_id, from_date, to_date);
 
 
 --
@@ -2415,6 +2740,30 @@ CREATE INDEX roll_calls_open_idx ON __TENANT__.roll_calls USING btree (started_a
 
 --
 
+-- Name: room_assignments_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX room_assignments_open_idx ON __TENANT__.room_assignments USING btree (resident_id) WHERE (to_at IS NULL);
+
+
+--
+
+-- Name: room_assignments_resident_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX room_assignments_resident_idx ON __TENANT__.room_assignments USING btree (resident_id, from_at DESC);
+
+
+--
+
+-- Name: room_assignments_room_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX room_assignments_room_idx ON __TENANT__.room_assignments USING btree (room_id, from_at DESC);
+
+
+--
+
 -- Name: rooms_building_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2443,6 +2792,14 @@ CREATE INDEX visits_on_site_idx ON __TENANT__.visits USING btree (arrived_at DES
 --
 
 CREATE TRIGGER app_settings_audit AFTER UPDATE ON __TENANT__.app_settings FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: authorised_absences authorised_absences_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER authorised_absences_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.authorised_absences FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
 
 
 --
@@ -2479,6 +2836,14 @@ CREATE TRIGGER residents_prune_households AFTER DELETE OR UPDATE OF household_id
 
 --
 
+-- Name: residents residents_room_history; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER residents_room_history AFTER INSERT OR UPDATE OF room_id, status ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION __TENANT__.track_room_assignment();
+
+
+--
+
 -- Name: residents residents_touch_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2500,6 +2865,24 @@ CREATE TRIGGER rooms_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.rooms 
 
 ALTER TABLE ONLY __TENANT__.admin_audit
     ADD CONSTRAINT admin_audit_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: authorised_absences authorised_absences_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.authorised_absences
+    ADD CONSTRAINT authorised_absences_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: authorised_absences authorised_absences_resident_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.authorised_absences
+    ADD CONSTRAINT authorised_absences_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
 
 
 --
@@ -2693,6 +3076,33 @@ ALTER TABLE ONLY __TENANT__.roll_calls
 
 --
 
+-- Name: room_assignments room_assignments_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.room_assignments
+    ADD CONSTRAINT room_assignments_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: room_assignments room_assignments_resident_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.room_assignments
+    ADD CONSTRAINT room_assignments_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: room_assignments room_assignments_room_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.room_assignments
+    ADD CONSTRAINT room_assignments_room_id_fkey FOREIGN KEY (room_id) REFERENCES __TENANT__.rooms(id) ON DELETE SET NULL;
+
+
+--
+
 -- Name: rooms rooms_building_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2754,6 +3164,21 @@ CREATE POLICY app_settings_read ON __TENANT__.app_settings FOR SELECT USING (__T
 --
 
 CREATE POLICY app_settings_write ON __TENANT__.app_settings FOR UPDATE USING (__TENANT__.is_admin()) WITH CHECK (__TENANT__.is_admin());
+
+
+--
+
+-- Name: authorised_absences; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.authorised_absences ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: authorised_absences authorised_absences_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authorised_absences_read ON __TENANT__.authorised_absences FOR SELECT USING (__TENANT__.is_staff());
 
 
 --
@@ -2993,6 +3418,21 @@ CREATE POLICY roll_calls_read ON __TENANT__.roll_calls FOR SELECT USING (__TENAN
 
 --
 
+-- Name: room_assignments; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.room_assignments ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: room_assignments room_assignments_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY room_assignments_read ON __TENANT__.room_assignments FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
 -- Name: rooms; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3027,6 +3467,16 @@ ALTER TABLE __TENANT__.visits ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY visits_read ON __TENANT__.visits FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: FUNCTION absence_authorised(p_resident_id uuid, p_day date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.absence_authorised(p_resident_id uuid, p_day date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.absence_authorised(p_resident_id uuid, p_day date) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.absence_authorised(p_resident_id uuid, p_day date) TO service_role;
 
 
 --
@@ -3158,6 +3608,25 @@ REVOKE ALL ON FUNCTION __TENANT__.audit_row() FROM PUBLIC;
 
 --
 
+-- Name: TABLE authorised_absences; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.authorised_absences TO service_role;
+GRANT SELECT ON TABLE __TENANT__.authorised_absences TO authenticated;
+
+
+--
+
+-- Name: FUNCTION authorise_absence(p_resident_id uuid, p_from date, p_to date, p_reason text, p_guardian_agreed boolean); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.authorise_absence(p_resident_id uuid, p_from date, p_to date, p_reason text, p_guardian_agreed boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.authorise_absence(p_resident_id uuid, p_from date, p_to date, p_reason text, p_guardian_agreed boolean) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.authorise_absence(p_resident_id uuid, p_from date, p_to date, p_reason text, p_guardian_agreed boolean) TO service_role;
+
+
+--
+
 -- Name: FUNCTION close_out_compliance_days(p_through date); Type: ACL; Schema: public; Owner: -
 --
 
@@ -3174,6 +3643,16 @@ GRANT ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) TO se
 REVOKE ALL ON FUNCTION __TENANT__.close_out_due_through() FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO service_role;
+
+
+--
+
+-- Name: FUNCTION end_absence(p_id bigint, p_last_day date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date) TO service_role;
 
 
 --
@@ -3364,6 +3843,15 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_audit() TO service_role;
 
 --
 
+-- Name: FUNCTION purge_expired_authorised_absences(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_authorised_absences() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_authorised_absences() TO service_role;
+
+
+--
+
 -- Name: FUNCTION purge_expired_checkin_events(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -3545,6 +4033,15 @@ GRANT ALL ON FUNCTION __TENANT__.resident_views_between(p_from date, p_to date) 
 
 --
 
+-- Name: FUNCTION room_label_of(p_room_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.room_label_of(p_room_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.room_label_of(p_room_id uuid) TO service_role;
+
+
+--
+
 -- Name: FUNCTION search_residents(q text, include_departed boolean, max_results integer); Type: ACL; Schema: public; Owner: -
 --
 
@@ -3574,6 +4071,15 @@ GRANT ALL ON FUNCTION __TENANT__.start_roll_call(p_id uuid, p_kind text, p_start
 
 --
 
+-- Name: FUNCTION track_room_assignment(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.track_room_assignment() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.track_room_assignment() TO service_role;
+
+
+--
+
 -- Name: TABLE admin_audit; Type: ACL; Schema: public; Owner: -
 --
 
@@ -3589,6 +4095,16 @@ GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE ON TABLE __TENANT__.admin_audit TO serv
 GRANT ALL ON SEQUENCE __TENANT__.admin_audit_id_seq TO anon;
 GRANT ALL ON SEQUENCE __TENANT__.admin_audit_id_seq TO authenticated;
 GRANT ALL ON SEQUENCE __TENANT__.admin_audit_id_seq TO service_role;
+
+
+--
+
+-- Name: SEQUENCE authorised_absences_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.authorised_absences_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.authorised_absences_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.authorised_absences_id_seq TO service_role;
 
 
 --
@@ -3705,6 +4221,25 @@ GRANT ALL ON TABLE __TENANT__.resident_views TO service_role;
 GRANT ALL ON SEQUENCE __TENANT__.resident_views_id_seq TO anon;
 GRANT ALL ON SEQUENCE __TENANT__.resident_views_id_seq TO authenticated;
 GRANT ALL ON SEQUENCE __TENANT__.resident_views_id_seq TO service_role;
+
+
+--
+
+-- Name: TABLE room_assignments; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.room_assignments TO service_role;
+GRANT SELECT ON TABLE __TENANT__.room_assignments TO authenticated;
+
+
+--
+
+-- Name: SEQUENCE room_assignments_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.room_assignments_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.room_assignments_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.room_assignments_id_seq TO service_role;
 
 
 --

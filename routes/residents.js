@@ -125,6 +125,20 @@ router.get('/', wrap(async (req, res) => {
         household_id: rm.household_id || null, household_size: rm.household_size || null, household_label: rm.household_label || null,
       });
     }
+    // Away with the centre's agreement today (migration 028): the card says
+    // so, and on the register the person is not "not seen", they are away.
+    const { rows: away } = await client.query(
+      `select a.resident_id, a.reason, coalesce(a.ended_on, a.to_date) as until
+         from authorised_absences a
+        where a.resident_id = any($1::uuid[])
+          and site_today() between a.from_date and coalesce(a.ended_on, a.to_date)`,
+      [found.map(r => r.id)],
+    );
+    const awayById = new Map(away.map(a => [a.resident_id, a]));
+    for (const r of found) {
+      const a = awayById.get(r.id);
+      r.away = a ? { reason: a.reason, until: String(a.until).slice(0, 10) } : null;
+    }
     if (!wantCompliance) return found;
 
     // first_seen_at is today's row in daily_compliance, joined here rather
@@ -143,7 +157,11 @@ router.get('/', wrap(async (req, res) => {
       [found.map(r => r.id)],
     );
     const byId = new Map(comp.map(c => [c.id, c]));
-    return found.map(r => ({ ...r, ...(byId.get(r.id) || {}) }));
+    return found.map(r => {
+      const out = { ...r, ...(byId.get(r.id) || {}) };
+      if (out.away && out.status === 'active') { out.required_today = false; if (out.state !== 'breach_open') out.state = 'away'; }
+      return out;
+    });
   });
 
   res.json(rows);
@@ -240,6 +258,82 @@ router.get('/:id/history', wrap(async (req, res) => {
         order by x.occurred_at desc
         limit 2000`,
       [id, from, to]);
+    return rows;
+  });
+  res.json(rows);
+}));
+
+// Authorised absences (migration 028). Any staff member sees them; only a
+// supervisor or admin records or changes one, enforced by the functions.
+const ABSENCE_REASONS = ['holiday', 'family', 'medical', 'education', 'work', 'other'];
+function absenceRow(a) {
+  return {
+    id: Number(a.id), from_date: String(a.from_date).slice(0, 10), to_date: String(a.to_date).slice(0, 10),
+    ended_on: a.ended_on ? String(a.ended_on).slice(0, 10) : null,
+    reason: a.reason, guardian_agreed: a.guardian_agreed, approved_by: a.approved_by_name || null, created_at: a.created_at,
+  };
+}
+router.get('/:id/absences', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const rows = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select a.*, p.full_name as approved_by_name
+         from authorised_absences a left join profiles p on p.id = a.approved_by
+        where a.resident_id = $1 order by a.from_date desc limit 200`, [id]);
+    return rows;
+  });
+  res.json(rows.map(absenceRow));
+}));
+router.post('/:id/absences', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const body = req.body || {};
+  const from = dateParam(body.from_date, 'from_date');
+  const to = dateParam(body.to_date, 'to_date');
+  const reason = String(body.reason || '');
+  if (!ABSENCE_REASONS.includes(reason)) throw new HttpError(400, `reason must be one of ${ABSENCE_REASONS.join(', ')}`);
+  const guardian = body.guardian_agreed === true;
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query('select * from authorise_absence($1, $2, $3, $4, $5)', [id, from, to, reason, guardian]);
+    const { rows: named } = await client.query(
+      `select a.*, p.full_name as approved_by_name from authorised_absences a left join profiles p on p.id = a.approved_by where a.id = $1`, [rows[0].id]);
+    return named[0] || rows[0];
+  }).catch((err) => {
+    if (err && err.code === '23505') throw new HttpError(409, err.message);
+    if (err && err.code === '23514') throw new HttpError(400, err.message);
+    if (err && err.code === '22023') throw new HttpError(400, err.message);
+    if (err && err.code === 'P0002') throw new HttpError(404, 'No such resident');
+    throw err;
+  });
+  res.status(201).json(absenceRow(row));
+}));
+// POST …/absences/:aid/end { last_day? } — cut it short; a last day before
+// the first day removes it (it never happened).
+router.post('/:id/absences/:aid/end', wrap(async (req, res) => {
+  uuidParam(req.params.id, 'resident id');
+  const aid = intParam(req.params.aid, 0, Number.MAX_SAFE_INTEGER);
+  if (!aid) throw new HttpError(400, 'absence id');
+  const body = req.body || {};
+  const last = body.last_day ? dateParam(body.last_day, 'last_day') : null;
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query('select * from end_absence($1, $2)', [aid, last]);
+    return rows[0];
+  }).catch((err) => {
+    if (err && err.code === 'P0002') throw new HttpError(404, 'No such absence');
+    throw err;
+  });
+  const out = absenceRow(row);
+  out.cancelled = row.ended_on && String(row.ended_on).slice(0, 10) < out.from_date;
+  res.json(out);
+}));
+
+// GET /api/residents/:id/rooms — every room they have had (migration 028).
+router.get('/:id/rooms', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const rows = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select ra.room_label, ra.from_at, ra.to_at, p.full_name as changed_by
+         from room_assignments ra left join profiles p on p.id = ra.changed_by
+        where ra.resident_id = $1 order by ra.from_at desc limit 200`, [id]);
     return rows;
   });
   res.json(rows);

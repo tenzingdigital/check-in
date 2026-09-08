@@ -259,6 +259,7 @@ function residentCard(r, { clickable = true } = {}) {
   const bits = [];
   if (r.room_label && state.settings?.feature_buildings) bits.push(esc(r.room_label));
   bits.push(r.last_event_at ? `${r.presence === "in" ? "on site" : "off site"} ${sinceLabel(r.last_event_at)}` : "no movement on record");
+  if (r.away) bits.push(`<span class="away">away until ${esc(dayLabel(r.away.until))}</span>`);
 
   const card = `
     <${tag} class="${cls}" ${clickable ? `data-id="${esc(r.id)}" type="button"` : ""}>
@@ -1046,10 +1047,20 @@ document.addEventListener("click", (e) => {
   const row = state.rows.get(card.dataset.id);
   if (!row) return;
   if (state.selecting) {
-    // Selecting several: a tap chooses, the bar at the bottom acts.
-    if (state.selectedIds.has(row.id)) state.selectedIds.delete(row.id); else state.selectedIds.add(row.id);
-    card.classList.toggle("selected", state.selectedIds.has(row.id));
+    // Selecting several: a tap chooses, the bar at the bottom acts. A tap
+    // on someone in a family chooses the whole family that is on screen,
+    // since a family moves together (Brighton: "bulk actions for families").
+    const on = !state.selectedIds.has(row.id);
+    const group = row.household_id
+      ? [...state.rows.values()].filter((r) => r.household_id === row.household_id && document.querySelector(`button.card[data-id="${r.id}"]`))
+      : [row];
+    for (const r of group) {
+      if (on) state.selectedIds.add(r.id); else state.selectedIds.delete(r.id);
+      const c = document.querySelector(`button.card[data-id="${r.id}"]`);
+      if (c) c.classList.toggle("selected", on);
+    }
     $("multiCount").textContent = `${state.selectedIds.size} selected`;
+    if (group.length > 1 && on) toast(`Family of ${group.length} ticked`, "ok");
     return;
   }
   if (state.tab !== "search") selectTab("search");

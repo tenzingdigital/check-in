@@ -389,6 +389,22 @@ out of the two working apps:
   range, and occupancy, the evacuation list and *Absent now* as they stand, each as a CSV download or a printable page.
   A reason is required and every export is on the audit record with the
   range.
+- **Authorised absences** (migration 028): a supervisor records the days a
+  resident is away with the centre's agreement, with a reason from a fixed
+  list and, for a child, that a parent or guardian agreed. The nightly
+  close-out writes those days as not required, so they never count as
+  missed; cards say *Away until*; a report covers a range. Nothing else is
+  held.
+- **Room history** (migration 028): every room a resident has had, from
+  when to when and who moved them, kept by a trigger as the room changes
+  and closed when they leave. On the edit sheet and as a report. The label
+  is kept, so history survives a room being removed.
+- **Search by room**: the Door and register find "B1" or "K12" as well as a
+  name, online and offline. Ticking one member of a family in *Select
+  several* ticks the family.
+- **Roll call: who was marked safe**: one row per person per roll call,
+  residents and visitors, with the time, who marked them and the room they
+  had at the time.
 - **Who was off site at midnight** (migration 027): the nightly job takes a
   snapshot of every resident whose last movement before the end of the day
   was OUT, or who has never been signed in, with when they left. Kept as

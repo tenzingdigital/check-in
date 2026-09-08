@@ -473,3 +473,20 @@ sheet, and the people in a room were coloured chips with no key.
 - *Tappable.* The chips are buttons with a 34-pixel height, a focus ring
   and a spoken label ("Amara Adebayo, on site, child"), and open the
   person's record from a room or a family.
+
+## After the Brighton call (8 September 2026)
+
+- *Room first.* Security at Slaney works by room number, so "B1" in the
+  Door's search box now finds the people in B1, ranked above name matches.
+  No new control: the box they already type into.
+- *Away, not missing.* A resident on an authorised absence used to look
+  identical to one who had simply not turned up. The card now says "Away
+  until Thu 12 Sep" in amber on both the Door and the register, and the
+  register's Not seen count leaves them out. The same amber that the app
+  already uses for "due today": something to know, not something wrong.
+- *A family is one tick.* In Select several, ticking anyone in a family
+  ticks the family, with a toast saying so. Untick one to drop them.
+- *The absence form is on the person.* It lives on the edit sheet next to
+  the household, not on a separate screen: the supervisor is already
+  looking at the person when the request comes in. Six reasons, two dates,
+  and a guardian tick that only appears for a child.

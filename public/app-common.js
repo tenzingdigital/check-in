@@ -422,6 +422,11 @@ function dayTime(iso) {
   const d = new Date(iso);
   return `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`;
 }
+// "Thu 12 Sep" for a YYYY-MM-DD, in local words.
+function dayLabel(ymd) {
+  const d = new Date(`${ymd}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? ymd : d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+}
 function isoDate(d) { const p = (v) => String(v).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 
 // Quick ranges for a date pair: today, yesterday, this week (Monday to

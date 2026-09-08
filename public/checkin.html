@@ -34,6 +34,7 @@
   .badge.expected      { color: var(--muted); }
   .badge.due_today     { color: var(--warn); }
   .badge.exempt, .badge.not_required { color: var(--muted); }
+  .badge.away { color: var(--warn-text); }
   .badge.never         { color: var(--bad); }
 
   .card.never          { border-left: 4px solid var(--bad); }
@@ -198,6 +199,7 @@ const STATE_LABEL = {
   exempt:       "Under 18 — not required",
   never:        "Not yet seen",
   not_required: "Not required",
+  away:         "Away — authorised",
 };
 
 function stateLabel(s) {
@@ -216,6 +218,7 @@ function pastDueHour() {
 
 function viewState(r) {
   if (r.state === "exempt" || r.state === "not_required") return r.state;
+  if (r.away) return "away";
   if (r.seen_today) return "seen_today";
   if (!r.last_seen_on) return "never";
   return pastDueHour() ? "due_today" : "expected";
@@ -256,7 +259,7 @@ function residentCard(r) {
   // only when it adds something the pill does not.
   const badge = (vs === "exempt" || vs === "not_required" || vs === "due_today" || vs === "never")
     ? ` · <span class="badge ${esc(vs)}">${esc(stateLabel(vs))}</span>`
-    : "";
+    : vs === "away" ? ` · <span class="badge away">Away until ${esc(dayLabel(r.away.until))}</span>` : "";
 
   // The strip behind the card says what a right swipe does (see .swipe-bg).
   return `<div class="swipe">
@@ -269,7 +272,7 @@ function residentCard(r) {
       </span>
       ${r.queued
         ? `<span class="pill queued">Queued</span>`
-        : `<span class="pill ${r.seen_today ? "in" : "out"}">${r.seen_today ? "Seen today" : "Not yet"}</span>`}
+        : `<span class="pill ${r.seen_today ? "in" : "out"}">${r.seen_today ? "Seen today" : r.away ? "Away" : "Not yet"}</span>`}
     </button></div>`;
 }
 

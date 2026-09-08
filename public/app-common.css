@@ -113,6 +113,7 @@
   .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
   .brand small b { font-weight: 600; color: var(--text); }
   /* ---- history (a resident's movements and check-ins over a range) ---- */
+  .meta .away { color: var(--warn-text); font-weight: 600; }
   .history { margin-top: 16px; }
   .history .hrange { gap: 8px; margin: 0 0 8px; }
   .history .hrange .field { padding: 10px 10px; font-size: 14px; }

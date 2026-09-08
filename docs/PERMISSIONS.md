@@ -35,6 +35,8 @@ validation.
 | The 30-day strip under the sheet<br><code>GET /api/residents/:id/days</code> | — | ✓ | ✓ | ✓ | ✓ |
 | A resident's household members<br><code>GET /api/residents/:id/household</code> | — | ✓ | ✓ | ✓ | ✓ |
 | A resident's history: every movement and check-in over a range<br><code>GET /api/residents/:id/history</code> | — | ✓ | ✓ | ✓ | ✓ |
+| A resident's authorised absences<br><code>GET /api/residents/:id/absences</code> | — | ✓ | ✓ | ✓ | ✓ |
+| A resident's room history<br><code>GET /api/residents/:id/rooms</code> | — | ✓ | ✓ | ✓ | ✓ |
 | The movement log over a range, filtered by name or room<br><code>GET /api/gate-events</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Who is on site now (summary)<br><code>GET /api/summary</code> | — | ✓ | ✓ | ✓ | ✓ |
 | The day's movement log<br><code>GET /api/gate-events</code> | — | ✓ | ✓ | ✓ | ✓ |
@@ -72,6 +74,8 @@ validation.
 |---|:---:|:---:|:---:|:---:|:---:|
 | Add a resident<br><code>POST /api/residents</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Import residents from a spreadsheet (preview and for real)<br><code>POST /api/residents/import</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Authorise an absence (a holiday, a family matter)<br><code>POST /api/residents/:id/absences</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Cut an authorised absence short or cancel it<br><code>POST /api/residents/:id/absences/undefined/end</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Change a resident's details, room, need or family<br><code>PATCH /api/residents/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Open a resident's full record (date of birth, the edit sheet; logged)<br><small>A guard reads residents through a view that carries age, never the date of birth; the table itself does not exist for them</small><br><code>GET /api/residents/:id/record</code> | — | hidden | ✓ | ✓ | ✓ |
 | Add a building<br><code>POST /api/buildings</code> | — | ✗ | ✓ | ✓ | ✓ |
