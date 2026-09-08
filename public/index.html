@@ -31,8 +31,8 @@
      the register's green, whatever the gate's strips are coloured. */
   .rollrow.swipe-arm, .rollrow.swipe-arm-out { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); border-color: var(--ok); }
   .swipe > .rollrow { margin-bottom: 0; }
-  .swipe:has(> .rollrow) { margin-bottom: 6px; }
-  .swipe:has(> .rollrow) .swipe-bg.right, .swipe:has(> .rollrow) .swipe-bg.left { background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); }
+  #rollBody .swipe { margin-bottom: 6px; }
+  #rollBody .swipe-bg.right, #rollBody .swipe-bg.left { background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); }
   .rollend { margin-top: 16px; display: flex; gap: 10px; }
   /* Assistance required, at a glance: amber, tappable, a filter when pressed. */
   .needchip {

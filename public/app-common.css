@@ -342,7 +342,7 @@
      pointer handlers in mountCardSwipe(). The armed state colours the card by
      what releasing will do: green for the positive action (check in, sign in),
      accent for signing out. */
-  button.card { touch-action: pan-y; will-change: transform; }
+  button.card, .swipe > .rollrow { touch-action: pan-y; will-change: transform; }
   button.card.swipe-arm {
     background: color-mix(in srgb, var(--ok) 18%, var(--surface));
     border-color: var(--ok);
