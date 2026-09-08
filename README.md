@@ -43,7 +43,7 @@ tier in front of it.
 
 Two front ends, one API, one Postgres database, one resident register.
 
-**`index.html` — the Door (the gate app in older notes).** Who is on site right now. A guard logs in,
+**`index.html` — In & out (the Door or gate app in older notes).** Who is on site right now. A guard logs in,
 searches a registered resident by name, verifies the person visually, and taps
 one button to sign them in or out. Two tabs: Search and Log.
 
@@ -399,7 +399,7 @@ out of the two working apps:
   when to when and who moved them, kept by a trigger as the room changes
   and closed when they leave. On the edit sheet and as a report. The label
   is kept, so history survives a room being removed.
-- **Search by room**: the Door and register find "B1" or "K12" as well as a
+- **Search by room**: In & out and the register find "B1" or "K12" as well as a
   name, and a letter alone lists the block, online and offline. Ticking one
   member of a family in *Select several* ticks the family, and *All* ticks
   everyone the search found.

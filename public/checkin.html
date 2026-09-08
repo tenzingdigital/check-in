@@ -116,7 +116,7 @@
         </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
-        <a href="/index.html">Door</a>
+        <a href="/index.html">In &amp; out</a>
         <span aria-current="page">Daily register</span>
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
@@ -144,7 +144,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="register">Daily register:</b><span>swipe a card either way to record today's check-in. Movements in and out are on the Door.</span></p>
+      <p class="jobline"><b class="register">Daily register:</b><span>swipe a card either way to record today's check-in. Movements in and out are on In &amp; out.</span></p>
       <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
     </section>
@@ -385,7 +385,7 @@ function todayFact(r) {
   const t = siteTime(r.first_seen_at, state.settings && state.settings.local_timezone);
   const evs = r.checkins_today_events || [];
   const first = evs.length ? evs[evs.length - 1] : null;   // newest first, so the earliest is last
-  const where = first && first.source === "door" ? " at the door" : "";
+  const where = first && first.source === "door" ? " at In & out" : "";
   return `Seen${where}${t ? " " + esc(t) : ""} (${r.checkins_today || 1}×)`;
 }
 
@@ -397,7 +397,7 @@ function eventsToday(r) {
   if (!evs.length) return "";
   const tz = state.settings && state.settings.local_timezone;
   return `<div class="events"><span class="stripTitle">Today's check-ins</span>${evs.map((e) =>
-    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b>${e.source === "door" ? " · at the door" : ""} · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
+    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b>${e.source === "door" ? " · at In & out" : ""} · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
 }
 
 function renderDetail(r) {

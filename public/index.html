@@ -7,7 +7,7 @@
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<title>CheckSteady — Door</title>
+<title>CheckSteady — In &amp; out</title>
 <style>
   /* ---- roll call (migration 017) ---- */
   .rollstart { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
@@ -90,7 +90,7 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>CheckSteady <span>Door</span></h1>
+  <h1>CheckSteady <span>In &amp; out</span></h1>
   <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -112,7 +112,7 @@
         </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
-        <span aria-current="page">Door</span>
+        <span aria-current="page">In &amp; out</span>
         <a href="/checkin.html">Daily register</a>
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
@@ -126,7 +126,7 @@
          so the numbers and the list under them cannot disagree. -->
     <div class="stats">
       <button class="stat ok" type="button" data-filter="in"    aria-pressed="false" data-tip="Residents whose last door movement was IN. Tap to see only them; tap again for everyone. Hold any tile for this note."><b id="statOnSite">–</b><span>On site</span></button>
-      <button class="stat"    type="button" data-filter="out"   aria-pressed="false" data-tip="Residents whose last movement was OUT, or who have never been signed in at the door."><b id="statOffSite">–</b><span>Off site</span></button>
+      <button class="stat"    type="button" data-filter="out"   aria-pressed="false" data-tip="Residents whose last movement was OUT, or who have never been signed in."><b id="statOffSite">–</b><span>Off site</span></button>
       <button class="stat"    type="button" data-filter="today" aria-pressed="false" data-tip="Anyone with a door movement today, in or out. The Log tab lists each movement with the time and who recorded it."><b id="statToday">–</b><span>Moved today</span></button>
     </div>
 
@@ -146,7 +146,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="gate">Door:</b><span>swipe right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
+      <p class="jobline"><b class="gate">In &amp; out:</b><span>swipe right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
       <p class="hint tight">Verify the person first. Tap a name for detail. <button class="linkish" type="button" id="selectToggle">Select several</button></p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>

@@ -245,7 +245,7 @@ branch.** Against the notes:
   absence is unapproved. The weekly IPAS report will read both.
 
 Still to do from the call, in the order the centre ranked them:
-rename Door to Gate; archive rooms rather than delete, with contracted
+rename Door to In & out (done 8 September, at the centre's request); archive rooms rather than delete, with contracted
 capacity and bed configuration; the weekly IPAS report from their template
 (nationality held for that report only); a search box on the roll call and
 evacuation screens; real-versus-practice wording on the roll call; a

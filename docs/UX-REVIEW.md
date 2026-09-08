@@ -490,3 +490,13 @@ sheet, and the people in a room were coloured chips with no key.
   the household, not on a separate screen: the supervisor is already
   looking at the person when the request comes in. Six reasons, two dates,
   and a guardian tick that only appears for a child.
+
+## "In & out" (8 September 2026)
+
+The screen was the Gate, then the Door. The centre's own words for it are
+"sign in and out", so it is now **In & out** on the pill, in the title, in
+the help and on the brochure site. Prose still says "at the door" where it
+means the place; the screen name is the only thing that changed. The
+setting that lets a sign-in count as the day's check-in is renamed to
+match and carries a note to leave it off where the policy makes the
+resident responsible for their own check-in, as this centre's does.

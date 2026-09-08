@@ -165,7 +165,7 @@
         </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
-        <a href="/index.html">Door</a>
+        <a href="/index.html">In &amp; out</a>
         <a href="/checkin.html">Daily register</a>
         <span aria-current="page">Admin</span>
         <a href="/org.html" id="orgLink" hidden>Organisation</a>
@@ -390,7 +390,7 @@
         <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
         <label class="check"><input id="stFeatHouseholds" type="checkbox"> <span><b>Households.</b> Link family members so a child appears with a parent on the roll call and a room's occupants read as a family. Holds only which residents share a household.</span></label>
         <label class="check"><input id="stFeatVisitors" type="checkbox"> <span><b>Visitors.</b> A Visitors tab on the gate: staff, visitors, contractors and suppliers signed in on arrival and out when they leave, and listed on the roll call while on site. Holds a kind, a name and an optional company; kept as long as the movement log.</span></label>
-        <label class="check"><input id="stFeatDoorCheckin" type="checkbox"> <span><b>Door sign-in counts as check-in.</b> A sign IN at the Door (never a sign OUT) also records today's check-in for that resident, marked as recorded at the door. Off, the two acts stay separate and a resident must present at the register.</span></label>
+        <label class="check"><input id="stFeatDoorCheckin" type="checkbox"> <span><b>An In &amp; out sign-in counts as check-in.</b> A sign IN at In &amp; out (never a sign OUT) also records today's check-in for that resident, marked as such. Off, the two acts stay separate and a resident must present at the register themselves. Leave this off where the policy makes the resident responsible for their own check-in.</span></label>
         <label class="check"><input id="stFeatEvac" type="checkbox"> <span><b>Evacuation.</b> An evacuation-need code on each record (fixed list, no free text) and a Roll call tab on the gate. Turning this on means the site holds a special-category field: record it in the DPIA.</span></label>
 
         <h2 class="mt6">Retention</h2>
@@ -1179,7 +1179,7 @@ function showLinkResult(out, who) {
 // the same thing in the words a manager uses.
 const ROLE_HELP = {
   guard: {
-    title: "A guard records at the door and on the register.",
+    title: "A guard records at In & out and on the register.",
     can: ["Sign residents in and out at the gate", "Record the daily check-in", "Open a resident's sheet: name, age, ID number (each opening is logged)", "Run a roll call and mark people safe", "Sign visitors and contractors in and out", "Read the day's movement log"],
     cannot: ["See a date of birth", "Add, edit or remove residents", "Export a report or a record", "Change settings or turn features on", "Manage staff accounts"],
   },
