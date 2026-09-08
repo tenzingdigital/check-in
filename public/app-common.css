@@ -123,6 +123,19 @@
   .history .hrange { gap: 8px; margin: 0 0 8px; }
   .history .hrange .field { padding: 10px 10px; font-size: 14px; }
   .history .hrange .btn.sm { padding: 10px 14px; flex: none; }
+  /* Which register: both, In & out, or the check-ins; and, for a supervisor,
+     the export. Segments, the pressed one in the accent. */
+  .history .hkind { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .history .hkind button {
+    padding: 8px 12px; border-radius: 999px; font-size: 13px; font-weight: 650;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+  }
+  .history .hkind button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .history .hkind button.hexport { margin-left: auto; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: transparent; }
+  .history .hkind button.hexport[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+  .history .hkind button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .history .hexportform { margin-top: 8px; }
+  .history .hexportform .btn.sm { padding: 10px 14px; flex: none; }
   /* Date inputs refuse to shrink below their intrinsic width on a phone, which
      pushes the third control off the edge. Let them give way. */
   .row input[type="date"].grow { flex: 1 1 0; min-width: 0; width: 0; padding: 10px 8px; font-size: 14px; }
@@ -372,6 +385,41 @@
   .pill.in   { background: color-mix(in srgb, var(--ok) 18%, transparent);   color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
   .pill.out  { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
 
+  /* ---- the button beside a card ---- */
+  /* One tap records, the way "Safe" does on the roll call, and it looks the
+     same: a plain button at the right of the card, beside the swipe rather
+     than inside it, so it and the swipe never fight over a finger. The card
+     itself still opens the sheet. The label is the act — "Sign in", "Sign
+     out", "Check in" — and flips to the opposite act once recorded; a day
+     already satisfied is filled in green, like a row marked safe. Hidden
+     while selecting several: there a tap chooses. */
+  .cardrow { display: flex; align-items: center; gap: 8px; }
+  .cardrow > .swipe { flex: 1; min-width: 0; }
+  .cardrow .btn.tick { flex: none; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
+  .cardrow .btn.tick.in  { color: var(--ok); }
+  body.app-gate .cardrow .btn.tick.in { color: var(--accent); }
+  .cardrow .btn.tick.out { color: var(--warn-text); }
+  .cardrow .btn.tick.done { background: var(--ok); color: var(--on-ok); border-color: transparent; }
+  .cardrow .btn.tick.queued { color: var(--muted); }
+  body.selecting .tick { display: none; }
+  /* The box at the left of a gate card, always there: tick two or more and
+     the bar at the bottom offers to sign them all in or out. One box on its
+     own does nothing — the button beside the card is the single-person act. */
+  .pick {
+    flex: none; align-self: stretch; width: 46px; border-radius: var(--radius); border: 1px solid var(--line);
+    background: var(--surface); box-shadow: var(--lift); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pick::before {
+    content: ""; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--line-hover); background: var(--surface);
+    display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; line-height: 1;
+  }
+  .pick:hover { border-color: var(--line-hover); }
+  .pick[aria-checked="true"] { border-color: var(--accent); }
+  .pick[aria-checked="true"]::before { content: "✓"; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .cardrow button.card.selected { border-color: var(--accent); }
+
   .badge { font-size: 12px; font-weight: 600; }
   .badge.ok       { color: var(--ok); }
   .badge.due_soon { color: var(--warn); }
@@ -408,16 +456,35 @@
     max-height: 72vh; overflow-y: auto;
     background: var(--surface-raised); border: 1px solid var(--line-hover); border-bottom: 0;
     border-radius: var(--radius) var(--radius) 0 0;
-    padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+    padding: 0 18px calc(18px + env(safe-area-inset-bottom));
     /* The second shadow is the scrim: a spread the size of the screen dims
        everything behind the sheet without another element to manage. */
     box-shadow: 0 -14px 44px var(--shadow), 0 0 0 100vmax var(--scrim);
   }
-  /* A grab handle, so the sheet reads as a sheet over the list. */
-  .detail::before {
-    content: ""; display: block; width: 44px; height: 5px; border-radius: 3px;
-    background: var(--line-hover); margin: -8px auto 12px;
+  /* The bar along the top of the sheet: the grab handle, so it reads as a
+     sheet over the list, and a ✕. It sticks to the top edge while the sheet
+     scrolls, so the way out is always on screen (see sheetBar() and
+     mountSheetDismiss() in app-common.js). The sheet has no top padding of
+     its own — the bar is the top edge — because a sticky element is held
+     inside its parent's content box: pulled up into padding with a
+     negative margin it would be pushed straight back down, over the name. */
+  .sheetbar {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; justify-content: flex-end; align-items: center; min-height: 48px;
+    margin: 0 -18px 6px; padding: 4px 8px 0;
+    background: var(--surface-raised); border-radius: var(--radius) var(--radius) 0 0;
   }
+  .sheetbar::before {
+    content: ""; position: absolute; left: 50%; top: 10px; width: 44px; height: 5px;
+    margin-left: -22px; border-radius: 3px; background: var(--line-hover);
+  }
+  .sheetbar .x {
+    width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--text); font-size: 18px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .sheetbar .x:hover { border-color: var(--line-hover); }
+  .sheetbar .x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .detail h2 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
   .detail .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
   .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
@@ -505,6 +572,22 @@
     color: var(--accent); font-size: 13px; font-weight: 600; text-decoration: underline; cursor: pointer;
   }
   .linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  /* "Select several": a checkbox with a label rather than a link, so it
+     reads as the thing it does. Pressed, the box fills with a tick, the
+     same tick that then appears on every card. */
+  .selectbtn {
+    display: inline-flex; align-items: center; gap: 7px; vertical-align: middle; margin-left: 8px;
+    padding: 4px 9px 4px 5px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .selectbtn .box {
+    width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--line-hover); background: var(--surface);
+    display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; line-height: 1;
+  }
+  .selectbtn[aria-pressed="true"] { border-color: var(--accent); }
+  .selectbtn[aria-pressed="true"] .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .selectbtn[aria-pressed="true"] .box::before { content: "✓"; }
+  .selectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .grow        { flex: 1; }
   .mt6  { margin-top: 6px; }
   .mt8  { margin-top: 8px; }
@@ -603,6 +686,7 @@
        settings" must fit on one line rather than folding into two. */
     .actions .btn { padding: 16px 10px; font-size: 15px; white-space: nowrap; }
     .card { padding: 11px 13px; gap: 10px; }
+    .pick { width: 42px; }
     .card .name { font-size: 16px; }
     .card .meta { font-size: 12px; margin-top: 1px; }
   }

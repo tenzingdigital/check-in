@@ -35,6 +35,7 @@ validation.
 | The 30-day strip under the sheet<br><code>GET /api/residents/:id/days</code> | — | ✓ | ✓ | ✓ | ✓ |
 | A resident's household members<br><code>GET /api/residents/:id/household</code> | — | ✓ | ✓ | ✓ | ✓ |
 | A resident's history: every movement and check-in over a range<br><code>GET /api/residents/:id/history</code> | — | ✓ | ✓ | ✓ | ✓ |
+| Export a resident's history as a file; logged<br><code>GET /api/residents/:id/history</code> | — | ✗ | ✓ | ✓ | ✓ |
 | A resident's authorised absences<br><code>GET /api/residents/:id/absences</code> | — | ✓ | ✓ | ✓ | ✓ |
 | A resident's room history<br><code>GET /api/residents/:id/rooms</code> | — | ✓ | ✓ | ✓ | ✓ |
 | A resident's breach reports<br><code>GET /api/residents/:id/breaches</code> | — | ✓ | ✓ | ✓ | ✓ |

@@ -213,7 +213,7 @@
         <button type="button" data-status="active"   aria-pressed="true">Active</button>
         <button type="button" data-status="departed" aria-pressed="false">Departed</button>
       </nav>
-      <p class="hint tight" id="famHint">Tap a name to open the record. <button class="linkish" type="button" id="famToggle" data-tip="Tick several people, then act on them all: make them a family, or mark them departed on one date. A child in a family appears with a parent on the roll call; if one of them is already in a family, the others join it.">Select several</button></p>
+      <p class="hint tight" id="famHint">Tap a name to open the record. <button class="selectbtn" type="button" id="famToggle" aria-pressed="false" data-tip="Tick several people, then act on them all: make them a family, or mark them departed on one date. A child in a family appears with a parent on the roll call; if one of them is already in a family, the others join it."><span class="box" aria-hidden="true"></span><span class="lbl">Select several</span></button></p>
       <div id="famBar" class="multibar" hidden>
         <b id="famCount">0 selected</b>
         <button class="btn primary-in sm" type="button" id="famMake" hidden>Family</button>
@@ -512,7 +512,8 @@ function setFamilySelecting(on) {
   state.famIds = new Set();
   document.body.classList.toggle("selecting", on);
   $("famBar").hidden = !on;
-  $("famToggle").textContent = on ? "Stop selecting" : "Select several";
+  $("famToggle").querySelector(".lbl").textContent = on ? "Stop selecting" : "Select several";
+  $("famToggle").setAttribute("aria-pressed", String(on));
   $("famMake").hidden = !featureOn("feature_households");
   $("residentList").querySelectorAll("button.card.selected").forEach((c) => c.classList.remove("selected"));
   if (on) renderDetail(null);
@@ -840,6 +841,7 @@ function renderDetail(rec, summary) {
   const type = rec.id_type || "";
 
   el.innerHTML = `
+    ${sheetBar()}
     <h2>${esc(rec.first_name)} ${esc(rec.last_name)}</h2>
     <div class="sub">${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
 
@@ -967,7 +969,7 @@ function renderDetail(rec, summary) {
       `}
     </div>`;
   el.hidden = false;
-  mountHistory($("detailHistory"), rec.id);
+  mountHistory($("detailHistory"), rec.id, { canExport: true }); // everyone on this page is a supervisor or admin
 
   let idType = type;
   el.querySelectorAll("#editForm .seg button").forEach((b) => b.addEventListener("click", () => {
@@ -982,6 +984,7 @@ function renderDetail(rec, summary) {
     const renderMembers = async () => {
       const members = await guarded(() => apiGet(`/api/residents/${rec.id}/household`), () => {});
       const box = $("hhMembers");
+      if (!box) return; // the sheet closed while the request was out
       if (!members || !members.length) { box.innerHTML = "Not linked to a family."; return; }
       box.innerHTML = `<div class="occ">${members.map((m) => personChip(m, { current: m.id === rec.id })).join("")}</div>
         <p class="hint tight"><button class="linkish" type="button" id="hhLeave">Remove ${esc(rec.first_name)} from this family</button></p>`;
@@ -1006,6 +1009,7 @@ function renderDetail(rec, summary) {
     const renderAbs = async () => {
       const rows = await guarded(() => apiGet(`/api/residents/${rec.id}/absences`), () => {});
       const box = $("absList");
+      if (!box) return; // the sheet closed while the request was out
       if (!rows) return;
       if (!rows.length) { box.innerHTML = "None recorded."; return; }
       const today = todayISODate();
@@ -1046,7 +1050,7 @@ function renderDetail(rec, summary) {
     const KIND = { house_rules: "Breach of house rules", misuse: "Misuse of the verification system" };
     const renderBr = async () => {
       const rows = await guarded(() => apiGet(`/api/residents/${rec.id}/breaches`), () => {});
-      const box = $("brList"); if (!rows) return;
+      const box = $("brList"); if (!box || !rows) return; // the sheet may have closed meanwhile
       if (!rows.length) { box.innerHTML = "None issued."; return; }
       box.innerHTML = `<div class="abslist">${rows.map((b) => `<div class="logrow wide">
           <time>${esc(dayLabel(b.issued_on))}</time>
@@ -1066,7 +1070,7 @@ function renderDetail(rec, summary) {
   }
   if ($("roomHist")) {
     guarded(() => apiGet(`/api/residents/${rec.id}/rooms`), () => {}).then((rows) => {
-      const box = $("roomHist"); if (!rows) return;
+      const box = $("roomHist"); if (!box || !rows) return; // the sheet may have closed meanwhile
       if (!rows.length) { box.innerHTML = "No room recorded yet."; return; }
       box.innerHTML = `<div class="abslist">${rows.map((r) => `<div class="logrow wide">
           <time>${esc(dayTime(r.from_at))}${r.to_at ? ` – ${esc(dayTime(r.to_at))}` : " – now"}</time>
@@ -1719,6 +1723,11 @@ $("famCancel").addEventListener("click", () => setFamilySelecting(false));
 $("famMake").addEventListener("click", makeFamily);
 $("famDepart").addEventListener("click", departMany);
 // A person chip anywhere (a room, a family) opens their record.
+// The ✕ on the sheet, Escape, or a tap on the page behind it — see
+// mountSheetDismiss() in app-common.js. Escape inside a field of the edit
+// form is left to the field, so a stray key never discards the changes.
+mountSheetDismiss(() => renderDetail(null));
+
 document.addEventListener("click", (e) => {
   const chip = e.target.closest("button.person[data-open]");
   if (!chip) return;

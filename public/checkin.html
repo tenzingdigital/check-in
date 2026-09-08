@@ -144,7 +144,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="register">Daily register:</b><span>swipe a card either way to record today's check-in. Movements in and out are on In &amp; out.</span></p>
+      <p class="jobline"><b class="register">Daily register:</b><span>tap the tick beside a card, or swipe it either way, to record today's check-in. Movements in and out are on In &amp; out.</span></p>
       <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
     </section>
@@ -262,7 +262,15 @@ function residentCard(r) {
     : vs === "away" ? ` · <span class="badge away">Away until ${esc(dayLabel(r.away.until))}</span>` : "";
 
   // The strip behind the card says what a right swipe does (see .swipe-bg).
-  return `<div class="swipe">
+  // The tick to the right records the check-in in one tap, the way "Safe"
+  // does on the roll call; once the day is satisfied it is filled and inert,
+  // so nobody records the same person twice by habit.
+  const tick = r.queued
+    ? `<button class="btn ghost tick queued" type="button" disabled aria-label="${esc(r.full_name)}: check-in queued">Queued</button>`
+    : r.seen_today
+      ? `<button class="btn tick done" type="button" disabled aria-label="${esc(r.full_name)}: seen today">Seen ✓</button>`
+      : `<button class="btn ghost tick in" type="button" data-tick="${esc(r.id)}" aria-label="Check in ${esc(r.full_name)}">Check in</button>`;
+  return `<div class="cardrow"><div class="swipe">
     <span class="swipe-bg right" aria-hidden="true">Check in ✓</span>
     <span class="swipe-bg left" aria-hidden="true">Check in ✓</span>
     <button class="${cls.join(" ")}" data-id="${esc(r.id)}" type="button">
@@ -273,7 +281,7 @@ function residentCard(r) {
       ${r.queued
         ? `<span class="pill queued">Queued</span>`
         : `<span class="pill ${r.seen_today ? "in" : "out"}">${r.seen_today ? "Seen today" : r.away ? "Away" : "Not yet"}</span>`}
-    </button></div>`;
+    </button></div>${tick}</div>`;
 }
 
 function renderList(container, rows, emptyMsg) {
@@ -428,6 +436,7 @@ function renderDetail(r) {
   }
 
   el.innerHTML = `
+    ${sheetBar()}
     <h2>${esc(r.full_name)}</h2>
 
     <div class="idline">${idLine(r)}</div>
@@ -455,7 +464,7 @@ function renderDetail(r) {
     <p class="hint legend"><span class="cell ok"></span>seen <span class="cell miss"></span>missed <span class="cell na"></span>not required</p>
     <div id="detailHistory"></div>`;
   el.hidden = false;
-  if (renderDetail.historyFor !== r.id || !$("detailHistory").querySelector(".hlist")) mountHistory($("detailHistory"), r.id);
+  if (renderDetail.historyFor !== r.id || !$("detailHistory").querySelector(".hlist")) mountHistory($("detailHistory"), r.id, { canExport: canEditId() });
   renderDetail.historyFor = r.id;
 
   $("doCheckin").onclick = () => checkin(r.id);
@@ -811,7 +820,7 @@ async function enterApp() {
   $("app").hidden = false;
   mountTips();
   mountCoach({ app: "register", title: "The daily register in three lines", before: "searchResults", points: [
-    "Swipe a card either way to record today's check-in. The card drops off the Not seen list.",
+    "Tap the tick beside a card, or swipe it either way, to record today's check-in. The card drops off the Not seen list.",
     "The list opens on who has not been seen today. Type a name to find anyone.",
     "Tap a name for the ID number and the last 30 days.",
   ] });
@@ -895,6 +904,18 @@ $("q").addEventListener("keydown", (e) => {
   e.preventDefault();
   const first = $("searchResults").querySelector("button.card");
   if (first) first.click();
+});
+
+// The ✕ on the sheet, Escape, or a tap on the page behind it — see
+// mountSheetDismiss() in app-common.js.
+mountSheetDismiss(() => renderDetail(null));
+
+// The tick at the right of a card records the check-in without opening the
+// sheet, like a swipe.
+document.addEventListener("click", (e) => {
+  const tick = e.target.closest("button.tick[data-tick]");
+  if (!tick || tick.disabled) return;
+  checkin(tick.dataset.tick);
 });
 
 // Card clicks are delegated so re-rendering never orphans a listener.

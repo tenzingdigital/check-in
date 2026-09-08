@@ -296,16 +296,7 @@ REPORTS.access = {
   sql: `select * from resident_views_between($1, $2)`,
 };
 
-function csv(rows) {
-  if (!rows.length) return '';
-  const cols = Object.keys(rows[0]);
-  const cell = (v) => {
-    if (v === null || v === undefined) return '';
-    const s = v instanceof Date ? v.toISOString() : String(v);
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [cols.join(','), ...rows.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\r\n') + '\r\n';
-}
+const { csv } = require('../lib/csv');
 
 router.get('/reports', wrap(async (req, res) => {
   res.json(Object.entries(REPORTS).map(([name, r]) => ({ name, title: r.title, ranged: r.ranged, admin: !!r.admin })));
