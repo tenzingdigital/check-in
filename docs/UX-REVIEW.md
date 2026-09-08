@@ -452,3 +452,24 @@ the fact, by person, by room and by night.
   ranges (Today, Yesterday, This week, This month) were cheaper than a
   calendar and cover what people actually tap; they sit as chips under
   the dates on the Log and the History panel.
+
+## Families and the room list (8 September 2026)
+
+Two things Aimee saw: making a family was a drop-down on one person's
+sheet, and the people in a room were coloured chips with no key.
+
+- *Make a family.* The door already had "Select several"; the residents
+  list now has the same tick mode with one button. Tick the people, one
+  tap, done. If one of them is already in a family the rest join it, so
+  a new baby is two ticks. The drop-down on the sheet stays for the odd
+  one-off.
+- *One meaning per colour.* The room chips used green for on site and grey
+  for off site, and the family card reused the same two colours to mean
+  "this record" and "the others", which is what made the chips read as
+  something else (age, perhaps). Now: a person is always a chip with a
+  dot, filled for on site, hollow for off site; "child" and the
+  evacuation need are words, not colours; the record being edited has an
+  accent outline and says so. A legend sits above the room list.
+- *Tappable.* The chips are buttons with a 34-pixel height, a focus ring
+  and a spoken label ("Amara Adebayo, on site, child"), and open the
+  person's record from a room or a family.
