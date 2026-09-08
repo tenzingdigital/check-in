@@ -348,6 +348,8 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
     const want = new URLSearchParams(location.search).get("view");
     const norm = want === "inout" || want === "gate" ? "gate" : want === "register" ? "register" : "";
     if (norm) { setDefaultView(norm); history.replaceState(null, "", location.pathname); }
+    // ?view=choose forgets the device's fixed job and asks again.
+    if (want === "choose") { setDefaultView(""); clearViewChoice(); history.replaceState(null, "", location.pathname); }
   } catch (_) { /* nothing */ }
   const fixed = defaultView();
   if (fixed && VIEW_PAGES[fixed]) {
@@ -372,7 +374,7 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
     </a>
     ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Site admin</b><span>This centre's residents, buildings, staff and settings.</span></a>` : ""}
     ${canOrg ? `<a class="choice admin" href="/org.html" data-view="org"><b>Organisation</b><span>Every centre on the service. No resident data.</span></a>` : ""}
-    <label class="check always"><input type="checkbox" id="chooserAlways"> <span>Always open this on this tablet. Undo it later from the ? menu.</span></label>`;
+    <label class="check always"><input type="checkbox" id="chooserAlways"> <span>Always open this on this tablet. To undo, open the address with <b>?view=choose</b>.</span></label>`;
   el.addEventListener("click", (e) => {
     const a = e.target.closest("[data-view]");
     if (!a) return;
