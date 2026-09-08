@@ -149,6 +149,19 @@ migration, no new data.**
   policy; each centre sets its own under Admin → Settings → House Rules
   thresholds.
 
+## The door as the presentation
+
+**Status: built 8 September 2026, behind the `feature_door_checkin` switch.**
+
+- Off by default. On, a sign IN at the Door also records today's check-in,
+  through the register's own function, with `source = 'door'` on the event;
+  a sign OUT never does. The detail sheet says "Seen at the door 08:12" and
+  lists each door event as such. Turning it off later leaves the record
+  honest.
+- Data added: one two-value column on an event the system already keeps.
+- Not done: a source column on the daily register report. Add it when an
+  inspector asks how a day was satisfied.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**

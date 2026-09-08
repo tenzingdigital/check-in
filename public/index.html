@@ -513,7 +513,8 @@ async function record(residentId, direction, { fromSwipe = false } = {}) {
   state.busy = false;
   if (!row) return;
 
-  toast(`${row.full_name} signed ${direction.toUpperCase()}`, "ok");
+  const doorNote = direction === "in" && state.settings && state.settings.feature_door_checkin ? " · today's check-in recorded" : "";
+  toast(`${row.full_name} signed ${direction.toUpperCase()}${doorNote}`, "ok");
   if (!fromSwipe) renderDetail(row);
   // record_check() returns the resident's new status row: put it on the
   // card now rather than after the list refresh, so the pill flips under

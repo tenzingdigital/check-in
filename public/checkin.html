@@ -373,24 +373,28 @@ function policyNotes(r) {
 }
 
 // "Seen 23:31 (1×)": the first presentation today, in the site's zone, and
-// how many taps landed on the day. A queued check-in is not yet a time the
-// server has; it says so.
+// how many taps landed on the day. "Seen at the door" when the earliest
+// check-in came from a Door sign-in (feature_door_checkin). A queued
+// check-in is not yet a time the server has; it says so.
 function todayFact(r) {
   if (r.queued) return "Queued";
   if (!r.seen_today) return "Not yet";
   const t = siteTime(r.first_seen_at, state.settings && state.settings.local_timezone);
-  return `Seen${t ? " " + esc(t) : ""} (${r.checkins_today || 1}×)`;
+  const evs = r.checkins_today_events || [];
+  const first = evs.length ? evs[evs.length - 1] : null;   // newest first, so the earliest is last
+  const where = first && first.source === "door" ? " at the door" : "";
+  return `Seen${where}${t ? " " + esc(t) : ""} (${r.checkins_today || 1}×)`;
 }
 
-// Every check-in recorded today, newest first, with the guard who recorded
-// it. Shown only when there is one: this is the line a manager reads when
-// a resident says "I checked in" and the register says otherwise.
+// Every check-in recorded today, newest first, with where it was recorded
+// and by whom. This is the line a manager reads when a resident says "I
+// checked in" and the register says otherwise.
 function eventsToday(r) {
   const evs = r.checkins_today_events || [];
   if (!evs.length) return "";
   const tz = state.settings && state.settings.local_timezone;
   return `<div class="events"><span class="stripTitle">Today's check-ins</span>${evs.map((e) =>
-    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b> · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
+    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b>${e.source === "door" ? " · at the door" : ""} · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
 }
 
 function renderDetail(r) {

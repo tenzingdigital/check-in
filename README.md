@@ -53,7 +53,9 @@ not seen today, seen today. Each card says when the person was seen today and
 the detail sheet says who recorded it. History — runs of missed nights and
 days absent in the rolling window — is the manager's list under Admin →
 Absences, not the guard's screen. A gate sign-in/out is a different act from
-a check-in and does not satisfy the daily requirement — see "Compliance is
+a check-in and does not satisfy the daily requirement — unless the site turns
+on `feature_door_checkin`, in which case a sign **in** (never a sign out) is
+also recorded as the day's check-in with `source = 'door'` — see "Compliance is
 per calendar day" below.
 
 Every event, at either app, is timestamped and attributed to the guard who

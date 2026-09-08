@@ -91,7 +91,10 @@ expected is never crowded out at the moment they reach for it.
 **13. Two taps, and no second system.**
 One gesture records the thing. The gate and the register are deliberately
 separate records — a sign-in is not a check-in, because the duty is to present,
-not merely to be seen leaving — but they are one app, one login, one list.
+not merely to be seen leaving — but they are one app, one login, one list. A
+site may declare its door the place of presentation (`feature_door_checkin`);
+then a sign in is recorded as a check-in *marked as such*, and a sign out
+still is not.
 
 **14. Say what happened, in words a guard can read.**
 Only four SQLSTATEs are forwarded to the browser, the ones whose messages were
