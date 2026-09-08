@@ -174,7 +174,7 @@ router.get('/:id/compliance', wrap(async (req, res) => {
     // 60-second dedupe folded into one presentation (which is why a day
     // can say 1× with one event here and two taps at the desk).
     const { rows: events } = await client.query(
-      `select e.occurred_at, p.full_name as recorded_by
+      `select e.occurred_at, e.source, p.full_name as recorded_by
          from checkin_events e
          join profiles p on p.id = e.guard_id
         cross join (select local_timezone from app_settings where id) s

@@ -397,6 +397,45 @@ async function main() {
     assert.equal(today.first_seen_at, resident.first_seen_at);
   });
 
+  await test("with the door switch on, a sign-in is the day's check-in, marked as from the door", async () => {
+    // head@hut.example (the "staff management" admin fixture) is not created
+    // until much later in the suite; a local admin covers this test instead.
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, [
+      "dooradmin@hut.example", PASSWORD, "Door Admin", "admin",
+    ]));
+    const admin = client(base);
+    assert.equal((await admin.fetch("/api/session", { method: "POST", body: { email: "dooradmin@hut.example", password: PASSWORD } })).status, 200);
+    const before = await admin.fetch("/api/session");
+    assert.equal(before.json.settings.feature_door_checkin, false, "the switch should default off");
+
+    const found = await api.fetch("/api/residents?q=fitzgerald&compliance=1");
+    const resident = found.json[0];
+    assert.equal(resident.seen_today, false, "fixture: Fitzgerald must not be seen today yet");
+
+    // Off: a sign-in changes nothing on the register.
+    const offIn = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: resident.id, direction: "in" } });
+    assert.equal(offIn.status, 200);
+    assert.equal((await api.fetch(`/api/residents/${resident.id}/compliance`)).json.seen_today, false, "switch off but the sign-in counted");
+
+    const on = await admin.fetch("/api/settings", { method: "PATCH", body: { feature_door_checkin: true } });
+    assert.equal(on.status, 200, on.text);
+    assert.equal((await admin.fetch("/api/session")).json.settings.feature_door_checkin, true);
+
+    // The gate's 60-second dedupe would swallow an identical 'in'; sign out first.
+    assert.equal((await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: resident.id, direction: "out" } })).status, 200);
+    assert.equal((await api.fetch(`/api/residents/${resident.id}/compliance`)).json.seen_today, false, "a sign-out counted as a presentation");
+    const onIn = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: resident.id, direction: "in" } });
+    assert.equal(onIn.status, 200);
+    const detail = await api.fetch(`/api/residents/${resident.id}/compliance`);
+    assert.equal(detail.json.seen_today, true, "switch on but the sign-in did not count");
+    assert.equal(detail.json.checkins_today_events.length, 1);
+    assert.equal(detail.json.checkins_today_events[0].source, "door");
+    assert.equal(detail.json.checkins_today_events[0].recorded_by, "Gina Guard");
+
+    const off = await admin.fetch("/api/settings", { method: "PATCH", body: { feature_door_checkin: false } });
+    assert.equal(off.status, 200, off.text);
+  });
+
   // A calendar day must reach the browser as one. The driver's default would
   // send a DATE column as a midnight timestamp, which the page cannot format
   // and which shifts by a day off UTC.
@@ -1331,6 +1370,7 @@ async function main() {
   await test("a guard signs a contractor in and out; the day's list and the on-site list agree", async () => {
     const off = await api.fetch("/api/session");
     assert.equal(off.json.settings.feature_visitors, false, "the switch defaults off");
+    assert.equal(off.json.settings.feature_door_checkin, false, "the switch defaults off");
     const bad = await api.fetch("/api/visits", { method: "POST", body: { kind: "spy", name: "X" } });
     assert.equal(bad.status, 400);
     const noName = await api.fetch("/api/visits", { method: "POST", body: { kind: "visitor", name: "  " } });

@@ -29,6 +29,7 @@ const COLUMNS = {
   feature_evacuation:            { kind: 'bool' },
   feature_households:            { kind: 'bool' },
   feature_visitors:              { kind: 'bool' },
+  feature_door_checkin:          { kind: 'bool' },
   // Codes by email at login for supervisors and admins (021).
   mfa_email:                     { kind: 'bool' },
   // Where logins are expected from (022): ISO codes, comma-separated.
