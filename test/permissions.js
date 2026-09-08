@@ -92,8 +92,9 @@ module.exports = [
   { area: 'Residents and buildings', name: 'Rename or reorder a building', method: 'PATCH', path: (fx) => `/api/buildings/${fx.buildingId}`, body: () => ({ name: `Wing ${crypto.randomInt(1e6)}` }), expect: SUPERVISOR },
   { area: 'Residents and buildings', name: 'Remove an empty building', method: 'DELETE', path: (fx) => `/api/buildings/${fx.buildingId}`, expect: SUPERVISOR, fresh: 'building' },
   { area: 'Residents and buildings', name: 'Add rooms to a building', method: 'POST', path: (fx) => `/api/buildings/${fx.buildingId}/rooms`, body: () => ({ rooms: [{ number: String(crypto.randomInt(1e6)), capacity: 2 }] }), expect: SUPERVISOR },
-  { area: 'Residents and buildings', name: "Change a room's number, floor or capacity", method: 'PATCH', path: (fx) => `/api/rooms/${fx.roomId}`, body: () => ({ capacity: 3 }), expect: SUPERVISOR },
-  { area: 'Residents and buildings', name: 'Remove an empty room', method: 'DELETE', path: (fx) => `/api/rooms/${fx.roomId}`, expect: SUPERVISOR, fresh: 'room' },
+  { area: 'Residents and buildings', name: "Change a room's number, floor, beds, contracted beds or bed set-up", method: 'PATCH', path: (fx) => `/api/rooms/${fx.roomId}`, body: () => ({ capacity: 3 }), expect: SUPERVISOR },
+  { area: 'Residents and buildings', name: 'Take a room out of use (archived if ever lived in, else removed)', method: 'DELETE', path: (fx) => `/api/rooms/${fx.roomId}`, expect: SUPERVISOR, fresh: 'room' },
+  { area: 'Residents and buildings', name: 'Put an archived room back into use', method: 'POST', path: (fx) => `/api/rooms/${fx.roomId}/restore`, body: () => ({}), expect: SUPERVISOR, fresh: 'room' },
 
   // ---- reports (supervisors and admins; one is the admin's) ---------------
   { area: 'Reports', name: 'See which reports exist', method: 'GET', path: () => '/api/reports', expect: STAFF },

@@ -408,6 +408,11 @@ out of the two working apps:
   Staff (pasted in, one per line). On the Visitors tab, under Staff, each
   name is one tap to sign in; the visit points back at the list entry.
   Archived rather than deleted.
+- **Rooms archived, not deleted** (migration 031): a room that has been
+  lived in keeps its history when taken out of use and can be restored;
+  nobody can be moved into it meanwhile. Each room carries the beds
+  contracted with IPAS where that differs from the physical count, and the
+  bed set-up in words; the *Vacancies* report reads both.
 - **Breach reports** (migration 029): that a report was issued to IPAS,
   which kind (house rules, or misuse of the verification tablet), on what
   day, by whom, with its reference. On the edit sheet, on the Absences tab

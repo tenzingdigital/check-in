@@ -251,7 +251,7 @@ the visit points back at the list entry, and the roll call names them.
 
 Still to do from the call, in the order the centre ranked them:
 rename Door to In & out (done 8 September, at the centre's request); archive rooms rather than delete, with contracted
-capacity and bed configuration; the weekly IPAS report from their template
+capacity and bed configuration (done 8 September, migration 031); the weekly IPAS report from their template
 (nationality held for that report only); a search box on the roll call and
 evacuation screens; real-versus-practice wording on the roll call; a
 default view per tablet; bulk depart; connecting the breach email; the

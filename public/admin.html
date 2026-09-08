@@ -84,6 +84,11 @@
   .legend .person { min-height: 26px; padding: 2px 8px 2px 6px; font-size: 12px; cursor: default; border-color: transparent; background: transparent; }
   .legend .person:hover { background: transparent; border-color: transparent; }
   .roomsForm .actions { margin-top: 0; }
+  .roomEdit { border-top: 1px dashed var(--line); padding-top: 8px; }
+  .roomEdit .lbl { margin-top: 0; }
+  .roomEdit .actions { margin-top: 6px; }
+  .archivedRooms summary { cursor: pointer; }
+  .archivedRooms .pill .linkish { font-size: 11px; margin-left: 4px; }
   @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
   .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); }
   .check input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
@@ -1339,7 +1344,7 @@ function roomOptions(selected) {
     if (!b.rooms.length) continue;
     opts.push(`<optgroup label="${esc(b.name)}">`);
     for (const r of b.rooms) {
-      const label = `${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}${r.occupants ? ` (${r.occupants}/${r.capacity})` : ""}`;
+      const label = `${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}${r.occupants ? ` (${r.occupants}/${r.contracted_capacity ?? r.capacity})` : ""}`;
       opts.push(`<option value="${esc(r.id)}" ${r.id === selected ? "selected" : ""}>${label}</option>`);
     }
     opts.push("</optgroup>");
@@ -1369,14 +1374,25 @@ async function loadBuildings({ quiet = false } = {}) {
         <button class="linkish" type="button" data-del-building="${esc(b.id)}" aria-label="Remove ${esc(b.name)}">remove building</button>
       </div>
       ${b.rooms.length ? `<div class="rooms">${b.rooms.map((r) => `
-        <div class="room ${r.occupants > r.capacity ? "over" : ""}">
+        <div class="room ${r.occupants > (r.contracted_capacity ?? r.capacity) ? "over" : ""}" data-room="${esc(r.id)}">
           <div class="roomhead">
             <b>${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}</b>
-            <span class="hint">${r.occupants}/${r.capacity}${r.occupants ? ` · ${r.on_site} on site` : ""}</span>
-            <button class="linkish" type="button" data-del-room="${esc(r.id)}" aria-label="Remove room ${esc(r.number)}">remove</button>
+            <span class="hint">${r.occupants}/${r.contracted_capacity ?? r.capacity}${r.contracted_capacity != null && r.contracted_capacity !== r.capacity ? ` (${r.capacity} beds)` : ""}${r.bed_config ? ` · ${esc(r.bed_config)}` : ""}${r.occupants ? ` · ${r.on_site} on site` : ""}</span>
+            <button class="linkish" type="button" data-edit-room="${esc(r.id)}" aria-label="Edit room ${esc(r.number)}">edit</button>
+            <button class="linkish" type="button" data-del-room="${esc(r.id)}" aria-label="Archive room ${esc(r.number)}">archive</button>
           </div>
+          <form class="roomEdit" data-rid="${esc(r.id)}" autocomplete="off" hidden>
+            <div class="grid3">
+              <div><label class="lbl">Beds</label><input class="field reCap" type="number" min="1" max="30" value="${r.capacity}" aria-label="Physical beds"></div>
+              <div><label class="lbl">Contracted</label><input class="field reContract" type="number" min="0" max="30" value="${r.contracted_capacity ?? ""}" placeholder="${r.capacity}" aria-label="Contracted beds"></div>
+              <div><label class="lbl">Bed set-up</label><input class="field reBeds" type="text" maxlength="80" value="${esc(r.bed_config || "")}" placeholder="double + bunk" aria-label="Bed configuration"></div>
+            </div>
+            <div class="actions"><button class="btn sm" type="submit">Save</button><button class="btn ghost sm" type="button" data-cancel-edit="${esc(r.id)}">Cancel</button></div>
+          </form>
           ${r.residents.length ? `<div class="occ">${r.residents.map((p) => personChip(p)).join("")}</div>` : ""}
         </div>`).join("")}</div>` : '<p class="hint flush">No rooms yet.</p>'}
+      ${b.archived_rooms && b.archived_rooms.length ? `<details class="archivedRooms"><summary class="hint">${b.archived_rooms.length} archived room${b.archived_rooms.length === 1 ? "" : "s"}</summary>
+        <div class="occ mt8">${b.archived_rooms.map((r) => `<span class="pill departed">${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)} <button class="linkish" type="button" data-restore-room="${esc(r.id)}">restore</button></span>`).join("")}</div></details>` : ""}
       <form class="roomsForm" data-bid="${esc(b.id)}" autocomplete="off">
         <div class="grid3">
           <input class="field rfFloor" type="text" maxlength="20" placeholder="Floor (optional)" aria-label="Floor">
@@ -1416,13 +1432,36 @@ $("buildingList").addEventListener("submit", async (e) => {
   loadBuildings();
 });
 
+$("buildingList").addEventListener("submit", async (e) => {
+  const form = e.target.closest("form.roomEdit");
+  if (!form) return;
+  e.preventDefault();
+  const contract = form.querySelector(".reContract").value;
+  const body = { capacity: Number(form.querySelector(".reCap").value || 1), contracted_capacity: contract === "" ? null : Number(contract), bed_config: form.querySelector(".reBeds").value.trim() };
+  const out = await guarded(() => apiPatch(`/api/rooms/${form.dataset.rid}`, body), (err) => toast("Not saved: " + err.message, "err"));
+  if (!out) return;
+  toast("Room saved", "ok");
+  loadBuildings();
+});
 $("buildingList").addEventListener("click", async (e) => {
+  const editRoom = e.target.closest("[data-edit-room]");
+  const cancelEdit = e.target.closest("[data-cancel-edit]");
+  const restore = e.target.closest("[data-restore-room]");
   const delRoom = e.target.closest("[data-del-room]");
   const delBld  = e.target.closest("[data-del-building]");
-  if (delRoom) {
-    if (!confirm("Remove this room? Refused while anyone lives in it.")) return;
-    const out = await guarded(() => apiDelete(`/api/rooms/${delRoom.dataset.delRoom}`), (err) => toast("Not removed: " + err.message, "err"));
-    if (out) loadBuildings();
+  if (editRoom) {
+    const form = $("buildingList").querySelector(`form.roomEdit[data-rid="${editRoom.dataset.editRoom}"]`);
+    if (form) { form.hidden = !form.hidden; if (!form.hidden) form.querySelector(".reCap").focus(); }
+  } else if (cancelEdit) {
+    const form = $("buildingList").querySelector(`form.roomEdit[data-rid="${cancelEdit.dataset.cancelEdit}"]`);
+    if (form) form.hidden = true;
+  } else if (restore) {
+    const out = await guarded(() => apiPost(`/api/rooms/${restore.dataset.restoreRoom}/restore`, {}), (err) => toast("Not restored: " + err.message, "err"));
+    if (out) { toast("Room back in use", "ok"); loadBuildings(); }
+  } else if (delRoom) {
+    if (!confirm("Take this room out of use? A room that has been lived in is archived and keeps its history; one never used is removed. Refused while anyone lives in it.")) return;
+    const out = await guarded(() => apiDelete(`/api/rooms/${delRoom.dataset.delRoom}`), (err) => toast("Not archived: " + err.message, "err"));
+    if (out) { toast(out.archived ? "Room archived" : "Room removed", "ok"); loadBuildings(); }
   } else if (delBld) {
     if (!confirm("Remove this building and all its rooms? Refused while anyone lives in it.")) return;
     const out = await guarded(() => apiDelete(`/api/buildings/${delBld.dataset.delBuilding}`), (err) => toast("Not removed: " + err.message, "err"));

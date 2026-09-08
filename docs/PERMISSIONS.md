@@ -88,8 +88,9 @@ validation.
 | Rename or reorder a building<br><code>PATCH /api/buildings/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Remove an empty building<br><code>DELETE /api/buildings/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Add rooms to a building<br><code>POST /api/buildings/:id/rooms</code> | — | ✗ | ✓ | ✓ | ✓ |
-| Change a room's number, floor or capacity<br><code>PATCH /api/rooms/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
-| Remove an empty room<br><code>DELETE /api/rooms/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Change a room's number, floor, beds, contracted beds or bed set-up<br><code>PATCH /api/rooms/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Take a room out of use (archived if ever lived in, else removed)<br><code>DELETE /api/rooms/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Put an archived room back into use<br><code>POST /api/rooms/:id/restore</code> | — | ✗ | ✓ | ✓ | ✓ |
 
 ## Reports
 

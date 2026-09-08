@@ -72,6 +72,7 @@ function evacParam(value) {
   return v;
 }
 function roomError(err) {
+  if (err && err.code === '23514' && /archived/.test(err.message || '')) return new HttpError(400, 'That room is archived');
   if (err && err.code === '23503' && /room/.test(err.constraint || '')) return new HttpError(400, 'No such room');
   return err;
 }

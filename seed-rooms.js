@@ -55,6 +55,7 @@ select rm.id, rm.capacity - count(r.id)::int as free
 from public.rooms rm
 join public.buildings b on b.id = rm.building_id
 left join public.residents r on r.room_id = rm.id and r.status = 'active'
+where rm.archived_at is null
 group by rm.id, rm.capacity, b.sort, b.name, rm.sort, rm.floor, rm.number
 having rm.capacity > count(r.id)
 order by b.sort, b.name, rm.sort, rm.floor, rm.number`;

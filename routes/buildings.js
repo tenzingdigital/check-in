@@ -52,9 +52,16 @@ async function listBuildings(client) {
             coalesce((
               select jsonb_agg(jsonb_build_object(
                        'id', o.room_id, 'floor', o.floor, 'number', o.room, 'capacity', o.capacity,
+                       'contracted_capacity', o.contracted_capacity, 'bed_config', o.bed_config,
                        'sort', o.room_sort, 'occupants', o.occupants, 'on_site', o.on_site, 'residents', o.residents)
                      order by o.room_sort, o.floor, o.room)
-                from v_room_occupancy o where o.building_id = b.id), '[]'::jsonb) as rooms
+                from v_room_occupancy o where o.building_id = b.id and not o.archived), '[]'::jsonb) as rooms,
+            coalesce((
+              select jsonb_agg(jsonb_build_object(
+                       'id', o.room_id, 'floor', o.floor, 'number', o.room, 'capacity', o.capacity,
+                       'contracted_capacity', o.contracted_capacity, 'bed_config', o.bed_config)
+                     order by o.room_sort, o.floor, o.room)
+                from v_room_occupancy o where o.building_id = b.id and o.archived), '[]'::jsonb) as archived_rooms
        from buildings b
       order by b.sort, b.name`,
   );
@@ -154,27 +161,54 @@ router.patch('/rooms/:id', wrap(async (req, res) => {
   if (Object.prototype.hasOwnProperty.call(body, 'number')) set('number', text(body.number, 'Room number', 20));
   if (Object.prototype.hasOwnProperty.call(body, 'capacity')) set('capacity', int(body.capacity, 'Capacity', 1, 30, 1));
   if (Object.prototype.hasOwnProperty.call(body, 'sort')) set('sort', int(body.sort, 'Order', 0, 10000, 0));
+  // Contracted beds (migration 031): a number, or null to mean "same as capacity".
+  if (Object.prototype.hasOwnProperty.call(body, 'contracted_capacity')) {
+    const v = body.contracted_capacity;
+    set('contracted_capacity', v === null || v === '' ? null : int(v, 'Contracted beds', 0, 30, 0));
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'bed_config')) set('bed_config', optText(body.bed_config, 80, 'Bed configuration') || null);
   if (!sets.length) throw new HttpError(400, 'Nothing to change');
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `update rooms set ${sets.join(', ')} where id = $1 returning id, building_id, floor, number, capacity, sort`, args);
+      `update rooms set ${sets.join(', ')} where id = $1 returning id, building_id, floor, number, capacity, contracted_capacity, bed_config, sort, archived_at`, args);
     return rows[0];
   }).catch((err) => { throw supervisorOnly(err); });
   if (!row) throw new HttpError(403, 'Only a supervisor or admin can change rooms');
   res.json(row);
 }));
 
+// DELETE /api/rooms/:id — take a room out of use. A room that has ever had
+// a resident is archived (migration 031): it keeps its history and nobody
+// can be assigned to it. A room that was never used is removed outright.
 router.delete('/rooms/:id', wrap(async (req, res) => {
   const id = uuidParam(req.params.id, 'room id');
   const out = await db.withIdentity(req.session.userId, async (client) => {
     const occupied = await client.query(
       `select count(*)::int as n from residents where room_id = $1 and status = 'active'`, [id]);
     if (occupied.rows[0].n > 0) throw new HttpError(409, `${occupied.rows[0].n} resident(s) still live in this room. Move them first.`);
+    const history = await client.query(
+      `select exists (select 1 from room_assignments where room_id = $1) or exists (select 1 from residents where room_id = $1) as used`, [id]);
+    if (history.rows[0].used) {
+      const { rowCount } = await client.query(`update rooms set archived_at = coalesce(archived_at, now()) where id = $1`, [id]);
+      return rowCount ? { ok: true, archived: true } : null;
+    }
     const { rowCount } = await client.query(`delete from rooms where id = $1`, [id]);
-    return rowCount;
+    return rowCount ? { ok: true, archived: false } : null;
   }).catch((err) => { throw supervisorOnly(err); });
   if (!out) throw req.session.role === 'guard' ? new HttpError(403, 'Only a supervisor or admin can change buildings and rooms') : new HttpError(404, 'No such room');
-  res.json({ ok: true });
+  res.json(out);
+}));
+
+// POST /api/rooms/:id/restore — back into use.
+router.post('/rooms/:id/restore', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'room id');
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `update rooms set archived_at = null where id = $1 returning id, building_id, floor, number, capacity, contracted_capacity, bed_config, sort, archived_at`, [id]);
+    return rows[0];
+  }).catch((err) => { throw supervisorOnly(err); });
+  if (!row) throw req.session.role === 'guard' ? new HttpError(403, 'Only a supervisor or admin can change buildings and rooms') : new HttpError(404, 'No such room');
+  res.json(row);
 }));
 
 module.exports = router;

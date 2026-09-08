@@ -75,6 +75,19 @@ const REPORTS = {
                  (select string_agg(p->>'full_name' || case when (p->>'presence') = 'in' then ' (on site)' else '' end, '; ')
                     from jsonb_array_elements(o.residents) p) as residents
             from v_room_occupancy o
+           where not o.archived
+           order by o.building_sort, o.building, o.room_sort, o.floor, o.room`,
+  },
+  // Vacancies against the contracted capacity, with the bed configuration:
+  // the figures the weekly IPAS return asks for (migration 031).
+  vacancies: {
+    title: 'Vacancies against contracted capacity',
+    ranged: false,
+    sql: `select o.building, o.floor, o.room, o.bed_config as beds,
+                 o.capacity as physical_beds, coalesce(o.contracted_capacity, o.capacity) as contracted_beds,
+                 o.occupants, coalesce(o.contracted_capacity, o.capacity) - o.occupants as vacancies
+            from v_room_occupancy o
+           where not o.archived
            order by o.building_sort, o.building, o.room_sort, o.floor, o.room`,
   },
   evacuation: {

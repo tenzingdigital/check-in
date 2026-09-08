@@ -1542,7 +1542,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 15);
+    assert.equal(list.json.length, 16);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1939,6 +1939,49 @@ async function main() {
     assert.equal(gone.status, 404, "an archived person cannot be signed in from the list");
     const unknown = await supC.fetch(`/api/roster/00000000-0000-0000-0000-000000000000`, { method: "PATCH", body: { role: "x" } });
     assert.equal(unknown.status, 404);
+  });
+
+  console.log("\n== rooms: archive, contracted beds, bed set-up, vacancies (migration 031) ==");
+
+  await test("a lived-in room is archived not deleted, keeps its history, and takes nobody new; contracted beds drive the vacancy report", async () => {
+    const set = await supC.fetch(`/api/rooms/${kRoom1}`, { method: "PATCH", body: { contracted_capacity: 5, bed_config: "double + bunk" } });
+    assert.equal(set.status, 200, set.text);
+    assert.equal(set.json.contracted_capacity, 5); assert.equal(set.json.bed_config, "double + bunk");
+    const tooMany = await supC.fetch(`/api/rooms/${kRoom1}`, { method: "PATCH", body: { contracted_capacity: 99 } });
+    assert.equal(tooMany.status, 400);
+    const vac = await supC.fetch(`/api/reports/vacancies?reason=weekly+return&format=json`);
+    assert.equal(vac.status, 200, vac.text);
+    const k1 = vac.json.rows.find((r) => r.building === "Kestrel" && r.room === "K1");
+    assert.ok(k1, "K1 missing from the vacancy report");
+    assert.equal(Number(k1.contracted_beds), 5); assert.equal(Number(k1.physical_beds), 2); assert.equal(k1.beds, "double + bunk");
+    assert.equal(Number(k1.vacancies), 5 - Number(k1.occupants));
+
+    // Roomy Finder lived in K1 once, so K1 is archived rather than deleted.
+    await supC.fetch(`/api/residents/${roomFinderId}`, { method: "PATCH", body: { room_id: null } });
+    const gone = await supC.fetch(`/api/rooms/${kRoom1}`, { method: "DELETE" });
+    assert.equal(gone.status, 200, gone.text); assert.equal(gone.json.archived, true);
+    const list = await api.fetch("/api/buildings");
+    const kestrel = list.json.find((b) => b.name === "Kestrel");
+    assert.ok(!kestrel.rooms.some((r) => r.id === kRoom1), "an archived room should leave the rooms list");
+    assert.ok(kestrel.archived_rooms.some((r) => r.id === kRoom1), "and appear under archived rooms");
+    const hist = await api.fetch(`/api/residents/${roomFinderId}/rooms`);
+    assert.ok(hist.json.some((r) => /K1/.test(r.room_label)), "the history should survive the archive");
+    const into = await supC.fetch(`/api/residents/${roomFinderId}`, { method: "PATCH", body: { room_id: kRoom1 } });
+    assert.equal(into.status, 400, into.text);
+    assert.match(into.json.error || into.text, /archived/);
+    const occ = await supC.fetch(`/api/reports/occupancy?reason=test&format=json`);
+    assert.ok(!occ.json.rows.some((r) => r.building === "Kestrel" && r.room === "K1"), "archived rooms stay off the occupancy report");
+    const asGuard = await api.fetch(`/api/rooms/${kRoom1}/restore`, { method: "POST", body: {} });
+    assert.equal(asGuard.status, 403);
+    const back = await supC.fetch(`/api/rooms/${kRoom1}/restore`, { method: "POST", body: {} });
+    assert.equal(back.status, 200, back.text); assert.equal(back.json.archived_at, null);
+    const again = await supC.fetch(`/api/residents/${roomFinderId}`, { method: "PATCH", body: { room_id: kRoom1 } });
+    assert.equal(again.status, 200, again.text);
+    // A room never lived in is simply removed.
+    const fresh = await supC.fetch(`/api/buildings/${list.json.find((b) => b.name === "Kestrel").id}/rooms`, { method: "POST", body: { rooms: [{ number: "K9", capacity: 1 }] } });
+    assert.equal(fresh.status, 201, fresh.text);
+    const removed = await supC.fetch(`/api/rooms/${fresh.json[0].id}`, { method: "DELETE" });
+    assert.equal(removed.status, 200); assert.equal(removed.json.archived, false);
   });
 
   console.log("\n== who viewed which record (migration 023) ==");

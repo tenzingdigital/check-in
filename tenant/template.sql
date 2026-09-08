@@ -1813,6 +1813,25 @@ $$;
 
 --
 
+-- Name: refuse_archived_room(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.refuse_archived_room() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if new.room_id is not null and (tg_op = 'INSERT' or new.room_id is distinct from old.room_id)
+     and exists (select 1 from __TENANT__.rooms where id = new.room_id and archived_at is not null) then
+    raise exception 'That room is archived' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+
 -- Name: resident_views_between(date, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2315,7 +2334,12 @@ CREATE TABLE __TENANT__.rooms (
     capacity integer DEFAULT 1 NOT NULL,
     sort integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    archived_at timestamp with time zone,
+    contracted_capacity integer,
+    bed_config text,
+    CONSTRAINT rooms_bed_config_check CHECK (((bed_config IS NULL) OR (length(bed_config) <= 80))),
     CONSTRAINT rooms_capacity_check CHECK (((capacity >= 1) AND (capacity <= 30))),
+    CONSTRAINT rooms_contracted_capacity_check CHECK (((contracted_capacity IS NULL) OR ((contracted_capacity >= 0) AND (contracted_capacity <= 30)))),
     CONSTRAINT rooms_floor_check CHECK ((length(floor) <= 20)),
     CONSTRAINT rooms_number_check CHECK (((length(btrim(number)) >= 1) AND (length(btrim(number)) <= 20)))
 );
@@ -2438,13 +2462,16 @@ CREATE VIEW __TENANT__.v_room_occupancy AS
     rm.sort AS room_sort,
     (count(v.id))::integer AS occupants,
     (count(v.id) FILTER (WHERE (v.presence = 'in'::text)))::integer AS on_site,
-    COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'full_name', v.full_name, 'presence', v.presence, 'is_adult', v.is_adult, 'evac_need', r.evac_need, 'household_id', r.household_id) ORDER BY r.household_id, v.last_name, v.first_name) FILTER (WHERE (v.id IS NOT NULL)), '[]'::jsonb) AS residents
+    COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'full_name', v.full_name, 'presence', v.presence, 'is_adult', v.is_adult, 'evac_need', r.evac_need, 'household_id', r.household_id) ORDER BY r.household_id, v.last_name, v.first_name) FILTER (WHERE (v.id IS NOT NULL)), '[]'::jsonb) AS residents,
+    rm.contracted_capacity,
+    rm.bed_config,
+    (rm.archived_at IS NOT NULL) AS archived
    FROM (((__TENANT__.buildings b
      JOIN __TENANT__.rooms rm ON ((rm.building_id = b.id)))
      LEFT JOIN __TENANT__.residents r ON (((r.room_id = rm.id) AND (r.status = 'active'::text))))
      LEFT JOIN __TENANT__.v_resident_status v ON ((v.id = r.id)))
   WHERE __TENANT__.is_staff()
-  GROUP BY b.id, b.name, b.sort, rm.id, rm.floor, rm.number, rm.capacity, rm.sort;
+  GROUP BY b.id, b.name, b.sort, rm.id, rm.floor, rm.number, rm.capacity, rm.contracted_capacity, rm.bed_config, rm.archived_at, rm.sort;
 
 
 --
@@ -3026,6 +3053,14 @@ CREATE TRIGGER profiles_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.pro
 --
 
 CREATE TRIGGER residents_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: residents residents_no_archived_room; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER residents_no_archived_room BEFORE INSERT OR UPDATE OF room_id ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION __TENANT__.refuse_archived_room();
 
 
 --
@@ -4341,6 +4376,15 @@ GRANT ALL ON FUNCTION __TENANT__.record_visit_arrival(p_kind text, p_name text, 
 REVOKE ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION refuse_archived_room(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.refuse_archived_room() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.refuse_archived_room() TO service_role;
 
 
 --
