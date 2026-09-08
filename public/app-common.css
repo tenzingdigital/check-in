@@ -385,16 +385,28 @@
   .pill.in   { background: color-mix(in srgb, var(--ok) 18%, transparent);   color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
   .pill.out  { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
 
-  /* ---- the button beside a card ---- */
-  /* One tap records, the way "Safe" does on the roll call, and it looks the
-     same: a plain button at the right of the card, beside the swipe rather
-     than inside it, so it and the swipe never fight over a finger. The card
-     itself still opens the sheet. The label is the act — "Sign in", "Sign
-     out", "Check in" — and flips to the opposite act once recorded; a day
-     already satisfied is filled in green, like a row marked safe. Hidden
-     while selecting several: there a tap chooses. */
-  .cardrow { display: flex; align-items: center; gap: 8px; }
+  /* ---- the card with its controls ---- */
+  /* On In & out and the register the visible card is .cardrow: the box at
+     the left, the name and pill in the middle, and the act at the right,
+     one bordered surface. The name part is still a <button class="card">
+     (it opens the sheet, and it is what slides on a swipe — the strip that
+     says what the swipe does lies behind it, inside .swipe) but drawn flat,
+     so the three read as one card. A <button> cannot hold a <button>, which
+     is why the box and the act are siblings rather than children. */
+  .cardrow {
+    display: flex; align-items: center; gap: 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--lift); padding-right: 10px;
+  }
+  .cardrow:hover { border-color: var(--line-hover); }
   .cardrow > .swipe { flex: 1; min-width: 0; }
+  .cardrow > .swipe > button.card { background: transparent; border: 0; box-shadow: none; border-radius: 0; padding-left: 6px; }
+  .cardrow > .swipe > button.card:hover { border-color: transparent; }
+  .cardrow > .swipe > .swipe-bg { border-radius: 0; }
+  /* The act, in the roll call's "Safe" style: a plain button whose label is
+     what the tap does — "Sign in", "Sign out", "Check in" — flipping to the
+     opposite act once recorded; a day already satisfied is filled in green,
+     like a row marked safe. Hidden while selecting several (admin). */
   .cardrow .btn.tick { flex: none; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
   .cardrow .btn.tick.in  { color: var(--ok); }
   body.app-gate .cardrow .btn.tick.in { color: var(--accent); }
@@ -402,23 +414,24 @@
   .cardrow .btn.tick.done { background: var(--ok); color: var(--on-ok); border-color: transparent; }
   .cardrow .btn.tick.queued { color: var(--muted); }
   body.selecting .tick { display: none; }
-  /* The box at the left of a gate card, always there: tick two or more and
-     the bar at the bottom offers to sign them all in or out. One box on its
-     own does nothing — the button beside the card is the single-person act. */
+  /* The box at the left, always there: tick two or more and the bar at the
+     bottom offers to sign them all in or out. One box on its own does
+     nothing — the button on the card is the single-person act. */
   .pick {
-    flex: none; align-self: stretch; width: 46px; border-radius: var(--radius); border: 1px solid var(--line);
-    background: var(--surface); box-shadow: var(--lift); cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
+    flex: none; align-self: stretch; width: 48px; border: 0; background: transparent; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; border-radius: var(--radius) 0 0 var(--radius);
   }
   .pick::before {
     content: ""; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--line-hover); background: var(--surface);
     display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; line-height: 1;
   }
-  .pick:hover { border-color: var(--line-hover); }
-  .pick[aria-checked="true"] { border-color: var(--accent); }
+  .pick:hover::before { border-color: var(--accent); }
   .pick[aria-checked="true"]::before { content: "✓"; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .cardrow button.card.selected { border-color: var(--accent); }
+  .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+  .cardrow.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent), var(--lift); }
+  /* The register's state stripe moves from the inner card to the row. */
+  .cardrow.overdue, .cardrow.never { border-left: 4px solid var(--bad); }
+  .cardrow.due_soon, .cardrow.due_today { border-left: 4px solid var(--warn); }
 
   .badge { font-size: 12px; font-weight: 600; }
   .badge.ok       { color: var(--ok); }
@@ -686,7 +699,7 @@
        settings" must fit on one line rather than folding into two. */
     .actions .btn { padding: 16px 10px; font-size: 15px; white-space: nowrap; }
     .card { padding: 11px 13px; gap: 10px; }
-    .pick { width: 42px; }
+    .pick { width: 44px; }
     .card .name { font-size: 16px; }
     .card .meta { font-size: 12px; margin-top: 1px; }
   }

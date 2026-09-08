@@ -144,7 +144,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="register">Daily register:</b><span>tap the tick beside a card, or swipe it either way, to record today's check-in. Movements in and out are on In &amp; out.</span></p>
+      <p class="jobline"><b class="register">Daily register:</b><span>tap Check in on the card, or swipe it either way, to record today's check-in. Movements in and out are on In &amp; out.</span></p>
       <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
     </section>
@@ -270,7 +270,7 @@ function residentCard(r) {
     : r.seen_today
       ? `<button class="btn tick done" type="button" disabled aria-label="${esc(r.full_name)}: seen today">Seen ✓</button>`
       : `<button class="btn ghost tick in" type="button" data-tick="${esc(r.id)}" aria-label="Check in ${esc(r.full_name)}">Check in</button>`;
-  return `<div class="cardrow"><div class="swipe">
+  return `<div class="cardrow ${esc(vs)}"><div class="swipe">
     <span class="swipe-bg right" aria-hidden="true">Check in ✓</span>
     <span class="swipe-bg left" aria-hidden="true">Check in ✓</span>
     <button class="${cls.join(" ")}" data-id="${esc(r.id)}" type="button">
@@ -820,7 +820,7 @@ async function enterApp() {
   $("app").hidden = false;
   mountTips();
   mountCoach({ app: "register", title: "The daily register in three lines", before: "searchResults", points: [
-    "Tap the tick beside a card, or swipe it either way, to record today's check-in. The card drops off the Not seen list.",
+    "Tap Check in on the card, or swipe it either way, to record today's check-in. The card drops off the Not seen list.",
     "The list opens on who has not been seen today. Type a name to find anyone.",
     "Tap a name for the ID number and the last 30 days.",
   ] });

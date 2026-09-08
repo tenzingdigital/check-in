@@ -146,8 +146,8 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="gate">In &amp; out:</b><span>tap the tick beside a card, or swipe it right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
-      <p class="hint tight">Verify the person first. Tap a name for detail, the tick to record. Tick the boxes of two or more to sign them in or out together.</p>
+      <p class="jobline"><b class="gate">In &amp; out:</b><span>tap Sign in or Sign out on the card, or swipe it right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
+      <p class="hint tight">Verify the person first. Tap a name for detail. Tick two or more to sign them in or out together. <button class="selectbtn" type="button" id="selectAll" aria-pressed="false" data-tip="Ticks everyone the search and the tile filter show: type a room or pick Off site, then tick them all and sign them in or out together."><span class="box" aria-hidden="true"></span><span class="lbl">Select all shown</span></button></p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
       <div id="multiBar" class="multibar" hidden>
@@ -289,7 +289,7 @@ function residentCard(r, { clickable = true } = {}) {
   const tick = r.queued
     ? `<button class="btn ghost tick queued" type="button" disabled aria-label="${esc(r.full_name)}: queued">Queued</button>`
     : `<button class="btn ghost tick ${isIn ? "out" : "in"}" type="button" data-tick="${esc(r.id)}" data-dir="${isIn ? "out" : "in"}" aria-label="Sign ${esc(r.full_name)} ${isIn ? "out" : "in"}">Sign ${isIn ? "out" : "in"}</button>`;
-  return `<div class="cardrow">${pick}<div class="swipe">
+  return `<div class="cardrow ${picked ? "selected" : ""}">${pick}<div class="swipe">
     <span class="swipe-bg right" aria-hidden="true">Sign in ✓</span>
     <span class="swipe-bg left" aria-hidden="true">Sign out</span>${card}</div>${tick}</div>`;
 }
@@ -298,10 +298,12 @@ function renderList(container, rows, emptyMsg) {
   (rows || []).forEach((r) => state.rows.set(r.id, r));
   if (!rows || rows.length === 0) {
     container.innerHTML = `<p class="empty">${esc(emptyMsg)}</p>`;
+    if (typeof syncMultiBar === "function") syncMultiBar();
     return;
   }
   container.innerHTML = withLetters(rows, !state.searchQuery && state.filter === "all");
   nudgeFirstCard(container, "gate");
+  if (typeof syncMultiBar === "function") syncMultiBar();
 }
 
 // Letter separators for the full alphabetical list, so a thumb scrolling a
@@ -995,7 +997,7 @@ async function enterApp() {
   syncRoll();
   mountTips();
   mountCoach({ app: "gate", title: "The gate in three lines", before: "searchResults", points: [
-    "Tap the tick beside a card to sign someone IN or OUT, or swipe it right for IN, left for OUT. Or tap the name and use the buttons.",
+    "Tap Sign in or Sign out on the card, or swipe it right for IN, left for OUT. Or tap the name and use the buttons on the sheet.",
     "The three tiles at the top filter the list. Tap one, tap it again for everyone. Hold a tile for what it counts.",
     "Today's check-in is a different act. It lives on the Daily register, one tap away at the top.",
   ] });
@@ -1151,12 +1153,29 @@ function togglePick(row) {
     : [row];
   for (const r of group) {
     if (on) state.selectedIds.add(r.id); else state.selectedIds.delete(r.id);
-    const c = document.querySelector(`button.card[data-id="${r.id}"]`);
-    if (c) c.classList.toggle("selected", on);
-    const b = document.querySelector(`button.pick[data-pick="${r.id}"]`);
-    if (b) b.setAttribute("aria-checked", String(on));
+    markPicked(r.id, on);
   }
   if (group.length > 1 && on) toast(`Family of ${group.length} ticked`, "ok");
+  syncMultiBar();
+}
+
+// The tick on the box, the accent on the card: both drawn from the one Set.
+function markPicked(id, on) {
+  const c = document.querySelector(`button.card[data-id="${id}"]`);
+  if (c) { c.classList.toggle("selected", on); const row = c.closest(".cardrow"); if (row) row.classList.toggle("selected", on); }
+  const b = document.querySelector(`button.pick[data-pick="${id}"]`);
+  if (b) b.setAttribute("aria-checked", String(on));
+}
+
+// Everyone the search and the tile filter currently show: all ticked, or
+// none. Sits above the list as "Select all shown", and in the bar as All.
+function toggleAllShown() {
+  const shown = [...document.querySelectorAll("#searchResults button.card[data-id]")];
+  const all = shown.length && shown.every((c) => state.selectedIds.has(c.dataset.id));
+  for (const c of shown) {
+    if (all) state.selectedIds.delete(c.dataset.id); else state.selectedIds.add(c.dataset.id);
+    markPicked(c.dataset.id, !all);
+  }
   syncMultiBar();
 }
 
@@ -1167,12 +1186,16 @@ function syncMultiBar() {
   $("multiBar").hidden = !show;
   $("multiCount").textContent = `${n} selected`;
   const shown = [...document.querySelectorAll("#searchResults button.card[data-id]")];
-  $("multiAll").textContent = shown.length && shown.every((c) => state.selectedIds.has(c.dataset.id)) ? "None" : "All";
+  const all = shown.length > 0 && shown.every((c) => state.selectedIds.has(c.dataset.id));
+  $("multiAll").textContent = all ? "None" : "All";
+  $("selectAll").setAttribute("aria-pressed", String(all));
+  $("selectAll").querySelector(".lbl").textContent = all ? "Clear all shown" : "Select all shown";
+  $("selectAll").disabled = shown.length === 0;
 }
 
 function clearSelection() {
   state.selectedIds.clear();
-  document.querySelectorAll("button.card.selected").forEach((c) => c.classList.remove("selected"));
+  document.querySelectorAll(".selected").forEach((c) => c.classList.remove("selected"));
   document.querySelectorAll("button.pick[aria-checked=\"true\"]").forEach((b) => b.setAttribute("aria-checked", "false"));
   syncMultiBar();
 }
@@ -1223,17 +1246,8 @@ async function recordMany(direction) {
 }
 
 $("multiCancel").addEventListener("click", clearSelection);
-$("multiAll").addEventListener("click", () => {
-  const shown = [...document.querySelectorAll("#searchResults button.card[data-id]")];
-  const all = shown.length && shown.every((c) => state.selectedIds.has(c.dataset.id));
-  for (const c of shown) {
-    if (all) state.selectedIds.delete(c.dataset.id); else state.selectedIds.add(c.dataset.id);
-    c.classList.toggle("selected", !all);
-    const b = document.querySelector(`button.pick[data-pick="${c.dataset.id}"]`);
-    if (b) b.setAttribute("aria-checked", String(!all));
-  }
-  syncMultiBar();
-});
+$("multiAll").addEventListener("click", toggleAllShown);
+$("selectAll").addEventListener("click", toggleAllShown);
 $("multiIn").addEventListener("click", () => recordMany("in"));
 $("multiOut").addEventListener("click", () => recordMany("out"));
 
