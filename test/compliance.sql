@@ -1036,3 +1036,67 @@ reset role;
 select pg_temp.expect('fixture: the grace row is the latest closed day',
   (select max(compliance_date) from public.daily_compliance where closed_at is not null), public.close_out_due_through());
 select pg_temp.expect('v_system_health: not behind when the due day is closed', (:'behind_when_due_day_closed')::boolean, false);
+
+\echo ''
+\echo '=========== DOOR CHECK-IN SWITCH (migration 026) ==========='
+\echo '--- door check-in switch: a sign-in is a presentation only when the site says so'
+reset role;
+insert into public.residents (id, first_name, last_name, date_of_birth, registered_at)
+values ('77777777-7777-7777-7777-777777777777', 'Dara', 'Doorway', '1990-01-01', now() - interval '10 days')
+on conflict (id) do nothing;
+select feature_door_checkin as door_default from public.app_settings \gset
+select pg_temp.expect('feature_door_checkin defaults off', (:'door_default')::boolean, false);
+
+-- Off: a sign-in records a gate event and nothing on the register.
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select 1 as _ from public.record_check('77777777-7777-7777-7777-777777777777', 'in') limit 1;
+reset role;
+select count(*)::integer as off_events from public.checkin_events where resident_id = '77777777-7777-7777-7777-777777777777' \gset
+select pg_temp.expect('switch off: a sign-in adds no check-in event', (:'off_events')::integer, 0);
+
+-- On: a sign OUT still records nothing; a sign IN records a door check-in.
+update public.app_settings set feature_door_checkin = true;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select 1 as _ from public.record_check('77777777-7777-7777-7777-777777777777', 'out') limit 1;
+reset role;
+select count(*)::integer as out_events from public.checkin_events where resident_id = '77777777-7777-7777-7777-777777777777' \gset
+select pg_temp.expect('switch on: a sign-out adds no check-in event', (:'out_events')::integer, 0);
+
+-- The gate's own 60-second dedupe would swallow an identical 'in' now; wait
+-- it out by backdating the earlier gate event.
+update public.gate_events set occurred_at = occurred_at - interval '2 minutes'
+ where resident_id = '77777777-7777-7777-7777-777777777777';
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select 1 as _ from public.record_check('77777777-7777-7777-7777-777777777777', 'in') limit 1;
+reset role;
+select count(*)::integer as in_events,
+       coalesce(max(source), '') as in_source
+  from public.checkin_events where resident_id = '77777777-7777-7777-7777-777777777777' \gset
+select pg_temp.expect('switch on: a sign-in adds one check-in event', (:'in_events')::integer, 1);
+select pg_temp.expect('…with source = door', (:'in_source')::text, 'door');
+select presented as day_presented from public.daily_compliance
+ where resident_id = '77777777-7777-7777-7777-777777777777' and compliance_date = public.site_today() \gset
+select pg_temp.expect('switch on: the day is presented', (:'day_presented')::boolean, true);
+
+-- A desk check-in seconds later is the same presentation (60-second rule).
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select 1 as _ from public.record_checkin('77777777-7777-7777-7777-777777777777') limit 1;
+reset role;
+select count(*)::integer as after_desk from public.checkin_events where resident_id = '77777777-7777-7777-7777-777777777777' \gset
+select pg_temp.expect('a desk check-in inside 60 s adds no second event', (:'after_desk')::integer, 1);
+
+-- The offline door: a late sign-in also records a late door check-in.
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select 1 as _ from public.record_check_late('77777777-7777-7777-7777-777777777777', 'in', now() - interval '3 hours', '77777777-7777-4777-8777-777777777701') limit 1;
+reset role;
+select count(*)::integer as late_events,
+       bool_or(late_entry) as any_late
+  from public.checkin_events
+ where resident_id = '77777777-7777-7777-7777-777777777777' and source = 'door' and late_entry \gset
+select pg_temp.expect('a late sign-in adds a late door check-in', (:'late_events')::integer, 1);
+update public.app_settings set feature_door_checkin = false;

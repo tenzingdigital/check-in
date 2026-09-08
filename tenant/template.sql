@@ -204,6 +204,7 @@ CREATE TABLE __TENANT__.app_settings (
     mfa_email boolean DEFAULT false NOT NULL,
     home_countries text DEFAULT 'IE'::text NOT NULL,
     feature_visitors boolean DEFAULT false NOT NULL,
+    feature_door_checkin boolean DEFAULT false NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -1240,6 +1241,15 @@ begin
   then
     insert into __TENANT__.gate_events (resident_id, guard_id, kind)
     values (p_resident_id, v_guard, p_direction);
+
+    -- The door as the presentation (feature_door_checkin). Only a sign IN,
+    -- only when the event was really recorded, and through the same
+    -- function the desk uses, so the 60-second rule and the day's row are
+    -- the register's own. The source says it came from the door.
+    if p_direction = 'in'
+       and (select feature_door_checkin from __TENANT__.app_settings where id) then
+      perform __TENANT__.record_checkin_at(p_resident_id, now(), false, null, 'door');
+    end if;
   end if;
 
   return query
@@ -1299,6 +1309,14 @@ begin
   if not v_dup then
     insert into __TENANT__.gate_events (resident_id, guard_id, kind, occurred_at, recorded_at, late_entry, client_ref)
     values (p_resident_id, auth.uid(), p_direction, p_occurred_at, now(), true, p_client_ref);
+
+    -- The offline door as the presentation, same rule as record_check().
+    -- The gate event's client_ref is reused so a replay is idempotent on
+    -- both tables.
+    if p_direction = 'in'
+       and (select feature_door_checkin from __TENANT__.app_settings where id) then
+      perform __TENANT__.record_checkin_at(p_resident_id, p_occurred_at, true, p_client_ref, 'door');
+    end if;
   end if;
 
   return query select * from __TENANT__.v_resident_status where id = p_resident_id;
@@ -1323,10 +1341,10 @@ $$;
 
 --
 
--- Name: record_checkin_at(uuid, timestamp with time zone, boolean, uuid); Type: FUNCTION; Schema: public; Owner: -
+-- Name: record_checkin_at(uuid, timestamp with time zone, boolean, uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid) RETURNS __TENANT__.daily_compliance
+CREATE FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid, p_source text DEFAULT 'desk'::text) RETURNS __TENANT__.daily_compliance
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
@@ -1386,8 +1404,8 @@ begin
   ) into v_dup;
 
   if not v_dup then
-    insert into __TENANT__.checkin_events (resident_id, guard_id, occurred_at, recorded_at, late_entry, client_ref)
-    values (p_resident_id, auth.uid(), p_at, now(), p_late, p_client_ref);
+    insert into __TENANT__.checkin_events (resident_id, guard_id, occurred_at, recorded_at, late_entry, client_ref, source)
+    values (p_resident_id, auth.uid(), p_at, now(), p_late, p_client_ref, p_source);
 
     -- The on-conflict branch is also how a late check-in corrects a day that
     -- close-out already wrote as missed: presented becomes true and
@@ -1654,7 +1672,9 @@ CREATE TABLE __TENANT__.checkin_events (
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     recorded_at timestamp with time zone DEFAULT now() NOT NULL,
     late_entry boolean DEFAULT false NOT NULL,
-    client_ref uuid
+    client_ref uuid,
+    source text DEFAULT 'desk'::text NOT NULL,
+    CONSTRAINT checkin_events_source_check CHECK ((source = ANY (ARRAY['desk'::text, 'door'::text])))
 );
 
 
@@ -3349,10 +3369,10 @@ GRANT ALL ON FUNCTION __TENANT__.record_checkin(p_resident_id uuid) TO service_r
 
 --
 
--- Name: FUNCTION record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid); Type: ACL; Schema: public; Owner: -
+-- Name: FUNCTION record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid, p_source text); Type: ACL; Schema: public; Owner: -
 --
 
-REVOKE ALL ON FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION __TENANT__.record_checkin_at(p_resident_id uuid, p_at timestamp with time zone, p_late boolean, p_client_ref uuid, p_source text) FROM PUBLIC;
 
 
 --
