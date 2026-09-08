@@ -7,7 +7,7 @@
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<title>CheckSteady — Gate</title>
+<title>CheckSteady — Door</title>
 <style>
   /* ---- roll call (migration 017) ---- */
   .rollstart { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
@@ -77,7 +77,7 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>CheckSteady <span>Gate</span></h1>
+  <h1>CheckSteady <span>Door</span></h1>
   <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
   <div id="loginError" class="alert" hidden></div>
   <form id="loginForm" autocomplete="on">
@@ -99,7 +99,7 @@
         </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
-        <span aria-current="page">Gate</span>
+        <span aria-current="page">Door</span>
         <a href="/checkin.html">Daily register</a>
         <a href="/admin.html" id="adminLink" hidden>Admin</a>
       </nav>
@@ -133,7 +133,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="gate">Gate:</b><span>swipe right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
+      <p class="jobline"><b class="gate">Door:</b><span>swipe right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
       <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>

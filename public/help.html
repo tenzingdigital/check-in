@@ -51,7 +51,7 @@
   <div class="bar">
     <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16"/><path d="M18 33l10 10 18-20"/></svg><div>CheckSteady<small><b>Help and guide</b></small></div></div>
     <nav class="viewswitch" aria-label="Go to">
-      <a href="/index.html">Gate</a>
+      <a href="/index.html">Door</a>
       <a href="/checkin.html">Daily register</a>
       <a href="/admin.html">Admin</a>
     </nav>
@@ -60,12 +60,12 @@
 
 <main class="guide" id="top">
   <h1>How CheckSteady works</h1>
-  <p class="lede">Written so that a new staff member can start on a shift with no training. Each part is a task, in the order you meet it. Two things to know before anything else: the <span class="gate">Gate</span> records people passing the door, and the <span class="register">Daily register</span> records the once-a-day check-in. They are different acts, and the app keeps them apart on purpose.</p>
+  <p class="lede">Written so that a new staff member can start on a shift with no training. Each part is a task, in the order you meet it. Two things to know before anything else: the <span class="gate">Door</span> records people passing in and out, and the <span class="register">Daily register</span> records the once-a-day check-in. They are different acts, and the app keeps them apart on purpose.</p>
 
   <ul class="toc">
     <li><a href="#start">Start here<small>Logging in, choosing a screen</small></a></li>
     <li><a href="#roles">Who can do what<small>Guard, supervisor and admin, side by side</small></a></li>
-    <li><a href="#gate">The gate<small>Sign in and out, tiles, the log</small></a></li>
+    <li><a href="#gate">The door<small>Sign in and out, tiles, the log</small></a></li>
     <li><a href="#register">The daily register<small>Today's check-in, missed days, ID numbers</small></a></li>
     <li><a href="#rollcall">Roll call and evacuation<small>Drills, marking people safe, several phones</small></a></li>
     <li><a href="#visitors">Visitors, staff and contractors<small>Everyone on site who is not a resident</small></a></li>
@@ -80,9 +80,9 @@
   <p>Open the site on any phone, tablet or computer and enter your email and password. If you have never had a password, use <span class="ui">Forgot your password?</span> and a link arrives by email; it works once and for a day.</p>
   <p>Supervisors and administrators may be asked for a six-digit code from their email after the password, if the site requires it or the login looks unusual. Type the code; tick <span class="ui">Trust this device</span> only on your own phone, never on a shared terminal.</p>
   <h3>Which screen am I on?</h3>
-  <p>The first time you log in on a device you are asked <span class="ui">What are you recording?</span> Pick the job for this terminal. You can switch at any time with the pill at the top of the screen: <span class="gate">blue</span> is the gate, <span class="register">green</span> is the daily register. The colour follows you onto the buttons and the swipe strips, so you always know which record you are writing.</p>
+  <p>The first time you log in on a device you are asked <span class="ui">What are you recording?</span> Pick the job for this terminal. You can switch at any time with the pill at the top of the screen: <span class="gate">blue</span> is the door, <span class="register">green</span> is the daily register. The colour follows you onto the buttons and the swipe strips, so you always know which record you are writing.</p>
   <h3>Who can do what</h3>
-  <div class="card"><b>Guard</b> Records at the gate and on the register, runs a roll call, reads the log. Sees names, ages and states, never a date of birth.</div>
+  <div class="card"><b>Guard</b> Records at the door and on the register, runs a roll call, reads the log. Sees names, ages and states, never a date of birth.</div>
   <div class="card"><b>Supervisor</b> Everything a guard does, plus adding and editing residents, importing a spreadsheet, buildings and rooms, and exporting reports.</div>
   <div class="card"><b>Admin</b> Everything a supervisor does, plus staff accounts, the site's settings and feature switches, a resident's full record export and erasure, and the log of who viewed which record.</div>
   <p>A refusal always says so in words. If a button does nothing for you, it is not yours to press, and the person who can is named in the message. The full table is under <a href="#roles">Who can do what</a>.</p>
@@ -95,7 +95,7 @@
   <div class="tablewrap"><table class="roles">
     <thead><tr><th>Can they…</th><th>Guard</th><th>Supervisor</th><th>Admin</th></tr></thead>
     <tbody>
-      <tr><td>Sign residents in and out at the gate</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Sign residents in and out at the door</td><td>✓</td><td>✓</td><td>✓</td></tr>
       <tr><td>Record the daily check-in</td><td>✓</td><td>✓</td><td>✓</td></tr>
       <tr><td>Open a resident's sheet (name, age, ID number; logged)</td><td>✓</td><td>✓</td><td>✓</td></tr>
       <tr><td>See a date of birth</td><td>—</td><td>✓</td><td>✓</td></tr>
@@ -117,8 +117,8 @@
   <p>Every row is enforced in the database, not the screen: a button a role should not press is refused even if someone finds the request behind it. <span class="ui">docs/PERMISSIONS.md</span> in the repository is the complete list, tested on every change.</p>
   <a class="top" href="#top">Back to the top</a>
 
-  <h2 id="gate">The gate <span class="who">every staff member</span></h2>
-  <p>The gate answers one question: who is on site right now? Every sign-in and sign-out is a movement with a time and your name on it.</p>
+  <h2 id="gate">The door <span class="who">every staff member</span></h2>
+  <p>The door answers one question: who is on site right now? Every sign-in and sign-out is a movement with a time and your name on it.</p>
   <h3>Sign someone in or out</h3>
   <div class="step"><b>1</b><span>Find the person. The whole list is on screen; type part of a name to filter. Spelling, accents and name order are forgiven.</span></div>
   <div class="step"><b>2</b><span>Look at the person. The app records that you checked; it does not check for you.</span></div>
@@ -131,7 +131,7 @@
   <a class="top" href="#top">Back to the top</a>
 
   <h2 id="register">The daily register <span class="who">every staff member</span></h2>
-  <p>The register answers a different question: has this resident presented today? The rule is one check-in per calendar day, midnight to midnight in the site's time zone. Being signed in at the gate does not count; the check-in is its own act.</p>
+  <p>The register answers a different question: has this resident presented today? The rule is one check-in per calendar day, midnight to midnight in the site's time zone. Being signed in at the door does not count; the check-in is its own act.</p>
   <h3>Record a check-in</h3>
   <div class="step"><b>1</b><span>The list opens on <span class="ui">Not seen</span>: residents required today who have not checked in yet. Type a name to find anyone, seen or not.</span></div>
   <div class="step"><b>2</b><span>Look at the person, then swipe the card either way, or tap the name and press <span class="ui">Check in</span>.</span></div>
@@ -146,7 +146,7 @@
   <a class="top" href="#top">Back to the top</a>
 
   <h2 id="rollcall">Roll call and evacuation <span class="who">every staff member</span></h2>
-  <p>On the gate, the <span class="ui">Roll call</span> tab lists everyone recorded on site, by building, with people who need assistance first. It appears when the site has the evacuation feature on.</p>
+  <p>On the Door, the <span class="ui">Roll call</span> tab lists everyone recorded on site, by building, with people who need assistance first. It appears when the site has the evacuation feature on.</p>
   <h3>Run a drill or a real roll call</h3>
   <div class="step"><b>1</b><span>Tap <span class="ui">Start a drill</span> or <span class="ui">Roll call now</span>. Every other warden's phone shows the same roll call within a few seconds.</span></div>
   <div class="step"><b>2</b><span>At the assembly point, tap <span class="ui">Safe</span> beside each person you can see. A tick made on one phone appears on the others; a person is counted once however many wardens tick them.</span></div>
@@ -157,7 +157,7 @@
   <a class="top" href="#top">Back to the top</a>
 
   <h2 id="visitors">Visitors, staff and contractors <span class="who">every staff member</span></h2>
-  <p>The <span class="ui">Visitors</span> tab on the gate is for anyone on site who is not a resident: staff, visitors, contractors and suppliers. It appears when the site has the visitors feature on. A fire officer asks who is in the building, not who lives there; this is the other half of that answer.</p>
+  <p>The <span class="ui">Visitors</span> tab on the Door is for anyone on site who is not a resident: staff, visitors, contractors and suppliers. It appears when the site has the visitors feature on. A fire officer asks who is in the building, not who lives there; this is the other half of that answer.</p>
   <div class="step"><b>1</b><span>Pick who they are: <span class="ui">Visitor</span>, <span class="ui">Contractor</span>, <span class="ui">Supplier</span> or <span class="ui">Staff</span>. Type the name and, if useful, the company or reason. Tap <span class="ui">Sign in</span>.</span></div>
   <div class="step"><b>2</b><span>They appear under <span class="ui">On site</span> with the time and your name. When they leave, tap <span class="ui">Sign out</span> beside them; they move to <span class="ui">Left today</span>.</span></div>
   <div class="step"><b>3</b><span>During a roll call, everyone still signed in is listed under <span class="ui">Staff, visitors and contractors</span> and is marked safe like a resident. The count at the top includes them.</span></div>
@@ -191,7 +191,7 @@
   <a class="top" href="#top">Back to the top</a>
 
   <h2 id="offline">Working offline</h2>
-  <p>The gate and the register keep working when the connection drops. The pill in the header changes from <span class="ui">Online</span> to <span class="ui">Offline</span>; the list you last saw stays on screen, and anything you record is queued and marked <span class="ui">Queued</span> on the card.</p>
+  <p>The door and the register keep working when the connection drops. The pill in the header changes from <span class="ui">Online</span> to <span class="ui">Offline</span>; the list you last saw stays on screen, and anything you record is queued and marked <span class="ui">Queued</span> on the card.</p>
   <p>When the connection returns the queue is sent in order, with the time you actually recorded it, and the cards update. A queued event survives a logout and is sent the next time anyone logs in on that device. Events older than the site's sync window are refused and listed so you can re-record them.</p>
   <p>The copy of the register held on the device is encrypted. Logging out does not delete queued events, on purpose; locking the screen after idle minutes does not either.</p>
   <a class="top" href="#top">Back to the top</a>

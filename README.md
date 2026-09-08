@@ -43,7 +43,7 @@ tier in front of it.
 
 Two front ends, one API, one Postgres database, one resident register.
 
-**`index.html` — the gate app.** Who is on site right now. A guard logs in,
+**`index.html` — the Door (the gate app in older notes).** Who is on site right now. A guard logs in,
 searches a registered resident by name, verifies the person visually, and taps
 one button to sign them in or out. Two tabs: Search and Log.
 

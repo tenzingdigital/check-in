@@ -341,7 +341,7 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
     <h2>What are you recording?</h2>
     <p class="hint">Two different things are recorded here. Pick the one for this terminal; you can switch at the top of the screen later.</p>
     <a class="choice gate" href="/index.html" data-view="gate">
-      <b>Gate — in and out</b>
+      <b>Door — in and out</b>
       <span>People passing the door. Swipe right to sign IN, left to sign OUT. Keeps the door log and who is on site now.</span>
     </a>
     <a class="choice register" href="/checkin.html" data-view="register">
