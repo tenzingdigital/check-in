@@ -183,6 +183,15 @@ branch.** The feedback from the IPAS centre managers, item by item:
   in or out from a bar at the bottom, one movement each.
 - *A list of who is absent*: the "Absent now" report, and the Off site tile
   at the door for the live list.
+- *The samples they sent* (a check-out and check-in spreadsheet, and a
+  History screen with Today / Yesterday / This week / This month): the
+  "Out and back" report is that spreadsheet, one row per absence with
+  building, room, date and time out, date and time back, hours away and
+  who signed each; the absent reports carry the same building, room,
+  date and time columns; the Log and History have the four quick ranges.
+  Two columns from the spreadsheet are not carried on purpose: gender,
+  which the app does not hold (nothing in the register needs it), and a
+  resident number, which the app does not assign. Residents are named.
 - *Tablets and the evacuation feature*: already there. The app is a web
   page that fits any screen; the roll call is Stage 2.
 

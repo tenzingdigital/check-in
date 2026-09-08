@@ -122,6 +122,8 @@
   .row input[type="date"].grow { flex: 1 1 0; min-width: 0; width: 0; padding: 10px 8px; font-size: 14px; }
   .row > .btn { flex: none; }
   .history .logrow time { min-width: 118px; }
+  .history .chips, #logPresets { margin: 8px 0 10px; gap: 6px; }
+  .history .chips button, #logPresets button { padding: 6px 10px; font-size: 13px; }
   .logrow .dir.chk { color: var(--ok); }
   .stripTitle { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
 

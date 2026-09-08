@@ -8,6 +8,9 @@
 //   occupancy   every room with its occupants and who is on site now
 //   evacuation  everyone active: room, presence, evacuation need, household
 //   roll-calls  drills and incidents in the range, with how many were accounted for
+//   absent      everyone off site now, with when and by whom they were signed out
+//   overnight   who was off site at midnight, night by night (migration 027)
+//   away        every sign OUT with the sign IN that followed: the check-out/check-in list
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -104,11 +107,17 @@ const REPORTS = {
 REPORTS.absent = {
   title: 'Absent now',
   ranged: false,
-  sql: `select v.full_name as resident, rm.room_label as room,
-               to_char(v.last_event_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as off_site_since,
+  sql: `select rm.building, rm.room, v.full_name as resident,
+               to_char(v.last_event_at at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
+               to_char(v.last_event_at at time zone s.local_timezone, 'HH24:MI') as time_out,
+               g.full_name as signed_out_by,
                case when v.last_event_at is null then 'never signed in' else '' end as note
           from v_resident_status v
           left join v_resident_room rm on rm.id = v.id
+          left join lateral (
+            select e.guard_id from gate_events e
+             where e.resident_id = v.id order by e.occurred_at desc, e.id desc limit 1) le on true
+          left join profiles g on g.id = le.guard_id
           cross join (select local_timezone from app_settings where id) s
          where v.status = 'active' and v.presence = 'out'
          order by v.last_event_at nulls first, v.last_name, v.first_name`,
@@ -116,8 +125,10 @@ REPORTS.absent = {
 REPORTS.overnight = {
   title: 'Absent overnight',
   ranged: true,
-  sql: `select o.night::text as night, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.room_label as room,
-               to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as off_site_since,
+  sql: `select o.night::text as night, rm.building, rm.room,
+               btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+               to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
+               to_char(o.off_site_since at time zone s.local_timezone, 'HH24:MI') as time_out,
                case when o.off_site_since is null then 'never signed in' else '' end as note
           from overnight_absences o
           join residents r on r.id = o.resident_id
@@ -125,6 +136,41 @@ REPORTS.overnight = {
           cross join (select local_timezone from app_settings where id) s
          where o.night between $1 and $2
          order by o.night desc, r.last_name, r.first_name`,
+};
+
+// Every sign OUT in the range with the sign IN that followed it, one row
+// per absence: the "check-out and check-in list" the centres keep by hand.
+// An OUT with no IN yet has the in-columns blank. Pairing is by order of
+// occurrence for the same resident (window functions over gate_events).
+REPORTS.away = {
+  title: 'Out and back',
+  ranged: true,
+  sql: `with s as (select local_timezone as tz from app_settings where id),
+            ev as (
+              select e.resident_id, e.kind, e.occurred_at, e.guard_id,
+                     lead(e.kind)        over w as next_kind,
+                     lead(e.occurred_at) over w as next_at,
+                     lead(e.guard_id)    over w as next_guard
+                from gate_events e
+              window w as (partition by e.resident_id order by e.occurred_at, e.id))
+       select rm.building, rm.room, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+              to_char(ev.occurred_at at time zone s.tz, 'YYYY-MM-DD') as date_out,
+              to_char(ev.occurred_at at time zone s.tz, 'HH24:MI') as time_out,
+              to_char(ev.next_at at time zone s.tz, 'YYYY-MM-DD') as date_in,
+              to_char(ev.next_at at time zone s.tz, 'HH24:MI') as time_in,
+              case when ev.next_at is null then null
+                   else round(extract(epoch from (ev.next_at - ev.occurred_at)) / 3600, 1) end as hours_away,
+              g1.full_name as signed_out_by, g2.full_name as signed_in_by
+         from ev
+         join residents r on r.id = ev.resident_id
+         left join v_resident_room rm on rm.id = r.id
+         left join profiles g1 on g1.id = ev.guard_id
+         left join profiles g2 on g2.id = ev.next_guard
+         cross join s
+        where ev.kind = 'out' and (ev.next_kind is null or ev.next_kind = 'in')
+          and ev.occurred_at >= ($1::date::timestamp) at time zone s.tz
+          and ev.occurred_at <  (($2::date + 1)::timestamp) at time zone s.tz
+        order by ev.occurred_at desc, r.last_name, r.first_name`,
 };
 
 // Staff, visitors, contractors and suppliers on site (migration 024).

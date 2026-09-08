@@ -1542,7 +1542,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 10);
+    assert.equal(list.json.length, 11);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1681,12 +1681,34 @@ async function main() {
     const row = rep.json.rows.find((r) => /Brennan/.test(r.resident));
     assert.ok(row, "the overnight report misses the absent resident");
     assert.equal(row.night, today);
-    assert.match(row.off_site_since, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    assert.equal(row.date_out, today); assert.match(row.time_out, /^\d{2}:\d{2}$/);
     assert.equal(rep.json.rows.find((r) => /Snap Never/.test(r.resident))?.note, "never signed in");
 
     const absent = await supC.fetch(`/api/reports/absent?reason=test&format=json`);
     assert.equal(absent.status, 200, absent.text);
-    assert.ok(absent.json.rows.some((r) => /Brennan/.test(r.resident)), "the absent-now report misses the resident who is out");
+    const abs = absent.json.rows.find((r) => /Brennan/.test(r.resident));
+    assert.ok(abs, "the absent-now report misses the resident who is out");
+    assert.equal(abs.signed_out_by, "Gina Guard");
+    assert.match(abs.date_out, /^\d{4}-\d{2}-\d{2}$/); assert.match(abs.time_out, /^\d{2}:\d{2}$/);
+    assert.ok(absent.json.rows.some((r) => /Snap Never/.test(r.resident) && r.note === "never signed in"));
+
+    // Out and back: Brennan's OUT has no IN yet; Snap Inside only ever came IN.
+    const away = await supC.fetch(`/api/reports/away?from=${today}&to=${today}&reason=test&format=json`);
+    assert.equal(away.status, 200, away.text);
+    assert.equal(away.json.title, "Out and back");
+    const trip = away.json.rows.find((r) => /Brennan/.test(r.resident));
+    assert.ok(trip, "the out-and-back report misses today's sign OUT");
+    assert.equal(trip.date_out, today);
+    assert.equal(trip.date_in, null); assert.equal(trip.hours_away, null);
+    assert.equal(trip.signed_out_by, "Gina Guard");
+    assert.ok(!away.json.rows.some((r) => /Snap Inside/.test(r.resident)), "a sign IN with no OUT before it is not an absence");
+    // Back in: the row now carries the IN and the hours away.
+    await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: resident.id, direction: "in" } });
+    const back = await supC.fetch(`/api/reports/away?from=${today}&to=${today}&reason=test&format=json`);
+    const done = back.json.rows.find((r) => /Brennan/.test(r.resident));
+    assert.equal(done.date_in, today);
+    assert.equal(typeof Number(done.hours_away), "number");
+    assert.equal(done.signed_in_by, "Gina Guard");
 
     // A guard reads the table through its policy; anon cannot.
     const asGuard = await withIdentity(guardId, (c) => c.query(`select count(*)::int as n from public.overnight_absences`));

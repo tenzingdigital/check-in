@@ -383,9 +383,10 @@ out of the two working apps:
   the roll call, children marked, and reads as a family in a room. The
   link is an id shared by the members and nothing else.
 - **Reports** (supervisors and admins): the daily register, an attendance
-  summary, the movement log, the drill record, visitors and *Absent
-  overnight* for a date range, and occupancy, the evacuation list and
-  *Absent now* as they stand, each as a CSV download or a printable page.
+  summary, the movement log, *Out and back* (one row per absence: building,
+  room, date and time out, date and time back, hours away, who signed
+  each), the drill record, visitors and *Absent overnight* for a date
+  range, and occupancy, the evacuation list and *Absent now* as they stand, each as a CSV download or a printable page.
   A reason is required and every export is on the audit record with the
   range.
 - **Who was off site at midnight** (migration 027): the nightly job takes a
@@ -397,7 +398,8 @@ out of the two working apps:
   *on site since* or *off site since* with the time of the last movement;
   the detail sheet (door, register and admin) lists one person's movements
   and check-ins over any range up to a year, with the time and who recorded
-  each; the Log covers up to a month at a time and filters by name or room;
+  each; the Log covers up to a month at a time, with Today, Yesterday, This
+  week and This month one tap away, and filters by name or room;
   and *Select several* signs a group in or out in one go, one movement per
   person.
 - **Visitors, staff and contractors** (behind `feature_visitors`): a

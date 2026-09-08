@@ -163,8 +163,8 @@
       <div class="row">
         <input id="logFrom" class="field grow" type="date" aria-label="From">
         <input id="logTo" class="field grow" type="date" aria-label="To">
-        <button class="btn ghost" id="logToday">Today</button>
       </div>
+      <div id="logPresets" class="chips" aria-label="Quick ranges"></div>
       <input id="logQ" class="field mt8" type="search" placeholder="Name or room…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Filter by name or room">
       <p class="hint tight" id="logCount"></p>
       <div id="logList" class="list"></div>
@@ -939,6 +939,7 @@ async function enterApp() {
   $("app").hidden = false;
   $("logFrom").value = todayISODate(); $("logTo").value = todayISODate();
   $("logFrom").max = todayISODate(); $("logTo").max = todayISODate();
+  $("logPresets").querySelector('[data-preset="today"]')?.setAttribute("aria-pressed", "true");
 
   selectTab("search");
   refreshSummary();
@@ -1148,10 +1149,7 @@ $("logFrom").addEventListener("change", loadLog);
 $("logTo").addEventListener("change", loadLog);
 let logQTimer = null;
 $("logQ").addEventListener("input", () => { clearTimeout(logQTimer); logQTimer = setTimeout(loadLog, 250); });
-$("logToday").addEventListener("click", () => {
-  $("logFrom").value = todayISODate(); $("logTo").value = todayISODate(); $("logQ").value = "";
-  loadLog();
-});
+mountRangePresets($("logPresets"), $("logFrom"), $("logTo"), loadLog);
 
 // Periodic refresh so a terminal left open overnight does not show a stale
 // on-site count or a list another terminal has since changed. Only while

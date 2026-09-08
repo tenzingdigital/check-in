@@ -424,6 +424,31 @@ function dayTime(iso) {
 }
 function isoDate(d) { const p = (v) => String(v).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 
+// Quick ranges for a date pair: today, yesterday, this week (Monday to
+// today), this month. Returns [from, to] as YYYY-MM-DD in local time.
+function presetRange(name) {
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const f = new Date(t);
+  if (name === "yesterday") { f.setDate(f.getDate() - 1); return [isoDate(f), isoDate(f)]; }
+  if (name === "week") { f.setDate(f.getDate() - ((f.getDay() + 6) % 7)); return [isoDate(f), isoDate(t)]; }
+  if (name === "month") { f.setDate(1); return [isoDate(f), isoDate(t)]; }
+  return [isoDate(t), isoDate(t)];
+}
+// Chips under a from/to pair. onPick runs after the inputs are set.
+function mountRangePresets(container, fromEl, toEl, onPick) {
+  container.innerHTML = [["today", "Today"], ["yesterday", "Yesterday"], ["week", "This week"], ["month", "This month"]]
+    .map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join("");
+  container.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-preset]"); if (!b) return;
+    const [f, t] = presetRange(b.dataset.preset);
+    fromEl.value = f; toEl.value = t;
+    container.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    onPick();
+  });
+  const clear = () => container.querySelectorAll("button").forEach((x) => x.removeAttribute("aria-pressed"));
+  fromEl.addEventListener("input", clear); toEl.addEventListener("input", clear);
+}
+
 // A resident's history: every movement and check-in with the date and time,
 // over a range, newest first. Shared by the gate sheet, the register sheet
 // and the admin edit sheet; each hands it a container to draw into.
@@ -437,6 +462,7 @@ function mountHistory(container, residentId) {
         <input class="field grow" type="date" name="to" value="${isoDate(to)}" aria-label="To">
         <button class="btn ghost sm" type="submit">Show</button>
       </form>
+      <div class="chips hpresets"></div>
       <div class="hlist"><span class="hint">Loading…</span></div>
     </div>`;
   const list = container.querySelector(".hlist");
@@ -456,6 +482,7 @@ function mountHistory(container, residentId) {
       </div>`).join("") + (rows.length >= 2000 ? '<p class="hint">Showing the first 2,000. Narrow the dates for the rest.</p>' : "");
   };
   form.addEventListener("submit", (e) => { e.preventDefault(); load(); });
+  mountRangePresets(container.querySelector(".hpresets"), form.elements.from, form.elements.to, load);
   load();
 }
 

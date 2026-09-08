@@ -444,3 +444,11 @@ the fact, by person, by room and by night.
 - *Date fields on a phone.* Three controls in a row of 390 pixels: the
   date inputs would not shrink and pushed the button off the screen. They
   now give way, with a smaller face and tighter padding on that row only.
+- *The samples.* The managers' own spreadsheet is a check-out and
+  check-in list: one row per absence, out and back on the same line. The
+  movement log is one row per movement, which is right for a door and
+  wrong for that question, so "Out and back" is its own report and pairs
+  each OUT with the IN that followed. Their History screen's four quick
+  ranges (Today, Yesterday, This week, This month) were cheaper than a
+  calendar and cover what people actually tap; they sit as chips under
+  the dates on the Log and the History panel.
