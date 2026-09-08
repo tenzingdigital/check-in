@@ -762,6 +762,8 @@ function renderDetail(rec, summary) {
       <p class="hint flush">Holds only which residents share a household. Nothing else about the family is recorded.</p>
     </div>` : ""}
 
+    <div id="detailHistory"></div>
+
     ${canStaff() ? `
     <div class="formcard">
       <h2>Their record</h2>
@@ -797,6 +799,7 @@ function renderDetail(rec, summary) {
       `}
     </div>`;
   el.hidden = false;
+  mountHistory($("detailHistory"), rec.id);
 
   let idType = type;
   el.querySelectorAll("#editForm .seg button").forEach((b) => b.addEventListener("click", () => {

@@ -406,6 +406,59 @@ function mountBrand() {
 }
 document.addEventListener("DOMContentLoaded", mountBrand);
 
+// "since 14:20" today, "since Thu 4 Sep 14:20" otherwise. The centre
+// managers asked for "off site since date and time" in place of "last
+// movement 3h ago": a time is a fact a manager can act on, an age is not.
+function sinceLabel(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (sameDay) return `since ${time}`;
+  return `since ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${time}`;
+}
+function dayTime(iso) {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+}
+function isoDate(d) { const p = (v) => String(v).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+
+// A resident's history: every movement and check-in with the date and time,
+// over a range, newest first. Shared by the gate sheet, the register sheet
+// and the admin edit sheet; each hands it a container to draw into.
+function mountHistory(container, residentId) {
+  const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 29);
+  container.innerHTML = `
+    <div class="history">
+      <div class="stripTitle">History</div>
+      <form class="row hrange">
+        <input class="field grow" type="date" name="from" value="${isoDate(from)}" aria-label="From">
+        <input class="field grow" type="date" name="to" value="${isoDate(to)}" aria-label="To">
+        <button class="btn ghost sm" type="submit">Show</button>
+      </form>
+      <div class="hlist"><span class="hint">Loading…</span></div>
+    </div>`;
+  const list = container.querySelector(".hlist");
+  const form = container.querySelector(".hrange");
+  const load = async () => {
+    if (typeof Offline !== "undefined" && !Offline.isOnline()) { list.innerHTML = '<p class="hint">History needs a connection.</p>'; return; }
+    const f = form.elements.from.value, t = form.elements.to.value;
+    const rows = await guarded(() => apiGet(`/api/residents/${residentId}/history?from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`), (err) => { list.innerHTML = `<p class="hint">${esc(err.message)}</p>`; });
+    if (!rows) return;
+    if (!rows.length) { list.innerHTML = '<p class="hint">Nothing recorded in this range.</p>'; return; }
+    const label = { in: "IN", out: "OUT", checkin: "Check-in" };
+    list.innerHTML = rows.map((e) => `
+      <div class="logrow">
+        <time datetime="${esc(e.occurred_at)}">${esc(dayTime(e.occurred_at))}</time>
+        <span class="dir ${e.kind === "in" ? "in" : e.kind === "out" ? "out" : "chk"}">${label[e.kind] || esc(e.kind)}</span>
+        <span class="body"><span class="by">by ${esc(e.guard_name)}${e.late_entry ? " · recorded offline, synced later" : ""}</span></span>
+      </div>`).join("") + (rows.length >= 2000 ? '<p class="hint">Showing the first 2,000. Narrow the dates for the rest.</p>' : "");
+  };
+  form.addEventListener("submit", (e) => { e.preventDefault(); load(); });
+  load();
+}
+
 // Tips: one sentence that explains a control, on demand.
 //
 // Two ways in. A small "?" button (class tip, data-tip="…") next to a label
@@ -579,6 +632,8 @@ function mountCardSwipe({ selector = "button.card", onRight, onLeft } = {}) {
   document.addEventListener("pointerdown", (e) => {
     swallow = false;
     if (e.pointerType === "mouse") return;
+    // Selecting several: a tap chooses, a swipe would record. Not both.
+    if (document.body.classList.contains("selecting")) return;
     const card = e.target.closest(selector);
     if (!card) return;
     swipe = { card, id: card.dataset.id, x0: e.clientX, y0: e.clientY, dx: 0, horizontal: null };

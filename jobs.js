@@ -30,6 +30,8 @@ const tenancy = require('./lib/tenancy');
 // the nightly run visits every open tenant, the legacy one (public) included.
 const TENANT_JOBS = [
   ["close-out-compliance-days", "select close_out_compliance_days()"],
+  // Who was off site at midnight, for the night just ended (migration 027).
+  ["snapshot-overnight-absences", "select snapshot_overnight_absences()"],
   ["purge-expired-gate-events", "select purge_expired_gate_events()"],
   ["purge-expired-checkin-events", "select purge_expired_checkin_events()"],
   ["purge-expired-compliance", "select purge_expired_compliance()"],
@@ -38,6 +40,7 @@ const TENANT_JOBS = [
   ["purge-expired-roll-calls", "select purge_expired_roll_calls()"],
   ["purge-resident-views", "select purge_resident_views()"],
   ["purge-expired-visits", "select purge_expired_visits()"],
+  ["purge-expired-overnight-absences", "select purge_expired_overnight_absences()"],
   // app_settings (one row) and a small residents table can carry the
   // planner's default guess of ~300 rows forever. Cross-joined into every
   // view, that guess is how a 200-row query was costed at 85,000 rows and

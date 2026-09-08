@@ -162,6 +162,30 @@ migration, no new data.**
 - Not done: a source column on the daily register report. Add it when an
   inspector asks how a day was satisfied.
 
+## Stage 2c — What the centre managers asked for
+
+**Status: built 8 September 2026 (migration 027), on the working
+branch.** The feedback from the IPAS centre managers, item by item:
+
+- *View a resident's history, filtered by person and dates*: a History
+  panel under every detail sheet (door, register, admin edit sheet) listing
+  movements and check-ins over a range up to a year, with date, time and
+  who recorded each.
+- *Search the Log by name or room over a period of days*: the Log takes a
+  from and to date (up to a month at a time) and a name-or-room filter.
+  Filtering by room needs the Buildings feature, which is where rooms live.
+- *"Off site since date and time"*: every card and detail sheet says on or
+  off site since the last movement, with the day once it is not today.
+- *Who was off site at midnight, historically*: the nightly job snapshots
+  it (`overnight_absences`), the "Absent overnight" report reads it for any
+  range, kept as long as the register.
+- *Multi-select at the door*: "Select several" ticks people and signs them
+  in or out from a bar at the bottom, one movement each.
+- *A list of who is absent*: the "Absent now" report, and the Off site tile
+  at the door for the live list.
+- *Tablets and the evacuation feature*: already there. The app is a web
+  page that fits any screen; the roll call is Stage 2.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**

@@ -354,6 +354,36 @@ async function main() {
     assert.ok(log.json.some((e) => e.resident_id === resident.id && e.guard_name === "Gina Guard"));
   });
 
+  await test("the log covers a range and filters by name or room; a resident's history lists it all", async () => {
+    const found = await api.fetch("/api/residents?q=brennan");
+    const resident = found.json[0];
+    const today = siteToday();
+    const weekAgo = new Date(Date.parse(today) - 6 * 86400000).toISOString().slice(0, 10);
+    const ranged = await api.fetch(`/api/gate-events?from=${weekAgo}&to=${today}&q=bren`);
+    assert.equal(ranged.status, 200, ranged.text);
+    assert.ok(ranged.json.some((e) => e.resident_id === resident.id), "the ranged, filtered log misses the movement");
+    assert.ok(ranged.json.every((e) => /bren/i.test(e.resident_name) || /bren/i.test(e.room_label || "")), "the filter let another name through");
+    const none = await api.fetch(`/api/gate-events?from=${weekAgo}&to=${today}&q=zzzz-no-such-person`);
+    assert.equal(none.json.length, 0);
+    const tooWide = await api.fetch(`/api/gate-events?from=2026-01-01&to=2026-03-01`);
+    assert.equal(tooWide.status, 400, "more than 31 days should be refused");
+    const backwards = await api.fetch(`/api/gate-events?from=${today}&to=${weekAgo}`);
+    assert.equal(backwards.status, 400);
+
+    const hist = await api.fetch(`/api/residents/${resident.id}/history`);
+    assert.equal(hist.status, 200, hist.text);
+    const out = hist.json.find((e) => e.kind === "out");
+    assert.ok(out, "the movement just recorded is missing from the history");
+    assert.equal(out.guard_name, "Gina Guard");
+    assert.ok(out.occurred_at && "late_entry" in out);
+    const empty = await api.fetch(`/api/residents/${resident.id}/history?from=2020-01-01&to=2020-01-31`);
+    assert.equal(empty.json.length, 0);
+    const tooLong = await api.fetch(`/api/residents/${resident.id}/history?from=2020-01-01&to=2022-01-01`);
+    assert.equal(tooLong.status, 400);
+    const bogus = await api.fetch(`/api/residents/${resident.id}/history?from=yesterday`);
+    assert.equal(bogus.status, 400);
+  });
+
   await test("a check-in satisfies the day", async () => {
     const found = await api.fetch("/api/residents?q=brennan&compliance=1");
     const resident = found.json[0];
@@ -1512,7 +1542,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 8);
+    assert.equal(list.json.length, 10);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1612,6 +1642,57 @@ async function main() {
     // put it back so later boots in this cluster are quiet
     const real = require("crypto").createHash("sha256").update(require("fs").readFileSync(require("path").join(__dirname, "..", "migrations", "001_platform.sql"), "utf8"), "utf8").digest("hex");
     await withOwner((c) => c.query(`update public.schema_migrations set checksum = $1 where name = '001_platform.sql'`, [real]));
+  });
+
+  console.log("\n== who was off site at midnight (migration 027) ==");
+
+  await test("the nightly snapshot keeps who was off site at midnight, and the report shows it", async () => {
+    const found = await api.fetch("/api/residents?q=brennan");
+    const resident = found.json[0];
+    const today = siteToday();
+    // Two more people for the night: one signed in (not absent) and one who
+    // has never been signed in (absent, "never signed in").
+    const inside = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Snap", last_name: "Inside", date_of_birth: "1990-01-01" } });
+    assert.equal(inside.status, 201, inside.text);
+    const never = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Snap", last_name: "Never", date_of_birth: "1990-01-01" } });
+    assert.equal(never.status, 201, never.text);
+    const signIn = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: inside.json.id, direction: "in" } });
+    assert.equal(signIn.status, 200, signIn.text);
+    // Brennan's last movement today is OUT (recorded above), so tonight's
+    // snapshot for today lists them; the same night twice adds nothing.
+    const first = await withOwner((c) => c.query(`select public.snapshot_overnight_absences($1::date) as n`, [today]));
+    assert.ok(first.rows[0].n >= 1, "nobody snapshotted");
+    const again = await withOwner((c) => c.query(`select public.snapshot_overnight_absences($1::date) as n`, [today]));
+    assert.equal(again.rows[0].n, 0, "re-running the same night duplicated rows");
+    const mine = await withOwner((c) => c.query(`select off_site_since from public.overnight_absences where night = $1 and resident_id = $2`, [today, resident.id]));
+    assert.equal(mine.rows.length, 1, "the resident who was out is not in the snapshot");
+    assert.ok(mine.rows[0].off_site_since, "off_site_since not kept");
+    const others = await withOwner((c) => c.query(
+      `select resident_id, off_site_since from public.overnight_absences where night = $1 and resident_id = any($2::uuid[])`,
+      [today, [inside.json.id, never.json.id]]));
+    assert.ok(!others.rows.some((r) => r.resident_id === inside.json.id), "a resident whose last movement was IN was listed as absent");
+    const neverRow = others.rows.find((r) => r.resident_id === never.json.id);
+    assert.ok(neverRow, "a resident never signed in should count as absent");
+    assert.equal(neverRow.off_site_since, null);
+
+    const rep = await supC.fetch(`/api/reports/overnight?from=${today}&to=${today}&reason=test&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.equal(rep.json.title, "Absent overnight");
+    const row = rep.json.rows.find((r) => /Brennan/.test(r.resident));
+    assert.ok(row, "the overnight report misses the absent resident");
+    assert.equal(row.night, today);
+    assert.match(row.off_site_since, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    assert.equal(rep.json.rows.find((r) => /Snap Never/.test(r.resident))?.note, "never signed in");
+
+    const absent = await supC.fetch(`/api/reports/absent?reason=test&format=json`);
+    assert.equal(absent.status, 200, absent.text);
+    assert.ok(absent.json.rows.some((r) => /Brennan/.test(r.resident)), "the absent-now report misses the resident who is out");
+
+    // A guard reads the table through its policy; anon cannot.
+    const asGuard = await withIdentity(guardId, (c) => c.query(`select count(*)::int as n from public.overnight_absences`));
+    assert.ok(asGuard.rows[0].n >= 1);
+    const cannotRun = await withIdentity(guardId, (c) => c.query(`select public.snapshot_overnight_absences()`).then(() => "ran", (e) => e.code));
+    assert.equal(cannotRun, "42501", "a staff member could run the snapshot");
   });
 
   console.log("\n== who viewed which record (migration 023) ==");

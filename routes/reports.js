@@ -98,6 +98,35 @@ const REPORTS = {
   },
 };
 
+// Everyone off site right now, whatever the date they left (the "absent
+// list" the centre managers asked for), and who was off site at midnight
+// on each night in a range (migration 027).
+REPORTS.absent = {
+  title: 'Absent now',
+  ranged: false,
+  sql: `select v.full_name as resident, rm.room_label as room,
+               to_char(v.last_event_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as off_site_since,
+               case when v.last_event_at is null then 'never signed in' else '' end as note
+          from v_resident_status v
+          left join v_resident_room rm on rm.id = v.id
+          cross join (select local_timezone from app_settings where id) s
+         where v.status = 'active' and v.presence = 'out'
+         order by v.last_event_at nulls first, v.last_name, v.first_name`,
+};
+REPORTS.overnight = {
+  title: 'Absent overnight',
+  ranged: true,
+  sql: `select o.night::text as night, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.room_label as room,
+               to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as off_site_since,
+               case when o.off_site_since is null then 'never signed in' else '' end as note
+          from overnight_absences o
+          join residents r on r.id = o.resident_id
+          left join v_resident_room rm on rm.id = r.id
+          cross join (select local_timezone from app_settings where id) s
+         where o.night between $1 and $2
+         order by o.night desc, r.last_name, r.first_name`,
+};
+
 // Staff, visitors, contractors and suppliers on site (migration 024).
 REPORTS.visits = {
   title: 'Visitors, staff and contractors',

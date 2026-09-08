@@ -449,8 +449,11 @@ function renderDetail(r) {
 
     <div class="stripTitle">Last 30 days</div>
     <div id="strip" class="strip"><span class="hint">Loading…</span></div>
-    <p class="hint legend"><span class="cell ok"></span>seen <span class="cell miss"></span>missed <span class="cell na"></span>not required</p>`;
+    <p class="hint legend"><span class="cell ok"></span>seen <span class="cell miss"></span>missed <span class="cell na"></span>not required</p>
+    <div id="detailHistory"></div>`;
   el.hidden = false;
+  if (renderDetail.historyFor !== r.id || !$("detailHistory").querySelector(".hlist")) mountHistory($("detailHistory"), r.id);
+  renderDetail.historyFor = r.id;
 
   $("doCheckin").onclick = () => checkin(r.id);
   $("closeDetail").onclick = () => renderDetail(null);

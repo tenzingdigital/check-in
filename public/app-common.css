@@ -112,6 +112,40 @@
   .bar .help:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
   .brand small b { font-weight: 600; color: var(--text); }
+  /* ---- history (a resident's movements and check-ins over a range) ---- */
+  .history { margin-top: 16px; }
+  .history .hrange { gap: 8px; margin: 0 0 8px; }
+  .history .hrange .field { padding: 10px 10px; font-size: 14px; }
+  .history .hrange .btn.sm { padding: 10px 14px; flex: none; }
+  /* Date inputs refuse to shrink below their intrinsic width on a phone, which
+     pushes the third control off the edge. Let them give way. */
+  .row input[type="date"].grow { flex: 1 1 0; min-width: 0; width: 0; padding: 10px 8px; font-size: 14px; }
+  .row > .btn { flex: none; }
+  .history .logrow time { min-width: 118px; }
+  .logrow .dir.chk { color: var(--ok); }
+  .stripTitle { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
+
+  /* ---- select several (the gate) ---- */
+  /* In selecting mode every card grows a box at its left edge; a tap
+     toggles it; a bar at the bottom carries the action. Swiping is off. */
+  body.selecting button.card::before {
+    content: ""; flex: none; width: 22px; height: 22px; border-radius: 6px;
+    border: 2px solid var(--line-hover); background: var(--surface); margin-right: 2px;
+  }
+  body.selecting button.card.selected::before {
+    content: "✓"; display: inline-flex; align-items: center; justify-content: center;
+    background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700;
+  }
+  body.selecting button.card.selected { border-color: var(--accent); }
+  .multibar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+    max-width: 760px; margin: 0 auto; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface-raised); border-top: 1px solid var(--line-hover); box-shadow: 0 -10px 30px var(--shadow);
+  }
+  .multibar b { flex: 1; font-size: 14px; }
+  .multibar .btn.sm { padding: 10px 12px; font-size: 14px; white-space: nowrap; }
+
   /* ---- tips ---- */
   /* A "?" beside a label opens one sentence; a tile or a tab shows its
      sentence on a long press (and on hover, where there is a mouse). */

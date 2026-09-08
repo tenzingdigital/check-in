@@ -45,8 +45,18 @@ router.post('/gate-events', wrap(async (req, res) => {
 // timezone is the one the rest of the compliance model already uses
 // (site_today()), and a terminal with a mis-set timezone should not be able to
 // shift what "today's log" means.
+// GET /api/gate-events?date=YYYY-MM-DD            one day (the original form)
+// GET /api/gate-events?from=…&to=…&q=…             up to 31 days, filtered by
+//                                                  part of a name or a room
+// The centre managers asked for both: a search over a period of days, by
+// resident or by room. The room is the resident's room today, not the room
+// they had at the time; rooms are not versioned.
 router.get('/gate-events', wrap(async (req, res) => {
-  const date = dateParam(req.query.date, 'date');
+  const from = dateParam(req.query.from || req.query.date, 'from');
+  const to = dateParam(req.query.to || req.query.from || req.query.date, 'to');
+  if (to < from) throw new HttpError(400, 'to must not be before from');
+  if ((Date.parse(to) - Date.parse(from)) / 86400000 > 31) throw new HttpError(400, 'The log shows at most 31 days at a time; use a report for more');
+  const q = String(req.query.q || '').trim().slice(0, 80);
   const limit = intParam(req.query.limit, MAX_LOG_ROWS, MAX_LOG_ROWS);
 
   const rows = await db.withIdentity(req.session.userId, async (client) => {
@@ -54,13 +64,16 @@ router.get('/gate-events', wrap(async (req, res) => {
       `with s as (select local_timezone as tz from app_settings limit 1)
        select l.id, l.resident_id, l.kind, l.occurred_at,
               l.resident_name, l.guard_id, l.guard_name,
-              l.late_entry, l.recorded_at
-         from v_check_log l, s
+              l.late_entry, l.recorded_at, rm.room_label
+         from v_check_log l
+         cross join s
+         left join v_resident_room rm on rm.id = l.resident_id
         where l.occurred_at >= ($1::date)::timestamp at time zone s.tz
-          and l.occurred_at <  (($1::date) + 1)::timestamp at time zone s.tz
+          and l.occurred_at <  (($2::date) + 1)::timestamp at time zone s.tz
+          and ($3 = '' or l.resident_name ilike '%' || $3 || '%' or coalesce(rm.room_label, '') ilike '%' || $3 || '%')
         order by l.occurred_at desc
-        limit $2`,
-      [date, limit],
+        limit $4`,
+      [from, to, q, limit],
     );
     return log;
   });

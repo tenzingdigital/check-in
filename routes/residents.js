@@ -211,6 +211,40 @@ router.get('/:id/days', wrap(async (req, res) => {
   res.json(rows);
 }));
 
+// GET /api/residents/:id/history?from=&to= — every movement and check-in
+// for one resident over a range (default the last 30 days, at most a year),
+// newest first, with who recorded it. What the centre managers asked for:
+// "search a name and see all their history with the date and time". Any
+// staff member: the same rows the log and the register already show, seen
+// from the person's side.
+router.get('/:id/history', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const to = req.query.to ? dateParam(req.query.to, 'to') : null;
+  const from = req.query.from ? dateParam(req.query.from, 'from') : null;
+  if (from && to && to < from) throw new HttpError(400, 'to must not be before from');
+  if (from && to && (Date.parse(to) - Date.parse(from)) / 86400000 > 366) throw new HttpError(400, 'A history covers at most a year at a time');
+  const rows = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `with s as (select local_timezone as tz from app_settings where id),
+            b as (select coalesce($2::date, site_today() - 29) as d0, coalesce($3::date, site_today()) as d1)
+       select x.kind, x.occurred_at, x.recorded_at, x.late_entry, x.guard_name
+         from (
+           select e.kind, e.occurred_at, e.recorded_at, e.late_entry, g.full_name as guard_name
+             from gate_events e join profiles g on g.id = e.guard_id where e.resident_id = $1
+           union all
+           select 'checkin', c.occurred_at, c.recorded_at, c.late_entry, g.full_name
+             from checkin_events c join profiles g on g.id = c.guard_id where c.resident_id = $1
+         ) x, s, b
+        where x.occurred_at >= (b.d0::timestamp) at time zone s.tz
+          and x.occurred_at <  ((b.d1 + 1)::timestamp) at time zone s.tz
+        order by x.occurred_at desc
+        limit 2000`,
+      [id, from, to]);
+    return rows;
+  });
+  res.json(rows);
+}));
+
 // POST /api/residents — add a resident to the register.
 //
 // Authorisation is the residents_supervisor row policy: a guard's insert is

@@ -47,6 +47,8 @@ module.exports = [
   { area: 'Gate and register', name: "Open a resident's detail sheet (the ID number; logged)", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/compliance`, expect: STAFF },
   { area: 'Gate and register', name: 'The 30-day strip under the sheet', method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/days`, expect: STAFF },
   { area: 'Gate and register', name: "A resident's household members", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/household`, expect: STAFF },
+  { area: 'Gate and register', name: "A resident's history: every movement and check-in over a range", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/history`, expect: STAFF },
+  { area: 'Gate and register', name: 'The movement log over a range, filtered by name or room', method: 'GET', path: () => '/api/gate-events?from=2026-01-01&to=2026-01-07&q=a', expect: STAFF },
   { area: 'Gate and register', name: 'Who is on site now (summary)', method: 'GET', path: () => '/api/summary', expect: STAFF },
   { area: 'Gate and register', name: "The day's movement log", method: 'GET', path: () => '/api/gate-events', expect: STAFF },
   { area: 'Gate and register', name: 'Sign a resident in or out at the gate', method: 'POST', path: () => '/api/gate-events', body: (fx) => ({ resident_id: fx.residentId, direction: 'in' }), expect: STAFF },

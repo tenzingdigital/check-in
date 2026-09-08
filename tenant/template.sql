@@ -1077,6 +1077,25 @@ $$;
 
 --
 
+-- Name: purge_expired_overnight_absences(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_expired_overnight_absences() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_days integer; v_n integer;
+begin
+  select compliance_retention_days into v_days from __TENANT__.app_settings where id;
+  delete from __TENANT__.overnight_absences where night < __TENANT__.site_today() - v_days;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
 -- Name: purge_expired_roll_calls(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1592,6 +1611,43 @@ $$;
 
 --
 
+-- Name: snapshot_overnight_absences(date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.snapshot_overnight_absences(p_night date DEFAULT NULL::date) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_night date := coalesce(p_night, __TENANT__.site_today() - 1);
+  v_tz    text;
+  v_end   timestamptz;
+  v_n     integer;
+begin
+  select local_timezone into v_tz from __TENANT__.app_settings where id;
+  v_end := ((v_night + 1)::timestamp) at time zone v_tz;   -- midnight at the end of that night, site time
+  insert into __TENANT__.overnight_absences (night, resident_id, off_site_since)
+  select v_night, r.id, le.occurred_at
+    from __TENANT__.residents r
+    left join lateral (
+      select e.kind, e.occurred_at
+        from __TENANT__.gate_events e
+       where e.resident_id = r.id and e.occurred_at < v_end
+       order by e.occurred_at desc, e.id desc
+       limit 1
+    ) le on true
+   where r.registered_at < v_end
+     and (r.status = 'active' or (r.status = 'departed' and r.departed_on is not null and r.departed_on > v_night))
+     and (le.kind is null or le.kind = 'out')
+  on conflict do nothing;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
 -- Name: start_roll_call(uuid, text, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1775,6 +1831,19 @@ ALTER TABLE __TENANT__.job_runs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY
     NO MINVALUE
     NO MAXVALUE
     CACHE 1
+);
+
+
+--
+
+-- Name: overnight_absences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.overnight_absences (
+    night date NOT NULL,
+    resident_id uuid NOT NULL,
+    off_site_since timestamp with time zone,
+    snapshot_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2070,6 +2139,15 @@ ALTER TABLE ONLY __TENANT__.job_runs
 
 --
 
+-- Name: overnight_absences overnight_absences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.overnight_absences
+    ADD CONSTRAINT overnight_absences_pkey PRIMARY KEY (night, resident_id);
+
+
+--
+
 -- Name: profiles profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2273,6 +2351,14 @@ CREATE INDEX job_runs_job_idx ON __TENANT__.job_runs USING btree (job, ran_at DE
 
 --
 
+-- Name: overnight_absences_night_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX overnight_absences_night_idx ON __TENANT__.overnight_absences USING btree (night DESC);
+
+
+--
+
 -- Name: resident_views_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2468,6 +2554,15 @@ ALTER TABLE ONLY __TENANT__.gate_events
 
 ALTER TABLE ONLY __TENANT__.gate_events
     ADD CONSTRAINT gate_events_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: overnight_absences overnight_absences_resident_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.overnight_absences
+    ADD CONSTRAINT overnight_absences_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
 
 
 --
@@ -2773,6 +2868,21 @@ CREATE POLICY households_read ON __TENANT__.households FOR SELECT USING (__TENAN
 --
 
 CREATE POLICY households_supervisor ON __TENANT__.households USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
+
+
+--
+
+-- Name: overnight_absences; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.overnight_absences ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: overnight_absences overnight_absences_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY overnight_absences_read ON __TENANT__.overnight_absences FOR SELECT USING (__TENANT__.is_staff());
 
 
 --
@@ -3293,6 +3403,15 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_job_runs() TO service_role;
 
 --
 
+-- Name: FUNCTION purge_expired_overnight_absences(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_overnight_absences() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_overnight_absences() TO service_role;
+
+
+--
+
 -- Name: FUNCTION purge_expired_roll_calls(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -3436,6 +3555,15 @@ GRANT ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boole
 
 --
 
+-- Name: FUNCTION snapshot_overnight_absences(p_night date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.snapshot_overnight_absences(p_night date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.snapshot_overnight_absences(p_night date) TO service_role;
+
+
+--
+
 -- Name: FUNCTION start_roll_call(p_id uuid, p_kind text, p_started_at timestamp with time zone); Type: ACL; Schema: public; Owner: -
 --
 
@@ -3539,6 +3667,15 @@ GRANT ALL ON TABLE __TENANT__.households TO service_role;
 GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO anon;
 GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO authenticated;
 GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO service_role;
+
+
+--
+
+-- Name: TABLE overnight_absences; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.overnight_absences TO service_role;
+GRANT SELECT ON TABLE __TENANT__.overnight_absences TO authenticated;
 
 
 --

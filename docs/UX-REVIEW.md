@@ -414,3 +414,33 @@ the things that made the screens look heavier or busier than they are.
   the due hour and amber after it, and red only for a missed day.
 - The gate's blue and the register's green are the product's memory aid
   and stay exactly as they are.
+
+## The centre managers' feedback (8 September 2026)
+
+Six asks from the IPAS centre managers who tried the site, and what
+changed. The pattern in all of them: the door was built to answer "who is
+here now?", and the managers also want to answer "what happened?" after
+the fact, by person, by room and by night.
+
+- *"Off site since 14:20."* The card meta used to say "last seen 14:20",
+  which reads as a sighting rather than a movement. It now says *on site
+  since* or *off site since*, and adds the day once it is not today.
+- *A person's history.* A History panel under the detail sheet on all
+  three screens, opening on the last 30 days. It reuses the log row so the
+  eye already knows how to read it; check-ins get a third, neutral badge
+  so they are not mistaken for a movement.
+- *The Log over a period.* Two date fields and a name-or-room box replace
+  the single date. When the range is a single day the rows show the time
+  only; over several days they show the day as well. Capped at a month so
+  a phone never draws thousands of rows; a report covers the rest.
+- *Several at once.* A "Select several" link turns the cards into a tick
+  list with a fixed bar at the bottom: count, Sign IN, Sign OUT, Cancel.
+  Swiping is off while selecting so a tick cannot become a sign-out. Each
+  person still gets their own movement, so the log reads exactly as if
+  they had been done one by one.
+- *Absent lists.* Two reports rather than one: *Absent now* for the live
+  answer, *Absent overnight* for any night in the past, taken by the app
+  itself at the end of each day so nobody has to remember to run it.
+- *Date fields on a phone.* Three controls in a row of 390 pixels: the
+  date inputs would not shrink and pushed the button off the screen. They
+  now give way, with a smaller face and tighter padding on that row only.

@@ -34,6 +34,8 @@ validation.
 | Open a resident's detail sheet (the ID number; logged)<br><code>GET /api/residents/:id/compliance</code> | — | ✓ | ✓ | ✓ | ✓ |
 | The 30-day strip under the sheet<br><code>GET /api/residents/:id/days</code> | — | ✓ | ✓ | ✓ | ✓ |
 | A resident's household members<br><code>GET /api/residents/:id/household</code> | — | ✓ | ✓ | ✓ | ✓ |
+| A resident's history: every movement and check-in over a range<br><code>GET /api/residents/:id/history</code> | — | ✓ | ✓ | ✓ | ✓ |
+| The movement log over a range, filtered by name or room<br><code>GET /api/gate-events</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Who is on site now (summary)<br><code>GET /api/summary</code> | — | ✓ | ✓ | ✓ | ✓ |
 | The day's movement log<br><code>GET /api/gate-events</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Sign a resident in or out at the gate<br><code>POST /api/gate-events</code> | — | ✓ | ✓ | ✓ | ✓ |

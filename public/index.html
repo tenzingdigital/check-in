@@ -147,17 +147,25 @@
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
       <p class="jobline"><b class="gate">Door:</b><span>swipe right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
-      <p class="hint tight">Verify the person first. Tap a name for detail.</p>
+      <p class="hint tight">Verify the person first. Tap a name for detail. <button class="linkish" type="button" id="selectToggle">Select several</button></p>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
+      <div id="multiBar" class="multibar" hidden>
+        <b id="multiCount">0 selected</b>
+        <button class="btn primary-in sm" type="button" id="multiIn">Sign IN</button>
+        <button class="btn primary-out sm" type="button" id="multiOut">Sign OUT</button>
+        <button class="btn ghost sm" type="button" id="multiCancel">Cancel</button>
+      </div>
     </section>
 
     <!-- ---- log ---- -->
     <section id="panelLog" role="tabpanel" aria-labelledby="tabLog" hidden>
       <div class="row">
-        <input id="logDate" class="field grow" type="date">
+        <input id="logFrom" class="field grow" type="date" aria-label="From">
+        <input id="logTo" class="field grow" type="date" aria-label="To">
         <button class="btn ghost" id="logToday">Today</button>
       </div>
+      <input id="logQ" class="field mt8" type="search" placeholder="Name or room…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Filter by name or room">
       <p class="hint tight" id="logCount"></p>
       <div id="logList" class="list"></div>
     </section>
@@ -247,10 +255,10 @@ function todayISODate() {
 
 function residentCard(r, { clickable = true } = {}) {
   const tag = clickable ? "button" : "div";
-  const cls = ["card"].join(" ");
+  const cls = ["card", state.selecting && state.selectedIds.has(r.id) ? "selected" : ""].join(" ");
   const bits = [];
   if (r.room_label && state.settings?.feature_buildings) bits.push(esc(r.room_label));
-  bits.push(r.last_event_at ? `last movement ${ago(r.last_event_at)}` : "no movement on record");
+  bits.push(r.last_event_at ? `${r.presence === "in" ? "on site" : "off site"} ${sinceLabel(r.last_event_at)}` : "no movement on record");
 
   const card = `
     <${tag} class="${cls}" ${clickable ? `data-id="${esc(r.id)}" type="button"` : ""}>
@@ -310,19 +318,22 @@ function renderDetail(r) {
 
     <div class="facts">
       <div class="fact"><span>Status</span><b>${isIn ? "On site" : "Off site"}</b></div>
-      <div class="fact"><span>Last movement</span><b>${r.last_event_at ? esc(ago(r.last_event_at)) : "No movement on record"}</b></div>
+      <div class="fact"><span>${isIn ? "On site" : "Off site"}</span><b>${r.last_event_at ? esc(sinceLabel(r.last_event_at)) : "No movement on record"}</b></div>
     </div>
 
     <div class="actions">
       <button class="btn ${isIn ? "current" : "primary-in"}"  id="doIn"  type="button" title="${isIn ? "Already on site" : ""}">Sign IN</button>
       <button class="btn ${isIn ? "primary-out" : "current"}" id="doOut" type="button" title="${isIn ? "" : "Already off site"}">Sign OUT</button>
       <button class="btn ghost wide" id="closeDetail" type="button">Close</button>
-    </div>`;
+    </div>
+    <div id="detailHistory"></div>`;
   el.hidden = false;
 
   $("doIn").onclick  = () => record(r.id, "in");
   $("doOut").onclick = () => record(r.id, "out");
   $("closeDetail").onclick = () => { renderDetail(null); $("q").focus(); };
+  if (!renderDetail.historyFor || renderDetail.historyFor !== r.id || !el.querySelector(".hlist")) mountHistory($("detailHistory"), r.id);
+  renderDetail.historyFor = r.id;
 }
 
 function renderLog(rows) {
@@ -334,12 +345,13 @@ function renderLog(rows) {
     list.innerHTML = `<p class="empty">No movements recorded for this date.</p>`;
     return;
   }
+  const oneDay = $("logFrom").value === $("logTo").value;
   list.innerHTML = rows.map((e) => `
-    <div class="logrow">
-      <time datetime="${esc(e.occurred_at)}">${esc(timeOfDay(e.occurred_at))}</time>
+    <div class="logrow ${oneDay ? "" : "wide"}">
+      <time datetime="${esc(e.occurred_at)}">${esc(oneDay ? timeOfDay(e.occurred_at) : dayTime(e.occurred_at))}</time>
       <span class="dir ${e.kind === "in" ? "in" : "out"}">${e.kind === "in" ? "IN" : "OUT"}</span>
       <span class="body">
-        ${esc(e.resident_name)}
+        ${esc(e.resident_name)}${e.room_label && state.settings?.feature_buildings ? ` <span class="by">· ${esc(e.room_label)}</span>` : ""}
         <span class="by">by ${esc(e.guard_name)}${e.late_entry ? " · recorded offline, synced later" : ""}</span>
       </span>
     </div>`).join("");
@@ -529,9 +541,13 @@ async function record(residentId, direction, { fromSwipe = false } = {}) {
 // The day window is now computed server-side from app_settings.local_timezone
 // rather than from this terminal's clock, so a machine with a mis-set timezone
 // can no longer shift what "today's log" means. dayBounds() went with it.
-async function loadLog(dateStr) {
+async function loadLog() {
+  if (!$("logFrom").value) $("logFrom").value = todayISODate();
+  if (!$("logTo").value) $("logTo").value = $("logFrom").value;
+  if ($("logTo").value < $("logFrom").value) $("logTo").value = $("logFrom").value;
+  const q = $("logQ").value.trim();
   const rows = await guarded(
-    () => apiGet(`/api/gate-events?date=${encodeURIComponent(dateStr)}`),
+    () => apiGet(`/api/gate-events?from=${encodeURIComponent($("logFrom").value)}&to=${encodeURIComponent($("logTo").value)}&q=${encodeURIComponent(q)}`),
     (err) => showError("Could not load the log: " + err.message),
   );
   if (!rows) return;
@@ -550,7 +566,7 @@ function selectTab(name) {
     $("panel" + cap).hidden = t !== name;
   }
   if (name === "search") $("q").focus();
-  if (name === "log")    loadLog($("logDate").value || todayISODate());
+  if (name === "log")    loadLog();
   if (name === "roll")   { renderRoll(); syncRoll(); }
   if (name === "visitors") loadVisits();
 }
@@ -921,8 +937,8 @@ async function enterApp() {
 
   $("login").hidden = true;
   $("app").hidden = false;
-  $("logDate").value = todayISODate();
-  $("logDate").max = todayISODate();
+  $("logFrom").value = todayISODate(); $("logTo").value = todayISODate();
+  $("logFrom").max = todayISODate(); $("logTo").max = todayISODate();
 
   selectTab("search");
   refreshSummary();
@@ -1028,9 +1044,80 @@ document.addEventListener("click", (e) => {
   if (!card) return;
   const row = state.rows.get(card.dataset.id);
   if (!row) return;
+  if (state.selecting) {
+    // Selecting several: a tap chooses, the bar at the bottom acts.
+    if (state.selectedIds.has(row.id)) state.selectedIds.delete(row.id); else state.selectedIds.add(row.id);
+    card.classList.toggle("selected", state.selectedIds.has(row.id));
+    $("multiCount").textContent = `${state.selectedIds.size} selected`;
+    return;
+  }
   if (state.tab !== "search") selectTab("search");
   renderDetail(row);
 });
+
+/* ========================================================================
+   Select several — sign a group in or out in one go
+   ======================================================================
+   A bus back from an outing, a family arriving together: the centre
+   managers asked to select several residents and sign them all at once.
+   Each person still gets their own event with their own time and the
+   guard's name; the shortcut is on the screen, not in the record. */
+state.selecting = false;
+state.selectedIds = new Set();
+
+function setSelecting(on) {
+  state.selecting = on;
+  if (!on) state.selectedIds.clear();
+  document.body.classList.toggle("selecting", on);
+  $("multiBar").hidden = !on;
+  $("multiCount").textContent = "0 selected";
+  $("selectToggle").textContent = on ? "Stop selecting" : "Select several";
+  if (on) renderDetail(null);
+  renderSearch();
+}
+
+async function recordMany(direction) {
+  const ids = [...state.selectedIds];
+  if (!ids.length) { toast("Tap the residents first", "err"); return; }
+  if (state.busy) return;
+  state.busy = true;
+  $("multiIn").disabled = true; $("multiOut").disabled = true;
+  let done = 0, queued = 0; const failed = [];
+  for (const id of ids) {
+    const r = state.rows.get(id);
+    if (Offline.isOnline()) {
+      try {
+        const row = await apiPost("/api/gate-events", { resident_id: id, direction });
+        if (r) Object.assign(r, row);
+        done += 1;
+        continue;
+      } catch (err) {
+        if (err.status === 401) { onUnauthenticated(); break; }
+        if (!Offline.isOutage(err)) { failed.push(`${r ? r.full_name : id}: ${err.message}`); continue; }
+      }
+    }
+    try {
+      await Offline.enqueue({ kind: "gate", resident_id: id, resident_name: r ? r.full_name : "", direction, guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "" });
+      queued += 1;
+    } catch (err) { failed.push(`${r ? r.full_name : id}: ${err.message}`); }
+  }
+  state.busy = false;
+  $("multiIn").disabled = false; $("multiOut").disabled = false;
+  const parts = [];
+  if (done) parts.push(`${done} signed ${direction.toUpperCase()}`);
+  if (queued) parts.push(`${queued} queued until the connection returns`);
+  if (failed.length) toast(`${parts.join(", ")}${parts.length ? ". " : ""}Not recorded: ${failed.join("; ")}`, "err");
+  else toast(parts.join(", "), "ok");
+  setSelecting(false);
+  Offline.renderNet();
+  refreshSummary();
+  runSearch($("q").value);
+}
+
+$("selectToggle").addEventListener("click", () => setSelecting(!state.selecting));
+$("multiCancel").addEventListener("click", () => setSelecting(false));
+$("multiIn").addEventListener("click", () => recordMany("in"));
+$("multiOut").addEventListener("click", () => recordMany("out"));
 
 // A tile pressed once filters; pressed again it shows everyone.
 document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
@@ -1057,10 +1144,13 @@ $("rollBody").addEventListener("click", (e) => {
   if (e.target.closest("#rollEnd")) return endRoll();
   if (e.target.closest("#rollNeed")) { state.rollNeedOnly = !state.rollNeedOnly; return renderRoll(); }
 });
-$("logDate").addEventListener("change", (e) => loadLog(e.target.value || todayISODate()));
+$("logFrom").addEventListener("change", loadLog);
+$("logTo").addEventListener("change", loadLog);
+let logQTimer = null;
+$("logQ").addEventListener("input", () => { clearTimeout(logQTimer); logQTimer = setTimeout(loadLog, 250); });
 $("logToday").addEventListener("click", () => {
-  $("logDate").value = todayISODate();
-  loadLog(todayISODate());
+  $("logFrom").value = todayISODate(); $("logTo").value = todayISODate(); $("logQ").value = "";
+  loadLog();
 });
 
 // Periodic refresh so a terminal left open overnight does not show a stale
