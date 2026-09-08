@@ -244,6 +244,11 @@ branch.** Against the notes:
   approved by construction (a supervisor recorded it); an unrecorded
   absence is unapproved. The weekly IPAS report will read both.
 
+Added 8 September (migration 030): **the site staff list**. Supervisors
+paste the centre's own staff in under Admin → Staff; on the Visitors tab,
+under Staff, each name is one tap to sign in with the job title filled;
+the visit points back at the list entry, and the roll call names them.
+
 Still to do from the call, in the order the centre ranked them:
 rename Door to In & out (done 8 September, at the centre's request); archive rooms rather than delete, with contracted
 capacity and bed configuration; the weekly IPAS report from their template

@@ -154,7 +154,14 @@ async function launch() {
     await sup.goto(BASE + "/admin.html");
     await sup.waitForSelector("#panelResidents:not([hidden])");
     await sup.waitForFunction(() => document.querySelectorAll("#residentList button.card").length > 0);
-    assert.equal(await sup.locator("#tabStaff").isHidden(), true, "Staff must be hidden from a supervisor");
+    // The Staff tab shows a supervisor the site staff list (migration 030);
+    // the accounts and roles section on it stays admin-only.
+    assert.equal(await sup.locator("#tabStaff").isHidden(), false, "the Staff tab (site staff list) should show for a supervisor");
+    await sup.click("#tabStaff");
+    await sup.waitForSelector("#rosterList");
+    assert.equal(await sup.locator("#accountsOnly").isHidden(), true, "staff accounts must be hidden from a supervisor");
+    await sup.click("#tabResidents");
+    await sup.waitForSelector("#panelResidents:not([hidden])");
     await sup.click("#showAdd");
     await sup.fill("#afFirst", "Zelda");
     await sup.fill("#afLast", "Testperson");

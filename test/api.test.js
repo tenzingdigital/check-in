@@ -1900,6 +1900,47 @@ async function main() {
     assert.equal(setting.rows[0].holiday_max_days, 14);
   });
 
+  console.log("\n== the site staff list (migration 030) ==");
+
+  await test("a supervisor keeps the staff list; a guard signs a listed person in with one tap", async () => {
+    const asGuard = await api.fetch("/api/roster", { method: "POST", body: { name: "Mary Byrne", role: "Kitchen" } });
+    assert.equal(asGuard.status, 403);
+    const made = await supC.fetch("/api/roster", { method: "POST", body: { name: " Mary Byrne ", role: "Kitchen" } });
+    assert.equal(made.status, 201, made.text);
+    assert.equal(made.json.name, "Mary Byrne"); assert.equal(made.json.role, "Kitchen"); assert.equal(made.json.visit_id, null);
+    const dup = await supC.fetch("/api/roster", { method: "POST", body: { name: "mary byrne" } });
+    assert.equal(dup.status, 409, dup.text);
+    const imp = await supC.fetch("/api/roster/import", { method: "POST", body: { rows: [{ name: "Tom Walsh", role: "Maintenance" }, { name: "Mary Byrne" }, { name: "Ana Costa" }] } });
+    assert.equal(imp.status, 201, imp.text);
+    assert.deepEqual(imp.json, { added: 2, skipped: 1 });
+    const list = await api.fetch("/api/roster");
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.json.map((r) => r.name), ["Ana Costa", "Mary Byrne", "Tom Walsh"]);
+
+    const signedIn = await api.fetch("/api/visits", { method: "POST", body: { roster_id: made.json.id } });
+    assert.equal(signedIn.status, 201, signedIn.text);
+    assert.equal(signedIn.json.kind, "staff"); assert.equal(signedIn.json.name, "Mary Byrne"); assert.equal(signedIn.json.company, "Kitchen");
+    assert.equal(signedIn.json.roster_id, made.json.id);
+    const twice = await api.fetch("/api/visits", { method: "POST", body: { roster_id: made.json.id } });
+    assert.equal(twice.status, 409, "signing the same listed person in twice should be refused");
+    const onSite = (await api.fetch("/api/roster")).json.find((r) => r.id === made.json.id);
+    assert.equal(onSite.visit_id, signedIn.json.id);
+    const out = await api.fetch(`/api/visits/${signedIn.json.id}/leave`, { method: "POST", body: {} });
+    assert.equal(out.status, 200, out.text);
+    assert.equal((await api.fetch("/api/roster")).json.find((r) => r.id === made.json.id).visit_id, null);
+
+    const guardEdit = await api.fetch(`/api/roster/${made.json.id}`, { method: "PATCH", body: { active: false } });
+    assert.equal(guardEdit.status, 403);
+    const archived = await supC.fetch(`/api/roster/${made.json.id}`, { method: "PATCH", body: { active: false } });
+    assert.equal(archived.status, 200, archived.text); assert.equal(archived.json.active, false);
+    assert.ok(!(await api.fetch("/api/roster")).json.some((r) => r.id === made.json.id), "an archived person should leave the default list");
+    assert.ok((await api.fetch("/api/roster?all=1")).json.some((r) => r.id === made.json.id), "and stay on the full list");
+    const gone = await api.fetch("/api/visits", { method: "POST", body: { roster_id: made.json.id } });
+    assert.equal(gone.status, 404, "an archived person cannot be signed in from the list");
+    const unknown = await supC.fetch(`/api/roster/00000000-0000-0000-0000-000000000000`, { method: "PATCH", body: { role: "x" } });
+    assert.equal(unknown.status, 404);
+  });
+
   console.log("\n== who viewed which record (migration 023) ==");
 
   let viewedId;
@@ -2400,6 +2441,11 @@ async function main() {
         assert.equal(v.status, 201, v.text);
         fx.visitId = v.json.id;
       },
+      roster: async () => {
+        const r = await supM.fetch("/api/roster", { method: "POST", body: { name: `Matrix Staff ${Math.floor(Math.random() * 1e6)}`, role: "Kitchen" } });
+        assert.equal(r.status, 201, r.text);
+        fx.rosterId = r.json.id;
+      },
       absence: async () => {
         await makers.resident();
         const d = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
@@ -2414,7 +2460,7 @@ async function main() {
         fx.tenantId = t.json.id; fx.tenantSlug = `centre-${n}`;
       },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "absence", "tenant"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "absence", "roster", "tenant"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 

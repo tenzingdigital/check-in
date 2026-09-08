@@ -134,6 +134,7 @@ app.use('/api/residents', require('./routes/residents'));
 app.use('/api', require('./routes/buildings'));
 app.use('/api', require('./routes/rollcall'));
 app.use('/api', require('./routes/visits'));
+app.use('/api', require('./routes/roster'));
 app.use('/api', require('./routes/reports'));
 app.use('/api', require('./routes/tenants'));
 app.use('/api/staff', require('./routes/staff'));

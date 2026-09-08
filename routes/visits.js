@@ -19,7 +19,7 @@ const router = express.Router();
 const KINDS = ['staff', 'visitor', 'contractor', 'supplier'];
 
 const SELECT = `
-  select v.id, v.kind, v.name, v.company, v.arrived_at, v.left_at,
+  select v.id, v.kind, v.name, v.company, v.arrived_at, v.left_at, v.roster_id,
          a.full_name as arrived_by_name, l.full_name as left_by_name
     from visits v
     left join profiles a on a.id = v.arrived_by
@@ -48,6 +48,20 @@ router.get('/visits', wrap(async (req, res) => {
 
 router.post('/visits', wrap(async (req, res) => {
   const body = req.body || {};
+  // A listed staff member (migration 030): the name and role come from the list.
+  if (body.roster_id) {
+    const rosterId = uuidParam(body.roster_id, 'roster_id');
+    const row = await db.withIdentity(req.session.userId, async (client) => {
+      const { rows } = await client.query('select * from record_staff_arrival($1)', [rosterId]);
+      const { rows: full } = await client.query(`${SELECT} where v.id = $1`, [rows[0].id]);
+      return full[0];
+    }).catch((err) => {
+      if (err && err.code === 'P0002') throw new HttpError(404, 'Not on the staff list');
+      if (err && err.code === '23505') throw new HttpError(409, 'Already signed in');
+      throw err;
+    });
+    return res.status(201).json(row);
+  }
   const kind = String(body.kind || '').trim().toLowerCase();
   if (!KINDS.includes(kind)) throw new HttpError(400, `Who is this? Choose ${KINDS.join(', ')}`);
   const name = String(body.name || '').trim();

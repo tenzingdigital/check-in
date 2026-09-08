@@ -257,4 +257,27 @@ select pg_temp.try('anon reads room history',               'select * from publi
 reset role;
 
 \echo ''
+\echo '=========== M. THE SITE STAFF LIST (migration 030) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+\echo '--- a supervisor adds to the list'
+insert into public.staff_roster (name, role) values ('Mary Byrne', 'Kitchen');
+select id as mary_id from public.staff_roster where name = 'Mary Byrne' \gset
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+\echo '--- a guard reads it and signs a listed person in, but cannot change the list'
+select count(*) as guard_sees from public.staff_roster;
+select kind, name, company, roster_id is not null as from_list from public.record_staff_arrival(:'mary_id');
+select pg_temp.try('guard signs the same listed person in twice', format('select public.record_staff_arrival(%L)', :'mary_id'));
+select pg_temp.try('guard adds to the staff list',            'insert into public.staff_roster (name) values (''Direct'')');
+select pg_temp.try('guard archives a listed person',          format('update public.staff_roster set active = false where id = %L', :'mary_id'));
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon reads the staff list',               'select * from public.staff_roster');
+reset role;
+
+\echo ''
 \echo '=========== DONE ==========='

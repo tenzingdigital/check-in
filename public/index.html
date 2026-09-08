@@ -181,6 +181,7 @@
           <button type="button" data-kind="supplier"   aria-pressed="false">Supplier</button>
           <button type="button" data-kind="staff"      aria-pressed="false">Staff</button>
         </div>
+        <div id="rosterChips" class="roster" hidden></div>
         <input id="vfName" class="field" type="text" placeholder="Name" maxlength="80" autocapitalize="words" required>
         <input id="vfCompany" class="field" type="text" placeholder="Company or reason (optional)" maxlength="80">
         <button class="btn primary-in" type="submit" id="vfSave">Sign in</button>
@@ -809,6 +810,7 @@ async function loadVisits() {
   showError("");
   state.visits = rows;
   renderVisits();
+  loadRoster();
 }
 
 function renderVisits() {
@@ -830,9 +832,39 @@ function renderVisits() {
     + (!rows.length ? '<p class="empty">Nobody signed in today.</p>' : "");
 }
 
+// The site's staff list (migration 030): under Staff, one tap per person.
+async function loadRoster() {
+  if (!Offline.isOnline()) { state.roster = []; renderRoster(); return; }
+  const rows = await guarded(() => apiGet("/api/roster"), () => {});
+  state.roster = rows || [];
+  renderRoster();
+}
+function renderRoster() {
+  const box = $("rosterChips");
+  const isStaff = (state.visitKind || "visitor") === "staff";
+  const rows = (state.roster || []).filter((r) => !r.visit_id);
+  box.hidden = !isStaff || !(state.roster || []).length;
+  if (box.hidden) return;
+  box.innerHTML = `<p class="hint flush">On the staff list · tap to sign in${rows.length ? "" : " · everyone listed is on site"}</p>
+    <div class="chips">${rows.map((r) => `<button type="button" data-roster="${esc(r.id)}" aria-label="Sign in ${esc(r.name)}">${esc(r.name)}${r.role ? `<small> · ${esc(r.role)}</small>` : ""}</button>`).join("")}</div>
+    <p class="hint tight">Not listed? Type the name below.</p>`;
+}
+$("rosterChips").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-roster]");
+  if (!b) return;
+  if (!Offline.isOnline()) { toast("Signing staff in needs a connection.", "err"); return; }
+  b.disabled = true;
+  const out = await guarded(() => apiPost("/api/visits", { roster_id: b.dataset.roster }), (err) => { b.disabled = false; toast("Not signed in: " + err.message, "err"); });
+  if (!out) return;
+  toast(`${out.name} signed in`, "ok");
+  state.visits = [out, ...(state.visits || [])];
+  state.roster = (state.roster || []).map((r) => (r.id === out.roster_id ? { ...r, visit_id: out.id } : r));
+  renderVisits(); renderRoster();
+});
 $("visitForm").querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
   state.visitKind = b.dataset.kind;
   $("visitForm").querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderRoster();
 }));
 $("visitForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -856,7 +888,8 @@ $("visitList").addEventListener("click", async (e) => {
   if (!out) { b.disabled = false; return; }
   toast(`${out.name} signed out`, "ok");
   state.visits = (state.visits || []).map((v) => (v.id === out.id ? out : v));
-  renderVisits();
+  if (out.roster_id) state.roster = (state.roster || []).map((r) => (r.id === out.roster_id ? { ...r, visit_id: null } : r));
+  renderVisits(); renderRoster();
 });
 
 async function endRoll() {

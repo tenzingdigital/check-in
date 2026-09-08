@@ -403,6 +403,11 @@ out of the two working apps:
   name, and a letter alone lists the block, online and offline. Ticking one
   member of a family in *Select several* ticks the family, and *All* ticks
   everyone the search found.
+- **Site staff list** (migration 030): the centre's own staff who do not
+  use the app, name and job title, kept by supervisors under Admin →
+  Staff (pasted in, one per line). On the Visitors tab, under Staff, each
+  name is one tap to sign in; the visit points back at the list entry.
+  Archived rather than deleted.
 - **Breach reports** (migration 029): that a report was issued to IPAS,
   which kind (house rules, or misuse of the verification tablet), on what
   day, by whom, with its reference. On the edit sheet, on the Absences tab

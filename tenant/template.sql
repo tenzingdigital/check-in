@@ -1733,11 +1733,37 @@ CREATE TABLE __TENANT__.visits (
     arrived_by uuid,
     left_at timestamp with time zone,
     left_by uuid,
+    roster_id uuid,
     CONSTRAINT visits_company_check CHECK (((company IS NULL) OR (length(company) <= 80))),
     CONSTRAINT visits_kind_check CHECK ((kind = ANY (ARRAY['staff'::text, 'visitor'::text, 'contractor'::text, 'supplier'::text]))),
     CONSTRAINT visits_left_after_arrival CHECK (((left_at IS NULL) OR (left_at >= arrived_at))),
     CONSTRAINT visits_name_check CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80)))
 );
+
+
+--
+
+-- Name: record_staff_arrival(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.record_staff_arrival(p_roster_id uuid) RETURNS __TENANT__.visits
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare r __TENANT__.staff_roster; v __TENANT__.visits;
+begin
+  if not __TENANT__.is_staff() then raise exception 'Not authorised to sign a staff member in' using errcode = '42501'; end if;
+  select * into r from __TENANT__.staff_roster where id = p_roster_id and active;
+  if not found then raise exception 'Not on the staff list' using errcode = 'P0002'; end if;
+  if exists (select 1 from __TENANT__.visits where roster_id = p_roster_id and left_at is null) then
+    raise exception 'Already signed in' using errcode = '23505';
+  end if;
+  insert into __TENANT__.visits (kind, name, company, arrived_by, roster_id)
+  values ('staff', btrim(r.name), r.role, auth.uid(), r.id)
+  returning * into v;
+  return v;
+end;
+$$;
 
 
 --
@@ -2297,6 +2323,23 @@ CREATE TABLE __TENANT__.rooms (
 
 --
 
+-- Name: staff_roster; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.staff_roster (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    role text,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by uuid,
+    CONSTRAINT staff_roster_name_check CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80))),
+    CONSTRAINT staff_roster_role_check CHECK (((role IS NULL) OR (length(role) <= 80)))
+);
+
+
+--
+
 -- Name: v_check_log; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -2673,6 +2716,15 @@ ALTER TABLE ONLY __TENANT__.rooms
 
 --
 
+-- Name: staff_roster staff_roster_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.staff_roster
+    ADD CONSTRAINT staff_roster_pkey PRIMARY KEY (id);
+
+
+--
+
 -- Name: visits visits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2898,6 +2950,14 @@ CREATE INDEX rooms_building_idx ON __TENANT__.rooms USING btree (building_id, so
 
 --
 
+-- Name: staff_roster_name_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX staff_roster_name_idx ON __TENANT__.staff_roster USING btree (lower(btrim(name)));
+
+
+--
+
 -- Name: visits_arrived_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2910,6 +2970,14 @@ CREATE INDEX visits_arrived_idx ON __TENANT__.visits USING btree (arrived_at DES
 --
 
 CREATE INDEX visits_on_site_idx ON __TENANT__.visits USING btree (arrived_at DESC) WHERE (left_at IS NULL);
+
+
+--
+
+-- Name: visits_roster_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX visits_roster_open_idx ON __TENANT__.visits USING btree (roster_id) WHERE (left_at IS NULL);
 
 
 --
@@ -2990,6 +3058,14 @@ CREATE TRIGGER residents_touch_updated_at BEFORE UPDATE ON __TENANT__.residents 
 --
 
 CREATE TRIGGER rooms_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.rooms FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: staff_roster staff_roster_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER staff_roster_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.staff_roster FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
 
 
 --
@@ -3264,6 +3340,15 @@ ALTER TABLE ONLY __TENANT__.rooms
 
 --
 
+-- Name: staff_roster staff_roster_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.staff_roster
+    ADD CONSTRAINT staff_roster_created_by_fkey FOREIGN KEY (created_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
 -- Name: visits visits_arrived_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3278,6 +3363,15 @@ ALTER TABLE ONLY __TENANT__.visits
 
 ALTER TABLE ONLY __TENANT__.visits
     ADD CONSTRAINT visits_left_by_fkey FOREIGN KEY (left_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: visits visits_roster_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.visits
+    ADD CONSTRAINT visits_roster_id_fkey FOREIGN KEY (roster_id) REFERENCES __TENANT__.staff_roster(id) ON DELETE SET NULL;
 
 
 --
@@ -3619,6 +3713,29 @@ CREATE POLICY rooms_read ON __TENANT__.rooms FOR SELECT USING (__TENANT__.is_sta
 --
 
 CREATE POLICY rooms_supervisor ON __TENANT__.rooms USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
+
+
+--
+
+-- Name: staff_roster; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.staff_roster ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: staff_roster staff_roster_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY staff_roster_read ON __TENANT__.staff_roster FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: staff_roster staff_roster_supervisor; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY staff_roster_supervisor ON __TENANT__.staff_roster USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
 
 
 --
@@ -4198,6 +4315,16 @@ GRANT SELECT ON TABLE __TENANT__.visits TO authenticated;
 
 --
 
+-- Name: FUNCTION record_staff_arrival(p_roster_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_staff_arrival(p_roster_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_staff_arrival(p_roster_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_staff_arrival(p_roster_id uuid) TO service_role;
+
+
+--
+
 -- Name: FUNCTION record_visit_arrival(p_kind text, p_name text, p_company text); Type: ACL; Schema: public; Owner: -
 --
 
@@ -4454,6 +4581,15 @@ GRANT ALL ON SEQUENCE __TENANT__.room_assignments_id_seq TO service_role;
 
 GRANT ALL ON TABLE __TENANT__.rooms TO authenticated;
 GRANT ALL ON TABLE __TENANT__.rooms TO service_role;
+
+
+--
+
+-- Name: TABLE staff_roster; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.staff_roster TO authenticated;
+GRANT ALL ON TABLE __TENANT__.staff_roster TO service_role;
 
 
 --

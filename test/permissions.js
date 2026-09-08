@@ -75,6 +75,10 @@ module.exports = [
   { area: 'Visitors', name: "Today's visitors, staff and contractors, and who is still on site", method: 'GET', path: () => '/api/visits', expect: STAFF },
   { area: 'Visitors', name: 'Sign a visitor, contractor, supplier or staff member in', method: 'POST', path: () => '/api/visits', body: () => ({ kind: 'contractor', name: 'Matrix Electrician', company: 'Sparks Ltd' }), expect: STAFF },
   { area: 'Visitors', name: 'Sign them out', method: 'POST', path: (fx) => `/api/visits/${fx.visitId}/leave`, body: () => ({}), expect: STAFF, fresh: 'visit' },
+  { area: 'Visitors', name: 'The site staff list', method: 'GET', path: () => '/api/roster', expect: STAFF },
+  { area: 'Visitors', name: 'Sign a listed staff member in with one tap', method: 'POST', path: () => '/api/visits', body: (fx) => ({ roster_id: fx.rosterId }), expect: STAFF, fresh: 'roster' },
+  { area: 'Visitors', name: 'Add to the staff list (one, or a pasted list)', method: 'POST', path: () => '/api/roster', body: () => ({ name: `Matrix Cook ${crypto.randomInt(1e6)}`, role: 'Kitchen' }), expect: SUPERVISOR },
+  { area: 'Visitors', name: 'Rename, retitle or archive a listed staff member', method: 'PATCH', path: (fx) => `/api/roster/${fx.rosterId}`, body: () => ({ role: 'Kitchen' }), expect: SUPERVISOR },
 
   // ---- residents and buildings (supervisors and admins) --------------------
   { area: 'Residents and buildings', name: 'Add a resident', method: 'POST', path: () => '/api/residents', body: () => ({ first_name: 'Matrix', last_name: `Row${crypto.randomInt(1e6)}`, date_of_birth: dob }), expect: SUPERVISOR },

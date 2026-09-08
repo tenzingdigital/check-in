@@ -328,6 +328,14 @@
     <!-- ---- staff (admins only; the database refuses every operation below
          for a non-admin regardless of what is visible) ---- -->
     <section id="panelStaff" role="tabpanel" aria-labelledby="tabStaff" hidden>
+      <div class="formcard" id="rosterCard">
+        <h2>Site staff list <button class="tip" type="button" data-tip="The centre's own staff: kitchen, cleaning, maintenance, anyone who is on site but does not use this app. On the Visitors tab, under Staff, each name is one tap to sign in, and the roll call names them. A name and a job title, nothing more." aria-label="About the staff list">?</button></h2>
+        <p class="hint flush">One per line, the job title after a comma: <span class="mono">Mary Byrne, Kitchen</span>. People already listed are skipped.</p>
+        <textarea id="rosterText" class="field mt8" rows="4" placeholder="Mary Byrne, Kitchen&#10;Tom Walsh, Maintenance"></textarea>
+        <div class="actions"><button class="btn sm" type="button" id="rosterAdd">Add to the list</button><label class="check"><input id="rosterShowAll" type="checkbox"> <span>Show archived</span></label></div>
+        <div id="rosterList" class="hint flush mt8">Loading…</div>
+      </div>
+      <div id="accountsOnly">
       <form id="staffForm" class="formcard" autocomplete="off">
         <h2>Add a staff account</h2>
         <div class="grid2">
@@ -354,6 +362,7 @@
       </form>
       <div id="linkNotice" class="alert warn" hidden></div>
       <div id="staffList" class="list"></div>
+      </div>
     </section>
 
     <!-- ---- settings (admins only; app_settings_write is the admin policy) ---- -->
@@ -1142,6 +1151,42 @@ function staffCard(s) {
     </div>`;
 }
 
+/* ---- the site staff list (migration 030) ---- */
+async function loadRoster() {
+  const all = $("rosterShowAll").checked;
+  const rows = await guarded(() => apiGet(`/api/roster${all ? "?all=1" : ""}`), (err) => showError("Could not load the staff list: " + err.message));
+  if (!rows) return;
+  const box = $("rosterList");
+  if (!rows.length) { box.innerHTML = "Nobody on the list yet."; return; }
+  box.innerHTML = `<div class="abslist">${rows.map((r) => `<div class="logrow wide ${r.active ? "" : "gone"}">
+      <span class="body"><b>${esc(r.name)}</b>${r.role ? ` · ${esc(r.role)}` : ""}${r.visit_id ? ' <span class="pill in">On site</span>' : ""}${r.active ? "" : ' <span class="pill departed">Archived</span>'}
+        <span class="by"><button class="linkish" type="button" data-roster-toggle="${esc(r.id)}" data-active="${r.active ? "1" : "0"}">${r.active ? "Archive" : "Restore"}</button></span></span>
+    </div>`).join("")}</div>`;
+}
+$("rosterAdd").addEventListener("click", async () => {
+  const rows = $("rosterText").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [name, ...rest] = l.split(",");
+    return { name: name.trim(), role: rest.join(",").trim() };
+  });
+  if (!rows.length) return toast("Type at least one name", "err");
+  $("rosterAdd").disabled = true;
+  const out = await guarded(() => apiPost("/api/roster/import", { rows }), (err) => toast("Not added: " + err.message, "err"));
+  $("rosterAdd").disabled = false;
+  if (!out) return;
+  toast(`${out.added} added${out.skipped ? `, ${out.skipped} already listed` : ""}`, "ok");
+  $("rosterText").value = "";
+  loadRoster();
+});
+$("rosterShowAll").addEventListener("change", loadRoster);
+$("rosterList").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-roster-toggle]");
+  if (!b) return;
+  const out = await guarded(() => apiPatch(`/api/roster/${b.dataset.rosterToggle}`, { active: b.dataset.active !== "1" }), (err) => toast("Not changed: " + err.message, "err"));
+  if (!out) return;
+  toast(out.active ? "Back on the list" : "Archived", "ok");
+  loadRoster();
+});
+
 async function loadStaff() {
   const rows = await guarded(
     () => apiGet("/api/staff"),
@@ -1503,7 +1548,7 @@ function selectTab(name) {
   if (name === "absences") loadAbsences();
   if (name === "buildings") loadBuildings();
   if (name === "reports") loadReports();
-  if (name === "staff") loadStaff();
+  if (name === "staff") { loadRoster(); if (canStaff()) loadStaff(); }
   if (name === "settings") loadSettings();
 }
 
@@ -1540,7 +1585,8 @@ async function enterApp() {
   }
   $("notForYou").hidden = true;
   $("adminTabs").hidden = false;
-  $("tabStaff").hidden = !canStaff();
+  $("tabStaff").hidden = false;                 // the site staff list is for supervisors too
+  $("accountsOnly").hidden = !canStaff();       // accounts and roles stay admin-only
   $("tabSettings").hidden = !canStaff();
   $("orgLink").hidden = !profile.platform_admin;
   mountTips();

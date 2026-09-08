@@ -68,6 +68,10 @@ validation.
 | Today's visitors, staff and contractors, and who is still on site<br><code>GET /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Sign a visitor, contractor, supplier or staff member in<br><code>POST /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Sign them out<br><code>POST /api/visits/undefined/leave</code> | — | ✓ | ✓ | ✓ | ✓ |
+| The site staff list<br><code>GET /api/roster</code> | — | ✓ | ✓ | ✓ | ✓ |
+| Sign a listed staff member in with one tap<br><code>POST /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
+| Add to the staff list (one, or a pasted list)<br><code>POST /api/roster</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Rename, retitle or archive a listed staff member<br><code>PATCH /api/roster/undefined</code> | — | ✗ | ✓ | ✓ | ✓ |
 
 ## Residents and buildings
 
