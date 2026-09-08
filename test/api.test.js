@@ -1367,7 +1367,7 @@ async function main() {
     assert.equal(m2.status, 200, "a second mark is a no-op, not an error");
     const again = await api.fetch("/api/roll-calls/active");
     assert.equal(again.json.marks.length, 1);
-    const end = await api.fetch(`/api/roll-calls/${rcId}/end`, { method: "POST", body: {} });
+    const end = await api.fetch(`/api/roll-calls/${rcId}/end`, { method: "POST", body: { note: "  Alarm at 10:02, all clear 10:09. Back door alarm not heard in K block.  " } });
     assert.equal(end.status, 200);
     assert.ok(end.json.ended_at);
     assert.equal((await api.fetch("/api/roll-calls/active")).json, null);
@@ -1565,6 +1565,7 @@ async function main() {
     const evac = await supC.fetch(`/api/reports/evacuation?reason=inspection&format=json`);
     assert.ok(evac.json.rows.some((r) => /Newcomer/.test(r.resident)));
     const drills = await supC.fetch(`/api/reports/roll-calls?from=${from}&to=${today}&reason=inspection&format=json`);
+    assert.ok(drills.json.rows.some((r) => /Back door alarm not heard/.test(r.note || "")), "the note written at End should be on the drills report");
     assert.ok(drills.json.rows.length >= 1, "the drill recorded earlier is missing");
     const { rows } = await withOwner((c) => c.query(`select row_id, note from public.admin_audit where table_name = 'reports' order by at`));
     assert.ok(rows.length >= 5, "report exports were not logged");

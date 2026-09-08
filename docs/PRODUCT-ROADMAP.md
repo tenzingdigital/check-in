@@ -257,7 +257,8 @@ capacity and bed configuration (done 8 September, migration 031); the weekly IPA
 "Practice drill" and "Real evacuation" wording; a default view per tablet
 (`?view=` or the tick on the chooser); bulk depart; the nightly House
 Rules reminder by email (migration 032, a switch in Settings); the help
-site pinned to the light palette. Still to confirm with the centre: the
+site pinned to the light palette; a note for the record when a drill or
+evacuation ends (migration 033). Still to confirm with the centre: the
 "not seen after N hours" figure, and whether 90 days is long enough for
 the movement log.
 

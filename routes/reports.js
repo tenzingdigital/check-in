@@ -109,7 +109,8 @@ const REPORTS = {
                  rc.kind, p.full_name as started_by,
                  to_char(rc.ended_at at time zone s.local_timezone, 'HH24:MI') as ended,
                  (select count(*)::int from roll_call_marks m where m.roll_call_id = rc.id) as accounted_for,
-                 round(extract(epoch from (rc.ended_at - rc.started_at)) / 60)::int as minutes
+                 round(extract(epoch from (rc.ended_at - rc.started_at)) / 60)::int as minutes,
+                 rc.note
             from roll_calls rc
             left join profiles p on p.id = rc.started_by
             cross join (select local_timezone from app_settings where id) s

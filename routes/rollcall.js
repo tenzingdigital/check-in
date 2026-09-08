@@ -107,7 +107,8 @@ router.post('/roll-calls/:id/end', wrap(async (req, res) => {
   const body = req.body || {};
   const id = uuidParam(req.params.id, 'roll call id');
   const row = await db.withIdentity(req.session.userId, async (client) => {
-    await client.query(`select end_roll_call($1, $2)`, [id, when(body.at)]);
+    const note = body.note == null ? null : String(body.note).trim().slice(0, 200);
+    await client.query(`select end_roll_call($1, $2, $3)`, [id, when(body.at), note || null]);
     return rollCallWithMarks(client, id);
   });
   res.json(row);

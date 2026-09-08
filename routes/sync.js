@@ -58,7 +58,9 @@ function parseItem(raw) {
       residentId = String(item.resident_id || '');
       if (!UUID_RE.test(residentId)) throw new HttpError(400, 'resident_id must be a uuid');
     }
-    return { ref, kind, rollCallId, rcKind, residentId, occurredAt: at.toISOString() };
+    // A note on ending (migration 033): a line about the event, capped.
+    const note = kind === 'rollcall_end' && item.note ? String(item.note).trim().slice(0, 200) : null;
+    return { ref, kind, rollCallId, rcKind, residentId, occurredAt: at.toISOString(), note };
   }
 
   const residentId = String(item.resident_id || '');
@@ -106,7 +108,7 @@ router.post('/sync', wrap(async (req, res) => {
         } else if (item.kind === 'rollcall_mark') {
           await client.query('select mark_roll_call($1, $2, $3, $4)', [item.rollCallId, item.residentId, item.ref, item.occurredAt]);
         } else if (item.kind === 'rollcall_end') {
-          await client.query('select end_roll_call($1, $2)', [item.rollCallId, item.occurredAt]);
+          await client.query('select end_roll_call($1, $2, $3)', [item.rollCallId, item.occurredAt, item.note ? String(item.note).slice(0, 200) : null]);
         } else if (item.kind === 'checkin') {
           await client.query(
             'select * from record_checkin_late($1, $2, $3)',

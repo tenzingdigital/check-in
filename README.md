@@ -408,6 +408,9 @@ out of the two working apps:
   Staff (pasted in, one per line). On the Visitors tab, under Staff, each
   name is one tap to sign in; the visit points back at the list entry.
   Archived rather than deleted.
+- **A note when a drill ends** (migration 033): one line about the event
+  itself, which alarm, the assembly point, what went wrong, on the drills
+  report. Never about a person.
 - **Roll call filters**: a name-or-room box and a building chip row on the
   Roll call tab, so a warden at one assembly point sees one block. The two
   buttons say *Practice drill* and *Real evacuation*, and the record keeps

@@ -659,23 +659,27 @@ CREATE TABLE __TENANT__.roll_calls (
     started_by uuid,
     ended_at timestamp with time zone,
     ended_by uuid,
-    CONSTRAINT roll_calls_kind_check CHECK ((kind = ANY (ARRAY['drill'::text, 'incident'::text])))
+    note text,
+    CONSTRAINT roll_calls_kind_check CHECK ((kind = ANY (ARRAY['drill'::text, 'incident'::text]))),
+    CONSTRAINT roll_calls_note_check CHECK (((note IS NULL) OR (length(note) <= 200)))
 );
 
 
 --
 
--- Name: end_roll_call(uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+-- Name: end_roll_call(uuid, timestamp with time zone, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone DEFAULT now()) RETURNS __TENANT__.roll_calls
+CREATE FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone DEFAULT now(), p_note text DEFAULT NULL::text) RETURNS __TENANT__.roll_calls
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
 declare v __TENANT__.roll_calls;
 begin
   if not __TENANT__.is_staff() then raise exception 'Not authorised to end a roll call' using errcode = '42501'; end if;
-  update __TENANT__.roll_calls set ended_at = least(coalesce(p_at, now()), now()), ended_by = auth.uid()
+  update __TENANT__.roll_calls
+     set ended_at = least(coalesce(p_at, now()), now()), ended_by = auth.uid(),
+         note = coalesce(nullif(btrim(coalesce(p_note, '')), ''), note)
    where id = p_id and ended_at is null;
   select * into v from __TENANT__.roll_calls where id = p_id;
   if v.id is null then raise exception 'No such roll call' using errcode = 'P0002'; end if;
@@ -3986,12 +3990,12 @@ GRANT SELECT ON TABLE __TENANT__.roll_calls TO authenticated;
 
 --
 
--- Name: FUNCTION end_roll_call(p_id uuid, p_at timestamp with time zone); Type: ACL; Schema: public; Owner: -
+-- Name: FUNCTION end_roll_call(p_id uuid, p_at timestamp with time zone, p_note text); Type: ACL; Schema: public; Owner: -
 --
 
-REVOKE ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone) TO authenticated;
-GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone) TO service_role;
+REVOKE ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone, p_note text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone, p_note text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone, p_note text) TO service_role;
 
 
 --

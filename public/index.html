@@ -911,22 +911,26 @@ async function endRoll() {
   if (!roll) return;
   const rows = await rollRows();
   const accounted = rows.filter((r) => roll.marks[r.id]).length;
-  if (accounted < rows.length && !confirm(`${rows.length - accounted} not yet accounted for. End the ${roll.kind === "drill" ? "drill" : "roll call"} anyway?`)) return;
+  if (accounted < rows.length && !confirm(`${rows.length - accounted} not yet accounted for. End the ${roll.kind === "drill" ? "drill" : "evacuation"} anyway?`)) return;
+  // One line for the record, about the event: which alarm, the assembly
+  // point, what went wrong. Optional; never about a person.
+  const noteIn = prompt(`Anything to note for the record? (optional, about the ${roll.kind === "drill" ? "drill" : "evacuation"} itself)`, "");
+  const note = (noteIn || "").trim().slice(0, 200);
   const at = new Date().toISOString();
   state.roll = null;
   saveRoll();
   renderRoll();
   let sent = false;
   if (Offline.isOnline()) {
-    const out = await guarded(() => apiPost(`/api/roll-calls/${roll.id}/end`, { at }), (err) => { if (!Offline.isOutage(err)) toast("Not recorded: " + err.message, "err"); });
+    const out = await guarded(() => apiPost(`/api/roll-calls/${roll.id}/end`, { at, note }), (err) => { if (!Offline.isOutage(err)) toast("Not recorded: " + err.message, "err"); });
     sent = !!out;
   }
   if (!sent) {
-    try { await Offline.enqueue({ kind: "rollcall_end", roll_call_id: roll.id, guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "" }); }
+    try { await Offline.enqueue({ kind: "rollcall_end", roll_call_id: roll.id, note, guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "" }); }
     catch (err) { toast(err.message, "err"); }
     Offline.renderNet();
   }
-  toast(`${roll.kind === "drill" ? "Drill" : "Roll call"} ended · ${accounted} of ${rows.length} accounted for`, "ok");
+  toast(`${roll.kind === "drill" ? "Drill" : "Evacuation"} ended · ${accounted} of ${rows.length} accounted for`, "ok");
 }
 
 /* ========================================================================
