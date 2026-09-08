@@ -114,6 +114,7 @@
   .brand small b { font-weight: 600; color: var(--text); }
   /* ---- history (a resident's movements and check-ins over a range) ---- */
   .meta .away { color: var(--warn-text); font-weight: 600; }
+  .chooser .always { margin-top: 14px; font-size: 14px; color: var(--muted); }
   .roster { margin: 2px 0 6px; }
   .roster .chips { margin-top: 6px; }
   .roster .chips button { color: var(--text); }

@@ -195,11 +195,15 @@
       <div id="rollActions">
         <p class="hint flush">Everyone recorded on site, by building, those who need assistance first. Mark each person safe with one tap. Works on every warden's phone at once and without a connection; ticks are sent when it returns.</p>
         <div class="rollstart" id="rollStart">
-          <button class="btn primary-in" type="button" id="rollDrill">Start a drill</button>
-          <button class="btn primary-out" type="button" id="rollIncident">Roll call now</button>
+          <button class="btn primary-in" type="button" id="rollDrill" data-tip="A practice. Recorded as a drill; the fire safety record needs practice and real events kept apart.">Practice drill</button>
+          <button class="btn primary-out" type="button" id="rollIncident" data-tip="A real evacuation. Recorded as an evacuation, not a drill.">Real evacuation</button>
         </div>
         <p class="hint tight"><button class="linkish" type="button" id="rollPrint">Print the evacuation list</button></p>
       </div>
+      <div class="row mt8">
+        <input id="rollQ" class="field grow" type="search" placeholder="Name or room…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Filter the roll call by name or room">
+      </div>
+      <div id="rollBuildings" class="chips" aria-label="Filter by building" hidden></div>
       <div id="rollBody"></div>
     </section>
 
@@ -651,9 +655,19 @@ async function renderRoll() {
   const body = $("rollBody");
   const roll = state.roll;
   $("rollStart").hidden = !!roll;
-  const rows = await rollRows();
+  const allRows = await rollRows();
+  // Search and a building filter (the centre call): a warden at one
+  // assembly point sees one block; a name or room narrows further.
+  const q = ($("rollQ").value || "").trim().toLowerCase();
+  const buildings = [...new Set(allRows.map((r) => (state.settings?.feature_buildings && r.building) || "No room recorded"))];
+  const bchips = $("rollBuildings");
+  bchips.hidden = buildings.length < 2;
+  if (!bchips.hidden) bchips.innerHTML = [["", "All"], ...buildings.map((b) => [b, b])].map(([v, l]) => `<button type="button" data-building="${esc(v)}" aria-pressed="${(state.rollBuilding || "") === v ? "true" : "false"}">${esc(l)}</button>`).join("");
+  const matches = (r) => (!q || String(r.full_name || "").toLowerCase().includes(q) || String(r.room_label || "").toLowerCase().includes(q) || String(r.room || "").toLowerCase() === q)
+    && (!state.rollBuilding || ((state.settings?.feature_buildings && r.building) || "No room recorded") === state.rollBuilding);
+  const rows = allRows.filter(matches);
   if (!state.visitsOnSite) { try { state.visitsOnSite = JSON.parse(localStorage.getItem("visitsOnSite") || "[]"); } catch (_) { state.visitsOnSite = []; } }
-  const visits = state.settings?.feature_visitors && !state.rollNeedOnly ? (state.visitsOnSite || []) : [];
+  const visits = state.settings?.feature_visitors && !state.rollNeedOnly && !state.rollBuilding ? (state.visitsOnSite || []).filter((v) => !q || String(v.name || "").toLowerCase().includes(q)) : [];
   const vmarks = (roll && roll.vmarks) || {};
   const vdone = roll ? visits.filter((v) => vmarks[v.id]).length : 0;
   const total = rows.length + visits.length;
@@ -687,8 +701,8 @@ async function renderRoll() {
     </button>` : "";
   const head = roll ? `
     <div class="rollmode ${roll.kind === "drill" ? "drill" : "incident"}" role="status">
-      <div>${roll.kind === "drill" ? "Drill" : "Evacuation roll call"}<small>${roll.kind === "drill" ? "A practice. The record says so." : "A real event. Account for everyone."} Started ${esc(timeOfDay(roll.started_at))}.</small></div>
-      <button class="btn ghost sm" type="button" id="rollEnd">End ${roll.kind === "drill" ? "drill" : "roll call"}</button>
+      <div>${roll.kind === "drill" ? "Practice drill" : "Real evacuation"}<small>${roll.kind === "drill" ? "A practice. The record says so." : "A real event. Account for everyone."} Started ${esc(timeOfDay(roll.started_at))}.</small></div>
+      <button class="btn ghost sm" type="button" id="rollEnd">End ${roll.kind === "drill" ? "drill" : "evacuation"}</button>
     </div>
     <div class="rollhead">
       <div><b>${accounted} of ${total}</b> <span class="hint">safe</span></div>
@@ -1182,6 +1196,13 @@ $("tabSearch").addEventListener("click", () => selectTab("search"));
 $("tabLog").addEventListener("click",    () => selectTab("log"));
 $("tabRoll").addEventListener("click",   () => selectTab("roll"));
 $("tabVisitors").addEventListener("click", () => selectTab("visitors"));
+let rollQTimer = null;
+$("rollQ").addEventListener("input", () => { clearTimeout(rollQTimer); rollQTimer = setTimeout(renderRoll, 150); });
+$("rollBuildings").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-building]"); if (!b) return;
+  state.rollBuilding = b.dataset.building || "";
+  renderRoll();
+});
 $("rollDrill").addEventListener("click",    () => startRoll("drill"));
 $("rollIncident").addEventListener("click", () => startRoll("incident"));
 $("rollPrint").addEventListener("click", async () => {

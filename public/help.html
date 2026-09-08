@@ -5,18 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>CheckSteady — Help</title>
 <link rel="stylesheet" href="/app-common.css">
 <style>
   /* The guide: plain reading on a phone, in the app's own palette. Nothing
      here is interactive beyond links, so there is no script on this page. */
+  /* A guide is read, not glanced at: paper, whatever the device's theme.
+     The light tokens are pinned here so the page never turns near-black
+     on a phone set to dark mode. */
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #eaeef3; --line: #d2d9e3; --line-hover: #aeb9c8;
+    --text: #1f2937; --muted: #4f5d73; --accent: #1d4ed8; --on-accent: #ffffff; --ok: #15803d; --on-ok: #ffffff;
+    --warn: #b45309; --on-warn: #ffffff; --warn-text: #5a2d00; --bad: #c2410c; --bad-text: #6b1a05; --exempt: #6b7280;
+    --shadow: rgba(16, 24, 40, .18); --surface-raised: #ffffff; --scrim: rgba(16, 24, 40, .38);
+    --lift: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 1px rgba(16, 24, 40, .03); --ring: rgba(29, 78, 216, .22);
+    color-scheme: light;
+  }
   .guide { max-width: 720px; margin: 0 auto; padding: 0 16px 64px; }
   .guide h1 { font-size: 26px; letter-spacing: -0.01em; margin: 18px 0 6px; }
   .guide h2 { font-size: 20px; margin: 34px 0 8px; padding-top: 18px; border-top: 1px solid var(--line); letter-spacing: -0.01em; }
   .guide h3 { font-size: 15.5px; margin: 18px 0 6px; }
-  .guide p, .guide li { font-size: 15px; line-height: 1.55; }
+  .guide p, .guide li { font-size: 16px; line-height: 1.6; }
   .guide p { margin: 8px 0; }
   .guide ul, .guide ol { padding-left: 20px; margin: 6px 0; }
   .guide li + li { margin-top: 4px; }
@@ -80,7 +91,7 @@
   <p>Open the site on any phone, tablet or computer and enter your email and password. If you have never had a password, use <span class="ui">Forgot your password?</span> and a link arrives by email; it works once and for a day.</p>
   <p>Supervisors and administrators may be asked for a six-digit code from their email after the password, if the site requires it or the login looks unusual. Type the code; tick <span class="ui">Trust this device</span> only on your own phone, never on a shared terminal.</p>
   <h3>Which screen am I on?</h3>
-  <p>The first time you log in on a device you are asked <span class="ui">What are you recording?</span> Pick the job for this terminal. You can switch at any time with the pill at the top of the screen: <span class="gate">blue</span> is In &amp; out, <span class="register">green</span> is the daily register. The colour follows you onto the buttons and the swipe strips, so you always know which record you are writing.</p>
+  <p>The first time you log in on a device you are asked <span class="ui">What are you recording?</span> Pick the job for this terminal. Tick <span class="ui">Always open this on this tablet</span> and that device goes straight to its job every time; opening the app with <span class="ui">?view=inout</span> or <span class="ui">?view=register</span> on the address does the same. You can switch at any time with the pill at the top of the screen: <span class="gate">blue</span> is In &amp; out, <span class="register">green</span> is the daily register. The colour follows you onto the buttons and the swipe strips, so you always know which record you are writing.</p>
   <h3>Who can do what</h3>
   <div class="card"><b>Guard</b> Records at In &amp; out and on the register, runs a roll call, reads the log. Sees names, ages and states, never a date of birth.</div>
   <div class="card"><b>Supervisor</b> Everything a guard does, plus adding and editing residents, importing a spreadsheet, buildings and rooms, and exporting reports.</div>
@@ -154,9 +165,9 @@
   <a class="top" href="#top">Back to the top</a>
 
   <h2 id="rollcall">Roll call and evacuation <span class="who">every staff member</span></h2>
-  <p>On In &amp; out, the <span class="ui">Roll call</span> tab lists everyone recorded on site, by building, with people who need assistance first. It appears when the site has the evacuation feature on. During a roll call, swipe a row either way, or tap <span class="ui">Safe</span>; a swipe never un-marks anyone.</p>
+  <p>On In &amp; out, the <span class="ui">Roll call</span> tab lists everyone recorded on site, by building, with people who need assistance first. Type a name or room to narrow the list, or tap a building so a warden at one assembly point sees only their block. It appears when the site has the evacuation feature on. During a roll call, swipe a row either way, or tap <span class="ui">Safe</span>; a swipe never un-marks anyone.</p>
   <h3>Run a drill or a real roll call</h3>
-  <div class="step"><b>1</b><span>Tap <span class="ui">Start a drill</span> or <span class="ui">Roll call now</span>. Every other warden's phone shows the same roll call within a few seconds.</span></div>
+  <div class="step"><b>1</b><span>Tap <span class="ui">Practice drill</span> for the monthly practice, or <span class="ui">Real evacuation</span> when it is real. The record keeps the two apart, as the fire safety review needs. Every other warden's phone shows the same roll call within a few seconds.</span></div>
   <div class="step"><b>2</b><span>At the assembly point, tap <span class="ui">Safe</span> beside each person you can see. A tick made on one phone appears on the others; a person is counted once however many wardens tick them.</span></div>
   <div class="step"><b>3</b><span>The amber line says how many people needing assistance are still to find. Tap it to show only them; tap again for everyone.</span></div>
   <div class="step"><b>4</b><span>Tap <span class="ui">End</span> at the top of the list. If people are still unaccounted for the app asks you to confirm. The drill is kept as a record with who was accounted for, by whom, and when. A drill and a real roll call work the same way; the header says which one is running, and the record keeps the difference.</span></div>
@@ -182,8 +193,8 @@
   <p>When the House Rules figures are reached, or a resident misuses the verification tablet by signing in for others, staff issue a breach report to IPAS. The app never decides that; it shows the facts. Record on the person's edit sheet that the report was issued, which kind, on what day and its reference. The Absences tab then shows the last report against the person, so nobody issues one twice.</p>
   <h3>Rooms so far</h3>
   <p>The same sheet lists every room the person has had, with the dates and who moved them. It fills in by itself as rooms change and closes when someone leaves; nothing to maintain.</p>
-  <h3>Make a family</h3>
-  <p>Where Households is on: tap <span class="ui">Make a family</span> above the list, tick each person who lives as one family, then <span class="ui">Make a family</span> in the bar at the bottom. If one of them is already in a family, the others join it. A family stays together on the roll call, children marked, and a room reads as a family. On any edit sheet the family's members are chips; tap one to open that person, or add someone from the drop-down.</p>
+  <h3>Several at once: a family, or a departure</h3>
+  <p>Tap <span class="ui">Select several</span> above the list and tick people. <span class="ui">Departed</span> in the bar marks them all as departed from one date, for a family or a bus leaving together. Where Households is on, <span class="ui">Family</span> makes them one family. If one of them is already in a family, the others join it. A family stays together on the roll call, children marked, and a room reads as a family. On any edit sheet the family's members are chips; tap one to open that person, or add someone from the drop-down.</p>
   <h3>Import a spreadsheet</h3>
   <div class="step"><b>1</b><span>Save your list as a CSV file with headings: First name, Last name, Date of birth, and optionally ID type, ID number, Building, Floor, Room, Evacuation need. <a href="/resident-import-template.csv" download>Download the template</a>.</span></div>
   <div class="step"><b>2</b><span><span class="ui">Import</span>, choose the file. Every line gets a verdict: ready, already on the register, or the problem to fix, such as a date that does not exist or a room the site does not have.</span></div>
@@ -203,7 +214,7 @@
   <h3>Settings <span class="who">admins</span></h3>
   <ul>
     <li><b>Register rules</b>: the adult age, the hour after which "not seen" turns amber, and the house rules for consecutive missed nights and days absent in a window.</li>
-    <li><b>Features for this site</b>: buildings, evacuation, households, visitors and "An In &amp; out sign-in counts as check-in" are off until turned on here. Turning one off hides its screens; nothing recorded is deleted.</li>
+    <li><b>Features for this site</b>: buildings, evacuation, households, visitors, "An In &amp; out sign-in counts as check-in" and the nightly House Rules reminder by email are off until turned on here. Turning one off hides its screens; nothing recorded is deleted.</li>
     <li><b>Retention</b>: how long movements and the register are kept. The IPAS policy says six months for the register; the audit trail and access log follow it.</li>
     <li><b>Security</b>: the idle lock, whether supervisors and admins need an emailed code, and the home countries a login is expected from.</li>
   </ul>

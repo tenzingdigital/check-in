@@ -252,11 +252,14 @@ the visit points back at the list entry, and the roll call names them.
 Still to do from the call, in the order the centre ranked them:
 rename Door to In & out (done 8 September, at the centre's request); archive rooms rather than delete, with contracted
 capacity and bed configuration (done 8 September, migration 031); the weekly IPAS report from their template
-(nationality held for that report only); a search box on the roll call and
-evacuation screens; real-versus-practice wording on the roll call; a
-default view per tablet; bulk depart; connecting the breach email; the
-help site's palette; the "not seen after N hours" figure to confirm with
-the centre; and whether 90 days is long enough for the movement log.
+(nationality held for that report only) — waiting on the template. Done
+8 September: a search box and building filter on the roll call;
+"Practice drill" and "Real evacuation" wording; a default view per tablet
+(`?view=` or the tick on the chooser); bulk depart; the nightly House
+Rules reminder by email (migration 032, a switch in Settings); the help
+site pinned to the light palette. Still to confirm with the centre: the
+"not seen after N hours" figure, and whether 90 days is long enough for
+the movement log.
 
 ## Stage 6 — Access control integration
 

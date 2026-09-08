@@ -213,11 +213,12 @@
         <button type="button" data-status="active"   aria-pressed="true">Active</button>
         <button type="button" data-status="departed" aria-pressed="false">Departed</button>
       </nav>
-      <p class="hint tight" id="famHint" hidden>Tap a name to open the record. <button class="linkish" type="button" id="famToggle" data-tip="Tick the people who live as one family, then Make a family. A child then appears with a parent on the roll call and a room reads as a family. If one of them is already in a family, the others join it.">Make a family</button></p>
+      <p class="hint tight" id="famHint">Tap a name to open the record. <button class="linkish" type="button" id="famToggle" data-tip="Tick several people, then act on them all: make them a family, or mark them departed on one date. A child in a family appears with a parent on the roll call; if one of them is already in a family, the others join it.">Select several</button></p>
       <div id="famBar" class="multibar" hidden>
         <b id="famCount">0 selected</b>
-        <button class="btn primary-in sm" type="button" id="famMake">Make a family</button>
-        <button class="btn ghost sm" type="button" id="famCancel">Cancel</button>
+        <button class="btn primary-in sm" type="button" id="famMake" hidden>Family</button>
+        <button class="btn ghost sm danger-ghost" type="button" id="famDepart">Departed</button>
+        <button class="btn ghost sm" type="button" id="famCancel" aria-label="Stop selecting" title="Stop selecting">✕</button>
       </div>
 
       <form id="addForm" class="formcard" autocomplete="off" hidden>
@@ -398,6 +399,7 @@
         <h2 class="mt6">Security</h2>
         <div><label class="lbl" for="stHome">Home countries <button class="tip" type="button" data-tip="Two-letter codes, comma-separated. A supervisor or admin logging in from anywhere else is refused; a guard is asked for an emailed code." aria-label="What home countries do">?</button></label><input id="stHome" class="field" type="text" required pattern="[A-Za-z]{2}(,[A-Za-z]{2})*" placeholder="IE">
           <p class="hint under">Two-letter codes, comma-separated. A supervisor or administrator logging in from anywhere else is refused; a guard from elsewhere must type an emailed code. Unknown addresses are not treated as abroad.</p></div>
+        <label class="check"><input id="stNotify" type="checkbox"> <span><b>Nightly House Rules reminder by email.</b> After close-out, supervisors and administrators are emailed the residents at or over the consecutive-nights or rolling-window figure, on the nights there is anyone to list. Authorised absences are left out. Needs email configured on the service.</span></label>
         <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login. Needs email configured on the service.</span></label>
 
         <h2 class="mt6">Features for this site <button class="tip" type="button" data-tip="Each switch is off until you turn it on here, so a centre sees only what it uses. Turning one off hides the screens; nothing already recorded is deleted." aria-label="About feature switches">?</button></h2>
@@ -510,7 +512,8 @@ function setFamilySelecting(on) {
   state.famIds = new Set();
   document.body.classList.toggle("selecting", on);
   $("famBar").hidden = !on;
-  $("famToggle").textContent = on ? "Stop selecting" : "Make a family";
+  $("famToggle").textContent = on ? "Stop selecting" : "Select several";
+  $("famMake").hidden = !featureOn("feature_households");
   $("residentList").querySelectorAll("button.card.selected").forEach((c) => c.classList.remove("selected"));
   if (on) renderDetail(null);
   updateFamilyBar();
@@ -519,6 +522,25 @@ function updateFamilyBar() {
   const n = state.famIds.size;
   $("famCount").textContent = `${n} selected`;
   $("famMake").disabled = n < 2;
+  $("famDepart").disabled = n < 1;
+}
+// Mark everyone ticked as departed on one date (the centres depart in
+// bulk, not one at a time). Each person still gets their own record change.
+async function departMany() {
+  const ids = [...state.famIds];
+  if (!ids.length) return;
+  const on = prompt(`Last day on site for ${ids.length} resident${ids.length === 1 ? "" : "s"} (YYYY-MM-DD)`, todayISODate());
+  if (on === null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) return toast("Give the date as YYYY-MM-DD", "err");
+  $("famDepart").disabled = true;
+  let done = 0;
+  for (const id of ids) {
+    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { status: "departed", departed_on: on }), (err) => toast(`${state.rows.get(id)?.full_name || "One person"} not changed: ${err.message}`, "err"));
+    if (out) done += 1;
+  }
+  toast(`${done} marked as departed from ${on}`, done ? "ok" : "err");
+  setFamilySelecting(false);
+  loadResidents();
 }
 async function makeFamily() {
   const ids = [...state.famIds];
@@ -1536,7 +1558,7 @@ const SETTINGS_FIELDS = {
   idle_lock_minutes: "stIdle", home_countries: "stHome",
 };
 
-const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa" };
+const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify" };
 
 async function loadSettings() {
   const s = await guarded(() => apiGet("/api/settings"), (err) => showError("Could not load settings: " + err.message));
@@ -1551,7 +1573,7 @@ function applyFeatures() {
   $("tabBuildings").hidden = !featureOn("feature_buildings");
   if (!featureOn("feature_buildings")) $("afRoomWrap").hidden = true;
   $("afEvacWrap").hidden = !featureOn("feature_evacuation");
-  $("famHint").hidden = !featureOn("feature_households");
+  $("famHint").hidden = false;
 }
 
 $("settingsForm").addEventListener("submit", async (e) => {
@@ -1695,6 +1717,7 @@ $("residentList").addEventListener("click", (e) => {
 $("famToggle").addEventListener("click", () => setFamilySelecting(!state.famSelecting));
 $("famCancel").addEventListener("click", () => setFamilySelecting(false));
 $("famMake").addEventListener("click", makeFamily);
+$("famDepart").addEventListener("click", departMany);
 // A person chip anywhere (a room, a family) opens their record.
 document.addEventListener("click", (e) => {
   const chip = e.target.closest("button.person[data-open]");

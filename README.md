@@ -408,6 +408,20 @@ out of the two working apps:
   Staff (pasted in, one per line). On the Visitors tab, under Staff, each
   name is one tap to sign in; the visit points back at the list entry.
   Archived rather than deleted.
+- **Roll call filters**: a name-or-room box and a building chip row on the
+  Roll call tab, so a warden at one assembly point sees one block. The two
+  buttons say *Practice drill* and *Real evacuation*, and the record keeps
+  them apart.
+- **A tablet that always does one job**: open the app with `?view=inout`
+  or `?view=register` once, or tick *Always open this on this tablet* on
+  the chooser, and that device skips the chooser from then on.
+- **Several residents at once** under Admin → Residents: tick people, then
+  *Departed* marks them all departed from one date, or *Family* makes them
+  one household.
+- **The nightly House Rules reminder** (migration 032, off by default):
+  after close-out, supervisors and admins are emailed the residents at or
+  over a figure, on the nights there is anyone to list. Needs
+  `RESEND_API_KEY` and `MAIL_FROM`.
 - **Rooms archived, not deleted** (migration 031): a room that has been
   lived in keeps its history when taken out of use and can be restored;
   nobody can be moved into it meanwhile. Each room carries the beds

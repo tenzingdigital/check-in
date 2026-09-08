@@ -1984,6 +1984,36 @@ async function main() {
     assert.equal(removed.status, 200); assert.equal(removed.json.archived, false);
   });
 
+  console.log("\n== the nightly House Rules reminder by email (migration 032) ==");
+
+  await test("with the switch on, supervisors and admins are emailed the residents at a figure; off, nothing goes", async () => {
+    const { notifyThresholds } = require("../jobs");
+    const made = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Missing", last_name: "Nights", date_of_birth: "1979-05-05" } });
+    assert.equal(made.status, 201, made.text);
+    await withOwner((c) => c.query(
+      `update public.residents set registered_at = now() - interval '10 days' where id = $1;`, [made.json.id]));
+    await withOwner((c) => c.query(
+      `insert into public.daily_compliance (resident_id, compliance_date, required, presented, checkin_count, closed_at)
+       select $1, d::date, true, false, 0, now() from generate_series(public.site_today() - 3, public.site_today() - 1, interval '1 day') d
+       on conflict do nothing`, [made.json.id]));
+    const before = (global.__mailSink || []).length;
+    await withOwner((c) => c.query(`update public.app_settings set notify_thresholds_email = false`));
+    assert.equal(await notifyThresholds("public", ""), true);
+    assert.equal((global.__mailSink || []).length, before, "nothing should be sent while the switch is off");
+    await withOwner((c) => c.query(`update public.app_settings set notify_thresholds_email = true`));
+    assert.equal(await notifyThresholds("public", ""), true);
+    const sent = (global.__mailSink || []).slice(before);
+    assert.ok(sent.length >= 2, `expected an email per supervisor and admin, got ${sent.length}`);
+    assert.ok(sent.every((m) => /House Rules/.test(m.subject)), "subject");
+    assert.ok(sent.every((m) => /Missing Nights/.test(m.text) && /3 consecutive nights/.test(m.text)), "the resident at the figure is listed");
+    assert.ok(sent.some((m) => /sup2@hut.example/.test(m.to)), "the supervisor should be a recipient");
+    const { rows } = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'notify-thresholds-email' order by id desc limit 1`));
+    assert.equal(rows[0].ok, true); assert.match(rows[0].result, /listed/);
+    await withOwner((c) => c.query(`update public.app_settings set notify_thresholds_email = false`));
+    const settings = await api.fetch("/api/settings");
+    assert.equal(settings.json.notify_thresholds_email, false);
+  });
+
   console.log("\n== who viewed which record (migration 023) ==");
 
   let viewedId;

@@ -94,6 +94,65 @@ async function runJob(schema, label, name, sql) {
   }
 }
 
+// The House Rules reminder (migration 032): after close-out, where the
+// centre has turned it on and email is configured, every active supervisor
+// and administrator gets the list of residents at or over a figure. Sent
+// only on nights there is anyone to list. The app states facts; the
+// letter is the manager's.
+const mail = require('./lib/mail');
+async function notifyThresholds(schema, label) {
+  const name = 'notify-thresholds-email';
+  const started = Date.now();
+  try {
+    const summary = await withOwnerIn(schema, async (client) => {
+      const { rows: [s] } = await client.query(
+        `select notify_thresholds_email as on, site_name, warn_after_consecutive_nights as nights,
+                absence_window_limit as win_limit, absence_window_days as win_days from app_settings where id`);
+      if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
+      // The register views filter on is_staff(), which the nightly job is
+      // not; the same two figures are computed here from the ledger, with
+      // the definitions of migration 015 (closed, required, not presented;
+      // the streak counts days after the latest presented day).
+      const { rows } = await client.query(
+        `with t as (
+           select btrim(r.first_name) || ' ' || btrim(r.last_name) as full_name, room_label_of(r.room_id) as room_label,
+                  (select count(*)::int from daily_compliance x
+                    where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
+                      and x.compliance_date > coalesce((select max(y.compliance_date) from daily_compliance y
+                                                         where y.resident_id = r.id and y.required and y.presented and y.closed_at is not null), '1900-01-01'::date)) as consecutive_missed,
+                  (select count(*)::int from daily_compliance x
+                    where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
+                      and x.compliance_date > site_today() - $3::int) as absent_in_window
+             from residents r where r.status = 'active')
+         select * from t where consecutive_missed >= $1 or absent_in_window >= $2
+         order by consecutive_missed desc, absent_in_window desc, full_name`, [s.nights, s.win_limit, s.win_days]);
+      if (!rows.length) { await record(client, name, true, 'nobody at a figure'); return 'nobody'; }
+      const { rows: to } = await client.query(
+        `select u.email, p.full_name from profiles p join auth.users u on u.id = p.id
+          where p.active and p.role in ('supervisor', 'admin') and u.email is not null`);
+      if (!to.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
+      const lines = rows.map((r) => `- ${r.full_name}${r.room_label ? ` (${r.room_label})` : ''}: ${r.consecutive_missed} consecutive night${r.consecutive_missed === 1 ? '' : 's'}, ${r.absent_in_window} of ${s.win_limit} days in ${s.win_days}`);
+      const text = `${s.site_name || 'CheckSteady'}: ${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure after last night's close-out.\n\n` +
+        `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}.\n\n${lines.join('\n')}\n\n` +
+        `The app records the facts; whether a letter or a breach report follows is the manager's decision. ` +
+        `Authorised absences are already left out. Details under Admin → Absences.`;
+      let delivered = 0;
+      for (const r of to) {
+        const out = await mail.send({ to: r.email, subject: `${s.site_name || 'CheckSteady'}: ${rows.length} at a House Rules figure`, text });
+        if (out.delivered) delivered += 1;
+      }
+      await record(client, name, true, `${rows.length} listed, ${delivered}/${to.length} emailed`);
+      return `${rows.length} listed, ${delivered}/${to.length} emailed`;
+    });
+    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
+    return true;
+  } catch (err) {
+    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
+    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
+    return false;
+  }
+}
+
 async function main() {
   let failed = 0;
 
@@ -106,6 +165,7 @@ async function main() {
     const label = t.slug === tenancy.LEGACY_SLUG ? "" : `${t.slug} · `;
     for (const [name, sql] of TENANT_JOBS) {
       if (!(await runJob(schema, label, name, sql))) failed += 1;
+      if (name === 'close-out-compliance-days' && !(await notifyThresholds(schema, label))) failed += 1;
     }
   }
 
@@ -120,7 +180,8 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+module.exports = { notifyThresholds };
+if (require.main === module) main().catch((err) => {
   console.error("[jobs] fatal:", err);
   process.exit(1);
 });

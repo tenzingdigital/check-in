@@ -333,7 +333,29 @@ function viewChosen() { try { return sessionStorage.getItem(VIEW_SLOT); } catch 
 function rememberView(v) { try { sessionStorage.setItem(VIEW_SLOT, v); } catch (_) { /* private mode */ } }
 function clearViewChoice() { try { sessionStorage.removeItem(VIEW_SLOT); } catch (_) { /* nothing */ } }
 
+// A tablet that always does one job: open it with ?view=inout or
+// ?view=register once and the choice is kept on that device (localStorage);
+// or tick "Always open this on this tablet" on the chooser. "Forget this
+// tablet's choice" on the chooser undoes it.
+const DEFAULT_VIEW_SLOT = "defaultView";
+const VIEW_PAGES = { gate: "/index.html", register: "/checkin.html" };
+function defaultView() { try { return localStorage.getItem(DEFAULT_VIEW_SLOT) || ""; } catch (_) { return ""; } }
+function setDefaultView(v) { try { if (v) localStorage.setItem(DEFAULT_VIEW_SLOT, v); else localStorage.removeItem(DEFAULT_VIEW_SLOT); } catch (_) { /* private mode */ } }
+
 function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
+  // ?view=… on the address bar fixes this device's job.
+  try {
+    const want = new URLSearchParams(location.search).get("view");
+    const norm = want === "inout" || want === "gate" ? "gate" : want === "register" ? "register" : "";
+    if (norm) { setDefaultView(norm); history.replaceState(null, "", location.pathname); }
+  } catch (_) { /* nothing */ }
+  const fixed = defaultView();
+  if (fixed && VIEW_PAGES[fixed]) {
+    if (fixed !== current) { rememberView(fixed); location.replace(VIEW_PAGES[fixed]); return; }
+    rememberView(fixed);
+    document.dispatchEvent(new Event("viewchosen"));
+    return;
+  }
   if (viewChosen()) return;
   const el = document.createElement("div");
   el.id = "chooser"; el.className = "chooser"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
@@ -349,10 +371,12 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
       <span>The once-a-day presentation the policy requires. Swipe a card either way to record today's check-in. Nothing here signs anyone in or out.</span>
     </a>
     ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Site admin</b><span>This centre's residents, buildings, staff and settings.</span></a>` : ""}
-    ${canOrg ? `<a class="choice admin" href="/org.html" data-view="org"><b>Organisation</b><span>Every centre on the service. No resident data.</span></a>` : ""}`;
+    ${canOrg ? `<a class="choice admin" href="/org.html" data-view="org"><b>Organisation</b><span>Every centre on the service. No resident data.</span></a>` : ""}
+    <label class="check always"><input type="checkbox" id="chooserAlways"> <span>Always open this on this tablet. Undo it later from the ? menu.</span></label>`;
   el.addEventListener("click", (e) => {
     const a = e.target.closest("[data-view]");
     if (!a) return;
+    if (el.querySelector("#chooserAlways")?.checked && VIEW_PAGES[a.dataset.view]) setDefaultView(a.dataset.view);
     rememberView(a.dataset.view);
     if (a.dataset.view === current) {
       e.preventDefault(); el.remove();
