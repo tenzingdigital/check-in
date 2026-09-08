@@ -238,6 +238,17 @@ select pg_temp.try('supervisor overlaps an absence',        format('select publi
 select pg_temp.try('child absence without a guardian',      format('select public.authorise_absence(%L, current_date, current_date, ''family'')', :'kid_id'));
 select guardian_agreed from public.authorise_absence(:'kid_id', current_date, current_date, 'family', true);
 select pg_temp.try('an unknown reason',                     format('select public.authorise_absence(%L, current_date + 10, current_date + 10, ''skiing'')', :'okonkwo_id'));
+select pg_temp.try('a holiday longer than the cap',         format('select public.authorise_absence(%L, current_date + 10, current_date + 30, ''holiday'')', :'okonkwo_id'));
+select kind, reference from public.issue_breach(:'okonkwo_id', 'house_rules', current_date, ' IPAS/1 ');
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select count(*) as guard_can_read_breaches from public.breach_reports;
+select pg_temp.try('guard records a breach report',         format('select public.issue_breach(%L, ''misuse'')', :'okonkwo_id'));
+select pg_temp.try('guard inserts a breach report directly', format('insert into public.breach_reports (resident_id, kind, issued_on) values (%L, ''misuse'', current_date)', :'okonkwo_id'));
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 reset role;
 set request.jwt.claim.sub = '';
 set role anon;

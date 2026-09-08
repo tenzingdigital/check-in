@@ -152,9 +152,10 @@
       <div id="detail" class="detail" hidden></div>
       <div id="multiBar" class="multibar" hidden>
         <b id="multiCount">0 selected</b>
+        <button class="btn ghost sm" type="button" id="multiAll" data-tip="Tick everyone the search shows: type a room, tick all, sign them in or out together.">All</button>
         <button class="btn primary-in sm" type="button" id="multiIn">Sign IN</button>
         <button class="btn primary-out sm" type="button" id="multiOut">Sign OUT</button>
-        <button class="btn ghost sm" type="button" id="multiCancel">Cancel</button>
+        <button class="btn ghost sm" type="button" id="multiCancel" aria-label="Stop selecting" title="Stop selecting">✕</button>
       </div>
     </section>
 
@@ -1083,6 +1084,7 @@ function setSelecting(on) {
   document.body.classList.toggle("selecting", on);
   $("multiBar").hidden = !on;
   $("multiCount").textContent = "0 selected";
+  $("multiAll").textContent = "All";
   $("selectToggle").textContent = on ? "Stop selecting" : "Select several";
   if (on) renderDetail(null);
   renderSearch();
@@ -1128,6 +1130,13 @@ async function recordMany(direction) {
 
 $("selectToggle").addEventListener("click", () => setSelecting(!state.selecting));
 $("multiCancel").addEventListener("click", () => setSelecting(false));
+$("multiAll").addEventListener("click", () => {
+  const shown = [...document.querySelectorAll("#searchResults button.card[data-id]")];
+  const all = shown.length && shown.every((c) => state.selectedIds.has(c.dataset.id));
+  for (const c of shown) { if (all) state.selectedIds.delete(c.dataset.id); else state.selectedIds.add(c.dataset.id); c.classList.toggle("selected", !all); }
+  $("multiCount").textContent = `${state.selectedIds.size} selected`;
+  $("multiAll").textContent = all ? "All" : "None";
+});
 $("multiIn").addEventListener("click", () => recordMany("in"));
 $("multiOut").addEventListener("click", () => recordMany("out"));
 

@@ -146,8 +146,8 @@
     display: flex; align-items: center; gap: 8px;
     background: var(--surface-raised); border-top: 1px solid var(--line-hover); box-shadow: 0 -10px 30px var(--shadow);
   }
-  .multibar b { flex: 1; font-size: 14px; }
-  .multibar .btn.sm { padding: 10px 12px; font-size: 14px; white-space: nowrap; }
+  .multibar b { flex: 1; font-size: 13px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .multibar .btn.sm { padding: 10px 10px; font-size: 14px; white-space: nowrap; flex: none; }
 
   /* ---- tips ---- */
   /* A "?" beside a label opens one sentence; a tile or a tab shows its

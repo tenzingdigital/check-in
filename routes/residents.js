@@ -157,8 +157,15 @@ router.get('/', wrap(async (req, res) => {
       [found.map(r => r.id)],
     );
     const byId = new Map(comp.map(c => [c.id, c]));
+    const { rows: breaches } = await client.query(
+      `select distinct on (resident_id) resident_id, kind, issued_on from breach_reports
+        where resident_id = any($1::uuid[]) order by resident_id, issued_on desc, id desc`,
+      [found.map(r => r.id)]);
+    const breachById = new Map(breaches.map(b => [b.resident_id, b]));
     return found.map(r => {
       const out = { ...r, ...(byId.get(r.id) || {}) };
+      const b = breachById.get(r.id);
+      out.last_breach = b ? { kind: b.kind, issued_on: String(b.issued_on).slice(0, 10) } : null;
       if (out.away && out.status === 'active') { out.required_today = false; if (out.state !== 'breach_open') out.state = 'away'; }
       return out;
     });
@@ -265,7 +272,7 @@ router.get('/:id/history', wrap(async (req, res) => {
 
 // Authorised absences (migration 028). Any staff member sees them; only a
 // supervisor or admin records or changes one, enforced by the functions.
-const ABSENCE_REASONS = ['holiday', 'family', 'medical', 'education', 'work', 'other'];
+const ABSENCE_REASONS = ['holiday', 'family', 'medical', 'interview', 'education', 'work', 'other'];
 function absenceRow(a) {
   return {
     id: Number(a.id), from_date: String(a.from_date).slice(0, 10), to_date: String(a.to_date).slice(0, 10),
@@ -324,6 +331,40 @@ router.post('/:id/absences/:aid/end', wrap(async (req, res) => {
   const out = absenceRow(row);
   out.cancelled = row.ended_on && String(row.ended_on).slice(0, 10) < out.from_date;
   res.json(out);
+}));
+
+// Breach reports (migration 029): that a report was issued to IPAS.
+const BREACH_KINDS = ['house_rules', 'misuse'];
+function breachRow(b) {
+  return { id: Number(b.id), kind: b.kind, issued_on: String(b.issued_on).slice(0, 10), reference: b.reference || null, issued_by: b.issued_by_name || null, created_at: b.created_at };
+}
+router.get('/:id/breaches', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const rows = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select b.*, p.full_name as issued_by_name from breach_reports b left join profiles p on p.id = b.issued_by
+        where b.resident_id = $1 order by b.issued_on desc, b.id desc limit 200`, [id]);
+    return rows;
+  });
+  res.json(rows.map(breachRow));
+}));
+router.post('/:id/breaches', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'resident id');
+  const body = req.body || {};
+  const kind = String(body.kind || '');
+  if (!BREACH_KINDS.includes(kind)) throw new HttpError(400, `kind must be one of ${BREACH_KINDS.join(', ')}`);
+  const on = body.issued_on ? dateParam(body.issued_on, 'issued_on') : null;
+  const reference = body.reference == null ? null : String(body.reference).trim().slice(0, 60);
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query('select * from issue_breach($1, $2, $3, $4)', [id, kind, on, reference]);
+    const { rows: named } = await client.query(
+      `select b.*, p.full_name as issued_by_name from breach_reports b left join profiles p on p.id = b.issued_by where b.id = $1`, [rows[0].id]);
+    return named[0] || rows[0];
+  }).catch((err) => {
+    if (err && err.code === 'P0002') throw new HttpError(404, 'No such resident');
+    throw err;
+  });
+  res.status(201).json(breachRow(row));
 }));
 
 // GET /api/residents/:id/rooms — every room they have had (migration 028).

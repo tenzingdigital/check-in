@@ -285,6 +285,7 @@
          beside the figures in Settings. ---- -->
     <section id="panelAbsences" role="tabpanel" aria-labelledby="tabAbsences" hidden>
       <p class="hint flush" id="absIntro"></p>
+      <input id="absQ" class="field mt8" type="search" placeholder="Name or room…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Filter by name or room">
       <div class="tablewrap mt14"><table id="absTable"></table></div>
     </section>
 
@@ -374,7 +375,10 @@
           <div><label class="lbl" for="stWarn">Consecutive nights → warning letter</label><input id="stWarn" class="field" type="number" min="1" max="90" required></div>
           <div><label class="lbl" for="stWinLimit">Days absent in the window</label><input id="stWinLimit" class="field" type="number" min="1" max="365" required></div>
         </div>
-        <div><label class="lbl" for="stWinDays">Rolling window (days)</label><input id="stWinDays" class="field" type="number" min="7" max="365" required></div>
+        <div class="grid2">
+          <div><label class="lbl" for="stWinDays">Rolling window (days)</label><input id="stWinDays" class="field" type="number" min="7" max="365" required></div>
+          <div><label class="lbl" for="stHoliday">Longest holiday (consecutive days)</label><input id="stHoliday" class="field" type="number" min="1" max="90" required></div>
+        </div>
         <p class="hint flush">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
 
         <h2 class="mt6">Security</h2>
@@ -582,8 +586,10 @@ function renderAbsences(rows) {
   const winDays = src.absence_window_days ?? s.absence_window_days ?? 28;
   const withRooms = !!s.feature_buildings;
 
+  const q = ($("absQ").value || "").trim().toLowerCase();
   const listed = rows
     .filter((r) => r.status === "active" && ((r.consecutive_missed || 0) > 0 || (r.absent_in_window || 0) > 0))
+    .filter((r) => !q || String(r.full_name).toLowerCase().includes(q) || String(r.room_label || "").toLowerCase().includes(q) || String(r.room || "").toLowerCase() === q)
     .sort((a, b) =>
       (b.consecutive_missed || 0) - (a.consecutive_missed || 0) ||
       (b.absent_in_window || 0) - (a.absent_in_window || 0) ||
@@ -599,7 +605,8 @@ function renderAbsences(rows) {
   }
 
   const lastSeen = (r) => r.seen_today ? "Today" : (r.last_seen_on || "Never");
-  const head = ["Name", ...(withRooms ? ["Room"] : []), "Consecutive nights", `Absent in ${winDays} days`, "Last seen"];
+  const head = ["Name", ...(withRooms ? ["Room"] : []), "Consecutive nights", `Absent in ${winDays} days`, "Last seen", "Today", "Breach report"];
+  const KIND_SHORT = { house_rules: "house rules", misuse: "misuse" };
   $("absTable").innerHTML =
     `<thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>` +
     `<tbody>${listed.map((r) => {
@@ -610,6 +617,8 @@ function renderAbsences(rows) {
         `<td class="num${n >= nightLimit ? " at" : ""}">${n} of ${nightLimit}</td>` +
         `<td class="num${w >= winLimit ? " at" : ""}">${w} of ${winLimit}</td>` +
         `<td>${esc(lastSeen(r))}</td>` +
+        `<td>${r.away ? `Away until ${esc(dayLabel(r.away.until))}` : r.seen_today ? "Checked in" : "Not yet checked in"}</td>` +
+        `<td>${r.last_breach ? `${esc(KIND_SHORT[r.last_breach.kind] || r.last_breach.kind)} · ${esc(dayLabel(r.last_breach.issued_on))}` : "—"}</td>` +
       `</tr>`;
     }).join("")}</tbody>`;
 }
@@ -856,13 +865,28 @@ function renderDetail(rec, summary) {
         </div>
         <label class="lbl" for="abReason">Reason</label>
         <select id="abReason" class="field">
-          <option value="holiday">Holiday</option><option value="family">Family</option><option value="medical">Medical</option>
+          <option value="holiday">Holiday</option><option value="family">Family</option><option value="medical">Medical</option><option value="interview">IPO interview</option>
           <option value="education">Education</option><option value="work">Work</option><option value="other">Other</option>
         </select>
         <label class="check mt8" id="abGuardianWrap" ${((summary && summary.age_years) ?? 99) < (state.settings?.adult_age_years ?? 18) ? "" : "hidden"}><input id="abGuardian" type="checkbox"> <span><b>A parent or guardian agreed.</b> Required for a child.</span></label>
         <div class="actions"><button class="btn sm" type="submit" id="abSave">Record absence</button></div>
       </form>
     </div>` : ""}
+
+    <div class="formcard" id="brCard">
+      <h2>Breach reports <button class="tip" type="button" data-tip="The app flags the thresholds; the decision and the report to IPAS are the manager's. Record here that a report was issued, which kind, on what day and its reference, so the register shows it." aria-label="About breach reports">?</button></h2>
+      <div id="brList" class="hint flush">Loading…</div>
+      <form id="brForm" class="mt8" autocomplete="off">
+        <div class="grid2">
+          <div><label class="lbl" for="brKind">Kind</label>
+            <select id="brKind" class="field"><option value="house_rules">Breach of house rules</option><option value="misuse">Misuse of the verification system</option></select></div>
+          <div><label class="lbl" for="brOn">Issued on</label><input id="brOn" class="field" type="date" required value="${todayISODate()}" max="${todayISODate()}"></div>
+        </div>
+        <label class="lbl" for="brRef">Reference (optional)</label>
+        <input id="brRef" class="field" type="text" maxlength="60" placeholder="e.g. IPAS ref or file number">
+        <div class="actions"><button class="btn sm" type="submit" id="brSave">Record report issued</button></div>
+      </form>
+    </div>
 
     ${featureOn("feature_buildings") ? `
     <div class="formcard">
@@ -942,7 +966,7 @@ function renderDetail(rec, summary) {
   }
 
   if ($("absCard")) {
-    const REASON = { holiday: "Holiday", family: "Family", medical: "Medical", education: "Education", work: "Work", other: "Other" };
+    const REASON = { holiday: "Holiday", family: "Family", medical: "Medical", interview: "IPO interview", education: "Education", work: "Work", other: "Other" };
     const renderAbs = async () => {
       const rows = await guarded(() => apiGet(`/api/residents/${rec.id}/absences`), () => {});
       const box = $("absList");
@@ -980,6 +1004,28 @@ function renderDetail(rec, summary) {
       if (!out) return;
       toast("Absence recorded", "ok");
       renderAbs(); loadResidents();
+    });
+  }
+  if ($("brCard")) {
+    const KIND = { house_rules: "Breach of house rules", misuse: "Misuse of the verification system" };
+    const renderBr = async () => {
+      const rows = await guarded(() => apiGet(`/api/residents/${rec.id}/breaches`), () => {});
+      const box = $("brList"); if (!rows) return;
+      if (!rows.length) { box.innerHTML = "None issued."; return; }
+      box.innerHTML = `<div class="abslist">${rows.map((b) => `<div class="logrow wide">
+          <time>${esc(dayLabel(b.issued_on))}</time>
+          <span class="body">${esc(KIND[b.kind] || b.kind)}${b.reference ? ` · ${esc(b.reference)}` : ""}<span class="by">recorded by ${esc(b.issued_by || "—")}</span></span>
+        </div>`).join("")}</div>`;
+    };
+    renderBr();
+    $("brForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("brSave").disabled = true;
+      const out = await guarded(() => apiPost(`/api/residents/${rec.id}/breaches`, { kind: $("brKind").value, issued_on: $("brOn").value, reference: $("brRef").value }), (err) => toast("Not recorded: " + err.message, "err"));
+      $("brSave").disabled = false;
+      if (!out) return;
+      toast("Breach report recorded", "ok"); $("brRef").value = "";
+      renderBr(); loadResidents();
     });
   }
   if ($("roomHist")) {
@@ -1401,7 +1447,7 @@ $("rpPrint").addEventListener("click", () => {
    ====================================================================== */
 const SETTINGS_FIELDS = {
   site_name: "stSite", local_timezone: "stTz", adult_age_years: "stAdult", due_soon_after_hour: "stDue",
-  warn_after_consecutive_nights: "stWarn", absence_window_limit: "stWinLimit", absence_window_days: "stWinDays",
+  warn_after_consecutive_nights: "stWarn", absence_window_limit: "stWinLimit", absence_window_days: "stWinDays", holiday_max_days: "stHoliday",
   event_retention_days: "stEventDays", compliance_retention_days: "stCompDays", late_entry_window_hours: "stLate",
   idle_lock_minutes: "stIdle", home_countries: "stHome",
 };
@@ -1574,6 +1620,8 @@ document.addEventListener("click", (e) => {
 });
 $("tabResidents").addEventListener("click", () => selectTab("residents"));
 $("tabAbsences").addEventListener("click", () => selectTab("absences"));
+let absQTimer = null;
+$("absQ").addEventListener("input", () => { clearTimeout(absQTimer); absQTimer = setTimeout(loadAbsences, 200); });
 $("tabBuildings").addEventListener("click", () => selectTab("buildings"));
 $("tabReports").addEventListener("click", () => selectTab("reports"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));

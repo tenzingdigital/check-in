@@ -1542,7 +1542,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 14);
+    assert.equal(list.json.length, 15);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1859,6 +1859,45 @@ async function main() {
     assert.match(me.marked_safe_at, /^\d{2}:\d{2}$/);
     const spark = rep.json.rows.find((r) => /Safe Sparks/.test(r.name));
     assert.ok(spark && spark.who === "contractor", "the marked contractor is missing");
+  });
+
+  console.log("\n== holiday cap, interviews, breach reports, prefix search (migration 029) ==");
+
+  await test("a room prefix lists the block; a holiday is capped; an interview is a reason; a breach report is recorded", async () => {
+    const byPrefix = await api.fetch("/api/residents?q=k");
+    assert.ok(byPrefix.json.some((r) => r.id === roomFinderId), "the prefix K should list the K rooms");
+    const today = siteToday();
+    const plus = (n) => new Date(Date.parse(today) + n * 86400000).toISOString().slice(0, 10);
+    const tooLong = await supC.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: plus(20), to_date: plus(40), reason: "holiday" } });
+    assert.equal(tooLong.status, 400, tooLong.text);
+    assert.match(tooLong.json.error || tooLong.text, /14 consecutive days/);
+    const interview = await supC.fetch(`/api/residents/${roomFinderId}/absences`, { method: "POST", body: { from_date: plus(20), to_date: plus(40), reason: "interview" } });
+    assert.equal(interview.status, 201, interview.text);
+
+    const asGuard = await api.fetch(`/api/residents/${roomFinderId}/breaches`, { method: "POST", body: { kind: "house_rules" } });
+    assert.equal(asGuard.status, 403);
+    const badKind = await supC.fetch(`/api/residents/${roomFinderId}/breaches`, { method: "POST", body: { kind: "rudeness" } });
+    assert.equal(badKind.status, 400);
+    const issued = await supC.fetch(`/api/residents/${roomFinderId}/breaches`, { method: "POST", body: { kind: "house_rules", issued_on: today, reference: " IPAS/2026/042 " } });
+    assert.equal(issued.status, 201, issued.text);
+    assert.equal(issued.json.reference, "IPAS/2026/042"); assert.match(issued.json.issued_by, /Sup/);
+    const list = await api.fetch(`/api/residents/${roomFinderId}/breaches`);
+    assert.equal(list.status, 200); assert.equal(list.json.length, 1);
+    const reg = await api.fetch("/api/residents?q=roomy&compliance=1");
+    const mine = reg.json.find((r) => r.id === roomFinderId);
+    assert.deepEqual(mine.last_breach, { kind: "house_rules", issued_on: today });
+    const rep = await supC.fetch(`/api/reports/breaches?from=${today}&to=${today}&reason=test&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.ok(rep.json.rows.some((r) => /Roomy Finder/.test(r.resident) && /house rules/.test(r.kind)));
+    const absentNow = await supC.fetch(`/api/reports/absent?reason=test&format=json`);
+    assert.ok(absentNow.json.rows.every((r) => "child" in r), "the absent report should carry a child column");
+    const adminId = (await withOwner((c) => c.query(`select id from auth.users where email = 'head@hut.example'`))).rows[0]?.id;
+    if (adminId) {
+      const exp = await withIdentity(adminId, (c) => c.query(`select public.export_resident_record($1) as j`, [roomFinderId]));
+      assert.equal(exp.rows[0].j.breach_reports.length, 1);
+    }
+    const setting = await withOwner((c) => c.query(`select holiday_max_days from public.app_settings`));
+    assert.equal(setting.rows[0].holiday_max_days, 14);
   });
 
   console.log("\n== who viewed which record (migration 023) ==");

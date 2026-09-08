@@ -120,14 +120,14 @@
   <h2 id="gate">The door <span class="who">every staff member</span></h2>
   <p>The door answers one question: who is on site right now? Every sign-in and sign-out is a movement with a time and your name on it.</p>
   <h3>Sign someone in or out</h3>
-  <div class="step"><b>1</b><span>Find the person. The whole list is on screen; type part of a name, or a room number such as <span class="ui">B1</span>, to filter. Spelling, accents and name order are forgiven.</span></div>
+  <div class="step"><b>1</b><span>Find the person. The whole list is on screen; type part of a name, or a room such as <span class="ui">B1</span>, to filter. A letter on its own lists the whole block: <span class="ui">B</span> for every B room. Spelling, accents and name order are forgiven.</span></div>
   <div class="step"><b>2</b><span>Look at the person. The app records that you checked; it does not check for you.</span></div>
   <div class="step"><b>3</b><span>Swipe the card <span class="ui">right</span> to sign IN, <span class="ui">left</span> to sign OUT. The strip behind the card says which. Or tap the name and use the <span class="ui">Sign IN</span> and <span class="ui">Sign OUT</span> buttons.</span></div>
   <p>The card updates the moment the movement is recorded. Nothing can be edited afterwards: a mistake is corrected by recording the opposite movement, and both stay on the log.</p>
   <h3>The three tiles</h3>
   <p><span class="ui">On site</span>, <span class="ui">Off site</span> and <span class="ui">Moved today</span> count the list below them. Tap a tile to see only those residents; tap it again for everyone. The line under the search box says which filter is on.</p>
   <h3>Several people at once</h3>
-  <p>A family coming back from school, a minibus arriving: tap <span class="ui">Select several</span>, tick each person, then <span class="ui">Sign IN</span> or <span class="ui">Sign OUT</span> in the bar at the bottom. Ticking someone who is in a family ticks the whole family that is on screen. Each person still gets their own movement with the time and your name. <span class="ui">Cancel</span> or <span class="ui">Stop selecting</span> puts the list back to normal.</p>
+  <p>A family coming back from school, a minibus arriving: tap <span class="ui">Select several</span>, tick each person, then <span class="ui">Sign IN</span> or <span class="ui">Sign OUT</span> in the bar at the bottom. Ticking someone who is in a family ticks the whole family that is on screen, and <span class="ui">All</span> ticks everyone the search found: type a room, tick all, sign them out together. Each person still gets their own movement with the time and your name. <span class="ui">Cancel</span> or <span class="ui">Stop selecting</span> puts the list back to normal.</p>
   <h3>Since when</h3>
   <p>Every card says <span class="ui">on site since 14:20</span> or <span class="ui">off site since Thu 4 Sep 09:10</span>: the time of the person's last movement, with the day once it is not today. <span class="ui">No movement on record</span> means they have never been signed in.</p>
   <h3>The log</h3>
@@ -177,7 +177,9 @@
   <p><span class="ui">Add</span> takes a first name, last name and date of birth, and optionally the ID document, a room and an evacuation need. The date of birth is used only for the adult rule and is never shown to guards.</p>
   <p>Tap a resident for the edit sheet: change details, move rooms, set an evacuation need, link family members, mark them <span class="ui">departed</span> when they leave (the record stays for the retention period), or as an admin export or erase the whole record.</p>
   <h3>Authorised absences</h3>
-  <p>On a resident's edit sheet: the first and last day away and a reason from the list (holiday, family, medical, education, work, other). For a child, tick that a parent or guardian agreed; the app refuses the absence without it. If the person comes back early, <span class="ui">Back early: end today</span> ends it; a planned absence that never happened is cancelled. Nothing else is held: no destination, no notes. The register shows those days as not required.</p>
+  <p>On a resident's edit sheet: the first and last day away and a reason from the list (holiday, family, medical, IPO interview, education, work, other). A holiday is capped at the figure in Settings, 14 consecutive days by default, as IPAS asks; the other reasons are not. For a child, tick that a parent or guardian agreed; the app refuses the absence without it. If the person comes back early, <span class="ui">Back early: end today</span> ends it; a planned absence that never happened is cancelled. Nothing else is held: no destination, no notes. The register shows those days as not required.</p>
+  <h3>Breach reports</h3>
+  <p>When the House Rules figures are reached, or a resident misuses the verification tablet by signing in for others, staff issue a breach report to IPAS. The app never decides that; it shows the facts. Record on the person's edit sheet that the report was issued, which kind, on what day and its reference. The Absences tab then shows the last report against the person, so nobody issues one twice.</p>
   <h3>Rooms so far</h3>
   <p>The same sheet lists every room the person has had, with the dates and who moved them. It fills in by itself as rooms change and closes when someone leaves; nothing to maintain.</p>
   <h3>Make a family</h3>

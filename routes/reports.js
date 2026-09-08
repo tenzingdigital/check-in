@@ -14,6 +14,7 @@
 //   absences    authorised absences overlapping the range (migration 028)
 //   roll-call-marks  who was marked safe on each roll call, by whom
 //   room-history     every room each resident has had
+//   breaches    breach reports issued to IPAS in the range (migration 029)
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -110,7 +111,7 @@ const REPORTS = {
 REPORTS.absent = {
   title: 'Absent now',
   ranged: false,
-  sql: `select rm.building, rm.room, v.full_name as resident,
+  sql: `select rm.building, rm.room, v.full_name as resident, case when v.is_adult then '' else 'child' end as child,
                to_char(v.last_event_at at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
                to_char(v.last_event_at at time zone s.local_timezone, 'HH24:MI') as time_out,
                g.full_name as signed_out_by,
@@ -133,12 +134,14 @@ REPORTS.overnight = {
   ranged: true,
   sql: `select o.night::text as night, rm.building, rm.room,
                btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+               case when vs.is_adult then '' else 'child' end as child,
                to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
                to_char(o.off_site_since at time zone s.local_timezone, 'HH24:MI') as time_out,
                concat_ws('; ', case when o.off_site_since is null then 'never signed in' end,
                          case when absence_authorised(o.resident_id, o.night) then 'authorised' end) as note
           from overnight_absences o
           join residents r on r.id = o.resident_id
+          left join v_resident_status vs on vs.id = r.id
           left join v_resident_room rm on rm.id = r.id
           cross join (select local_timezone from app_settings where id) s
          where o.night between $1 and $2
@@ -161,6 +164,7 @@ REPORTS.away = {
                 from gate_events e
               window w as (partition by e.resident_id order by e.occurred_at, e.id))
        select rm.building, rm.room, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+              case when vs.is_adult then '' else 'child' end as child,
               to_char(ev.occurred_at at time zone s.tz, 'YYYY-MM-DD') as date_out,
               to_char(ev.occurred_at at time zone s.tz, 'HH24:MI') as time_out,
               to_char(ev.next_at at time zone s.tz, 'YYYY-MM-DD') as date_in,
@@ -170,6 +174,7 @@ REPORTS.away = {
               g1.full_name as signed_out_by, g2.full_name as signed_in_by
          from ev
          join residents r on r.id = ev.resident_id
+         left join v_resident_status vs on vs.id = r.id
          left join v_resident_room rm on rm.id = r.id
          left join profiles g1 on g1.id = ev.guard_id
          left join profiles g2 on g2.id = ev.next_guard
@@ -237,6 +242,21 @@ REPORTS['room-history'] = {
          where (ra.from_at at time zone s.local_timezone)::date <= $2
            and (ra.to_at is null or (ra.to_at at time zone s.local_timezone)::date >= $1)
          order by ra.from_at desc, r.last_name, r.first_name`,
+};
+
+// Breach reports issued in the range (migration 029).
+REPORTS.breaches = {
+  title: 'Breach reports issued',
+  ranged: true,
+  sql: `select b.issued_on::text as issued_on, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
+               case b.kind when 'house_rules' then 'breach of house rules' else 'misuse of the verification system' end as kind,
+               b.reference, p.full_name as issued_by
+          from breach_reports b
+          join residents r on r.id = b.resident_id
+          left join v_resident_room rm on rm.id = r.id
+          left join profiles p on p.id = b.issued_by
+         where b.issued_on between $1 and $2
+         order by b.issued_on desc, r.last_name, r.first_name`,
 };
 
 // Staff, visitors, contractors and suppliers on site (migration 024).

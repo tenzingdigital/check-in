@@ -222,12 +222,14 @@ CREATE TABLE __TENANT__.app_settings (
     home_countries text DEFAULT 'IE'::text NOT NULL,
     feature_visitors boolean DEFAULT false NOT NULL,
     feature_door_checkin boolean DEFAULT false NOT NULL,
+    holiday_max_days integer DEFAULT 14 NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
     CONSTRAINT app_settings_compliance_retention_days_check CHECK (((compliance_retention_days >= 1) AND (compliance_retention_days <= 36500))),
     CONSTRAINT app_settings_due_soon_after_hour_check CHECK (((due_soon_after_hour >= 0) AND (due_soon_after_hour <= 23))),
     CONSTRAINT app_settings_event_retention_days_check CHECK (((event_retention_days >= 1) AND (event_retention_days <= 3650))),
+    CONSTRAINT app_settings_holiday_max_days_check CHECK (((holiday_max_days >= 1) AND (holiday_max_days <= 90))),
     CONSTRAINT app_settings_home_countries_check CHECK ((home_countries ~ '^[A-Z]{2}(,[A-Z]{2})*$'::text)),
     CONSTRAINT app_settings_id_check CHECK (id),
     CONSTRAINT app_settings_idle_lock_minutes_check CHECK (((idle_lock_minutes >= 1) AND (idle_lock_minutes <= 720))),
@@ -454,7 +456,7 @@ CREATE TABLE __TENANT__.authorised_absences (
     CONSTRAINT authorised_absences_check CHECK ((to_date >= from_date)),
     CONSTRAINT authorised_absences_check1 CHECK (((ended_on IS NULL) OR ((ended_on >= from_date) AND (ended_on <= to_date)))),
     CONSTRAINT authorised_absences_check2 CHECK (((to_date - from_date) <= 366)),
-    CONSTRAINT authorised_absences_reason_check CHECK ((reason = ANY (ARRAY['holiday'::text, 'family'::text, 'medical'::text, 'education'::text, 'work'::text, 'other'::text])))
+    CONSTRAINT authorised_absences_reason_check CHECK ((reason = ANY (ARRAY['holiday'::text, 'family'::text, 'medical'::text, 'interview'::text, 'education'::text, 'work'::text, 'other'::text])))
 );
 
 
@@ -470,6 +472,7 @@ CREATE FUNCTION __TENANT__.authorise_absence(p_resident_id uuid, p_from date, p_
 declare
   v_res   __TENANT__.residents;
   v_adult integer;
+  v_holiday integer;
   v_row   __TENANT__.authorised_absences;
 begin
   if not __TENANT__.is_supervisor() then
@@ -488,7 +491,10 @@ begin
   if p_to - p_from > 366 then
     raise exception 'An authorised absence covers at most a year' using errcode = '22023';
   end if;
-  select adult_age_years into v_adult from __TENANT__.app_settings where id;
+  select adult_age_years, holiday_max_days into v_adult, v_holiday from __TENANT__.app_settings where id;
+  if p_reason = 'holiday' and p_to - p_from + 1 > v_holiday then
+    raise exception 'A holiday covers at most % consecutive days (Settings)', v_holiday using errcode = '22023';
+  end if;
   if v_res.date_of_birth > (p_from - make_interval(years => v_adult))::date and not coalesce(p_guardian_agreed, false) then
     raise exception 'A child''s absence needs a parent or guardian''s agreement recorded' using errcode = '23514';
   end if;
@@ -836,6 +842,15 @@ begin
       left join __TENANT__.profiles p on p.id = ra.changed_by
       where ra.resident_id = r.id
     ), '[]'::jsonb),
+    'breach_reports', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'kind', b.kind, 'issued_on', b.issued_on, 'reference', b.reference,
+               'issued_by', p.full_name, 'recorded_at', b.created_at
+             ) order by b.issued_on)
+      from __TENANT__.breach_reports b
+      left join __TENANT__.profiles p on p.id = b.issued_by
+      where b.resident_id = r.id
+    ), '[]'::jsonb),
     -- Every change an administrator made to this record, and every export
     -- of it. Art. 15 is "everything held about me"; that includes who
     -- edited it and when.
@@ -909,6 +924,50 @@ CREATE FUNCTION __TENANT__.is_supervisor() RETURNS boolean
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
   select __TENANT__.my_role() in ('supervisor', 'admin');
+$$;
+
+
+--
+
+-- Name: breach_reports; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.breach_reports (
+    id bigint NOT NULL,
+    resident_id uuid NOT NULL,
+    kind text NOT NULL,
+    issued_on date NOT NULL,
+    issued_by uuid,
+    reference text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT breach_reports_kind_check CHECK ((kind = ANY (ARRAY['house_rules'::text, 'misuse'::text]))),
+    CONSTRAINT breach_reports_reference_check CHECK (((reference IS NULL) OR (length(reference) <= 60)))
+);
+
+
+--
+
+-- Name: issue_breach(uuid, text, date, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.issue_breach(p_resident_id uuid, p_kind text, p_issued_on date DEFAULT NULL::date, p_reference text DEFAULT NULL::text) RETURNS __TENANT__.breach_reports
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_row __TENANT__.breach_reports;
+begin
+  if not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin can record a breach report' using errcode = '42501';
+  end if;
+  if not exists (select 1 from __TENANT__.residents where id = p_resident_id) then
+    raise exception 'Resident not found' using errcode = 'P0002';
+  end if;
+  insert into __TENANT__.breach_reports (resident_id, kind, issued_on, issued_by, reference)
+  values (p_resident_id, p_kind, coalesce(p_issued_on, __TENANT__.site_today()), auth.uid(), nullif(btrim(coalesce(p_reference, '')), ''))
+  returning * into v_row;
+  return v_row;
+end;
 $$;
 
 
@@ -1154,6 +1213,25 @@ declare v_days integer; v_n integer;
 begin
   select compliance_retention_days into v_days from __TENANT__.app_settings where id;
   delete from __TENANT__.authorised_absences where to_date < __TENANT__.site_today() - v_days;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+--
+
+-- Name: purge_expired_breach_reports(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_expired_breach_reports() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_days integer; v_n integer;
+begin
+  select compliance_retention_days into v_days from __TENANT__.app_settings where id;
+  delete from __TENANT__.breach_reports where issued_on < __TENANT__.site_today() - v_days;
   get diagnostics v_n = row_count;
   return v_n;
 end;
@@ -1773,6 +1851,8 @@ CREATE FUNCTION __TENANT__.search_residents(q text, include_departed boolean DEF
       or exists (select 1 from __TENANT__.v_resident_room x
                   where x.id = v.id
                     and (lower(x.room) = n.nq
+                         -- A prefix too: "B" lists Manor House, "K1" K1 and K10-K18.
+                         or lower(x.room) like n.nq || '%'
                          or lower(x.room_label) like '%' || n.nq || '%'
                          or lower(x.building || ' ' || x.room) like '%' || n.nq || '%'))
       or (
@@ -1785,7 +1865,7 @@ CREATE FUNCTION __TENANT__.search_residents(q text, include_departed boolean DEF
       )
     )
   order by
-    case when exists (select 1 from __TENANT__.v_resident_room x where x.id = v.id and lower(x.room) = n.nq) then 0
+    case when exists (select 1 from __TENANT__.v_resident_room x where x.id = v.id and (lower(x.room) = n.nq or lower(x.room) like n.nq || '%')) then 0
          when v.search_key like n.nq || '%'         then 0
          when v.search_key like '%' || n.nq || '%'  then 1
          else 2 end,
@@ -1945,6 +2025,27 @@ CREATE SEQUENCE __TENANT__.authorised_absences_id_seq
 --
 
 ALTER SEQUENCE __TENANT__.authorised_absences_id_seq OWNED BY __TENANT__.authorised_absences.id;
+
+
+--
+
+-- Name: breach_reports_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE __TENANT__.breach_reports_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+
+-- Name: breach_reports_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE __TENANT__.breach_reports_id_seq OWNED BY __TENANT__.breach_reports.id;
 
 
 --
@@ -2340,6 +2441,14 @@ ALTER TABLE ONLY __TENANT__.authorised_absences ALTER COLUMN id SET DEFAULT next
 
 --
 
+-- Name: breach_reports id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.breach_reports ALTER COLUMN id SET DEFAULT nextval('__TENANT__.breach_reports_id_seq'::regclass);
+
+
+--
+
 -- Name: room_assignments id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2371,6 +2480,15 @@ ALTER TABLE ONLY __TENANT__.app_settings
 
 ALTER TABLE ONLY __TENANT__.authorised_absences
     ADD CONSTRAINT authorised_absences_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: breach_reports breach_reports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.breach_reports
+    ADD CONSTRAINT breach_reports_pkey PRIMARY KEY (id);
 
 
 --
@@ -2584,6 +2702,14 @@ CREATE INDEX admin_audit_row_idx ON __TENANT__.admin_audit USING btree (table_na
 --
 
 CREATE INDEX authorised_absences_resident_idx ON __TENANT__.authorised_absences USING btree (resident_id, from_date, to_date);
+
+
+--
+
+-- Name: breach_reports_resident_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX breach_reports_resident_idx ON __TENANT__.breach_reports USING btree (resident_id, issued_on DESC);
 
 
 --
@@ -2804,6 +2930,14 @@ CREATE TRIGGER authorised_absences_audit AFTER INSERT OR DELETE OR UPDATE ON __T
 
 --
 
+-- Name: breach_reports breach_reports_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER breach_reports_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.breach_reports FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
 -- Name: buildings buildings_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2883,6 +3017,24 @@ ALTER TABLE ONLY __TENANT__.authorised_absences
 
 ALTER TABLE ONLY __TENANT__.authorised_absences
     ADD CONSTRAINT authorised_absences_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: breach_reports breach_reports_issued_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.breach_reports
+    ADD CONSTRAINT breach_reports_issued_by_fkey FOREIGN KEY (issued_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: breach_reports breach_reports_resident_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.breach_reports
+    ADD CONSTRAINT breach_reports_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
 
 
 --
@@ -3179,6 +3331,21 @@ ALTER TABLE __TENANT__.authorised_absences ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY authorised_absences_read ON __TENANT__.authorised_absences FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: breach_reports; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.breach_reports ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: breach_reports breach_reports_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY breach_reports_read ON __TENANT__.breach_reports FOR SELECT USING (__TENANT__.is_staff());
 
 
 --
@@ -3736,6 +3903,25 @@ GRANT ALL ON FUNCTION __TENANT__.is_supervisor() TO service_role;
 
 --
 
+-- Name: TABLE breach_reports; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.breach_reports TO service_role;
+GRANT SELECT ON TABLE __TENANT__.breach_reports TO authenticated;
+
+
+--
+
+-- Name: FUNCTION issue_breach(p_resident_id uuid, p_kind text, p_issued_on date, p_reference text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.issue_breach(p_resident_id uuid, p_kind text, p_issued_on date, p_reference text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.issue_breach(p_resident_id uuid, p_kind text, p_issued_on date, p_reference text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.issue_breach(p_resident_id uuid, p_kind text, p_issued_on date, p_reference text) TO service_role;
+
+
+--
+
 -- Name: FUNCTION join_household(p_resident_id uuid, p_with_resident_id uuid); Type: ACL; Schema: public; Owner: -
 --
 
@@ -3848,6 +4034,15 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_audit() TO service_role;
 
 REVOKE ALL ON FUNCTION __TENANT__.purge_expired_authorised_absences() FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.purge_expired_authorised_absences() TO service_role;
+
+
+--
+
+-- Name: FUNCTION purge_expired_breach_reports(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_expired_breach_reports() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_expired_breach_reports() TO service_role;
 
 
 --
@@ -4105,6 +4300,16 @@ GRANT ALL ON SEQUENCE __TENANT__.admin_audit_id_seq TO service_role;
 GRANT ALL ON SEQUENCE __TENANT__.authorised_absences_id_seq TO anon;
 GRANT ALL ON SEQUENCE __TENANT__.authorised_absences_id_seq TO authenticated;
 GRANT ALL ON SEQUENCE __TENANT__.authorised_absences_id_seq TO service_role;
+
+
+--
+
+-- Name: SEQUENCE breach_reports_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.breach_reports_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.breach_reports_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.breach_reports_id_seq TO service_role;
 
 
 --

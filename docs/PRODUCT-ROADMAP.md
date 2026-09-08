@@ -223,6 +223,36 @@ what already existed:
 - Waiting on Brighton: the absence-tracking email, the IPAS weekly-register
   template, room-layout examples.
 
+## Stage 2e — The centre call (Amy and Niamh, 8 September 2026)
+
+**Status: P1 built 8 September 2026 (migration 029), on the working
+branch.** Against the notes:
+
+- *Historical absence from the gate log, currently-absent list, room
+  search and multi-select, authorised absences, under-18s in the gate
+  history*: Stages 2c and 2d. Added here: a letter alone lists the block
+  ("B" for Manor House), "All shown" ticks a whole search, and every
+  absence report carries a child column so the safeguarding pattern is
+  visible.
+- *Holiday blocks of at most 14 consecutive days*: `holiday_max_days` in
+  Settings, enforced by `authorise_absence()`; an IPO interview is its own
+  reason and is not capped.
+- *Record that a breach was issued*: `breach_reports`, on the edit sheet,
+  on the Absences tab (with a name-or-room filter and a "today" column
+  that separates not-yet-checked-in from away), and a report.
+- *Approval status in the weekly report*: an absence in the app is
+  approved by construction (a supervisor recorded it); an unrecorded
+  absence is unapproved. The weekly IPAS report will read both.
+
+Still to do from the call, in the order the centre ranked them:
+rename Door to Gate; archive rooms rather than delete, with contracted
+capacity and bed configuration; the weekly IPAS report from their template
+(nationality held for that report only); a search box on the roll call and
+evacuation screens; real-versus-practice wording on the roll call; a
+default view per tablet; bulk depart; connecting the breach email; the
+help site's palette; the "not seen after N hours" figure to confirm with
+the centre; and whether 90 days is long enough for the movement log.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**

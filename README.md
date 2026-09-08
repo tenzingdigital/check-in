@@ -400,8 +400,14 @@ out of the two working apps:
   and closed when they leave. On the edit sheet and as a report. The label
   is kept, so history survives a room being removed.
 - **Search by room**: the Door and register find "B1" or "K12" as well as a
-  name, online and offline. Ticking one member of a family in *Select
-  several* ticks the family.
+  name, and a letter alone lists the block, online and offline. Ticking one
+  member of a family in *Select several* ticks the family, and *All* ticks
+  everyone the search found.
+- **Breach reports** (migration 029): that a report was issued to IPAS,
+  which kind (house rules, or misuse of the verification tablet), on what
+  day, by whom, with its reference. On the edit sheet, on the Absences tab
+  against each person, and as a report. Holidays are capped at
+  `holiday_max_days` (14) and an IPO interview is a reason of its own.
 - **Roll call: who was marked safe**: one row per person per roll call,
   residents and visitors, with the time, who marked them and the room they
   had at the time.
