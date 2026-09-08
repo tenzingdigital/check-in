@@ -559,7 +559,8 @@ function mountLogin({ onReady } = {}) {
 // Swipe a resident card to act on it without opening the detail panel — one
 // gesture per person on a tablet at the door. Shared because both apps use it:
 // the register swipes right to record a check-in, the gate swipes right to
-// sign in and left to sign out.
+// sign in and left to sign out, and the roll call swipes either way to mark
+// safe.
 //
 // Touch and pen only: a mouse drag on a button is not a gesture anyone means.
 // The card slides under the finger and only commits past SWIPE_FIRE pixels,
@@ -567,16 +568,18 @@ function mountLogin({ onReady } = {}) {
 // click listener eats the click that follows any real horizontal movement, so
 // a swipe never also opens the panel behind it.
 //
-//   onRight / onLeft — called with the card's data-id. Omit one to disable
-//   that direction (the card then will not slide that way at all).
-function mountCardSwipe({ onRight, onLeft } = {}) {
+//   onRight / onLeft — called with the card's data-id and the element. Omit
+//   one to disable that direction (the card then will not slide that way).
+//   selector — which elements swipe; "button.card" unless a page says
+//   otherwise (the gate's roll call swipes its own rows).
+function mountCardSwipe({ selector = "button.card", onRight, onLeft } = {}) {
   const FIRE = 90, TAP_SLOP = 12, MAX = 140;
   let swipe = null, swallow = false;
 
   document.addEventListener("pointerdown", (e) => {
     swallow = false;
     if (e.pointerType === "mouse") return;
-    const card = e.target.closest("button.card");
+    const card = e.target.closest(selector);
     if (!card) return;
     swipe = { card, id: card.dataset.id, x0: e.clientX, y0: e.clientY, dx: 0, horizontal: null };
   });
@@ -622,8 +625,8 @@ function mountCardSwipe({ onRight, onLeft } = {}) {
     }
     if (Math.abs(s.dx) > TAP_SLOP) swallow = true;
     if (!fire) return;
-    if (s.dx >=  FIRE && onRight) onRight(s.id);
-    if (s.dx <= -FIRE && onLeft)  onLeft(s.id);
+    if (s.dx >=  FIRE && onRight) onRight(s.id, s.card);
+    if (s.dx <= -FIRE && onLeft)  onLeft(s.id, s.card);
   }
   document.addEventListener("pointerup",     () => end(true));
   document.addEventListener("pointercancel", () => end(false));

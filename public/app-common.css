@@ -281,7 +281,7 @@
   /* overflow-x: clip (not hidden) so the sliding card is cut at the edge
      without the wrapper becoming a scroll container. */
   .swipe { position: relative; overflow-x: clip; overflow-clip-margin: 4px; }
-  .swipe > button.card { position: relative; z-index: 1; }
+  .swipe > button.card, .swipe > .rollrow { position: relative; z-index: 1; }
   .swipe-bg {
     position: absolute; inset: 0; border-radius: var(--radius);
     display: flex; align-items: center; padding: 0 18px;

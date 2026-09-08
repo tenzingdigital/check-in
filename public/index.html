@@ -27,6 +27,12 @@
   .need { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn-text); }
   .rollrow .btn { padding: 10px 14px; font-size: 14px; flex: none; }
   .rollrow.done .btn { background: var(--ok); color: var(--on-ok); border-color: transparent; }
+  /* A roll row slides like a register card: either direction is "Safe", in
+     the register's green, whatever the gate's strips are coloured. */
+  .rollrow.swipe-arm, .rollrow.swipe-arm-out { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); border-color: var(--ok); }
+  .swipe > .rollrow { margin-bottom: 0; }
+  .swipe:has(> .rollrow) { margin-bottom: 6px; }
+  .swipe:has(> .rollrow) .swipe-bg.right, .swipe:has(> .rollrow) .swipe-bg.left { background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); }
   .rollend { margin-top: 16px; display: flex; gap: 10px; }
   /* Assistance required, at a glance: amber, tappable, a filter when pressed. */
   .needchip {
@@ -662,13 +668,19 @@ async function renderRoll() {
   if (state.rollNeedOnly) {
     for (const [name, people] of groups) { const kept = people.filter((r) => needRank(r) === 0); if (kept.length) groups.set(name, kept); else groups.delete(name); }
   }
+  // A row swipes only while it can be marked: a roll call is running and the
+  // person is not yet safe. Marked rows and rows outside a roll call render
+  // bare and do not slide. Either direction is "Safe"; nothing un-marks.
+  const swipeWrap = (inner, can) => can
+    ? `<div class="swipe"><span class="swipe-bg right" aria-hidden="true">Safe ✓</span><span class="swipe-bg left" aria-hidden="true">Safe ✓</span>${inner}</div>`
+    : inner;
   const list = [...groups.entries()].map(([name, people]) => {
     people.sort((a, b) => key(a).localeCompare(key(b)) || String(a.full_name).localeCompare(String(b.full_name)));
     const done = roll ? people.filter((r) => roll.marks[r.id]).length : 0;
     return `
     <div class="rollgroup">
       <h3><span>${esc(name)}</span><span>${roll ? `${done}/${people.length}` : people.length}</span></h3>
-      ${people.map((r) => `
+      ${people.map((r) => swipeWrap(`
       <div class="rollrow ${roll && roll.marks[r.id] ? "done" : ""}" data-id="${esc(r.id)}">
         <span class="who">
           <span class="name">${esc(r.full_name)}</span>
@@ -678,20 +690,20 @@ async function renderRoll() {
           ].filter(Boolean).join(" · ")}${(r.room_label && state.settings?.feature_buildings) || (households && r.household_label) ? (r.evac_need && r.evac_need !== "none" ? " · " : "") : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : ""}</span>
         </span>
         ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}" aria-label="${roll.marks[r.id] ? "Marked safe" : "Mark safe"}">${roll.marks[r.id] ? "Safe ✓" : "Safe"}</button>` : ""}
-      </div>`).join("")}
+      </div>`, !!(roll && !roll.marks[r.id]))).join("")}
     </div>`;
   }).join("");
   const vgroup = visits.length ? `
     <div class="rollgroup">
       <h3><span>Staff, visitors and contractors</span><span>${roll ? `${vdone}/${visits.length}` : visits.length}</span></h3>
-      ${visits.map((v) => `
-      <div class="rollrow ${roll && vmarks[v.id] ? "done" : ""}">
+      ${visits.map((v) => swipeWrap(`
+      <div class="rollrow ${roll && vmarks[v.id] ? "done" : ""}" data-vid="${esc(v.id)}">
         <span class="who">
           <span class="name">${esc(v.name)}</span>
           <span class="meta"><span class="kind">${esc(KIND_LABEL[v.kind] || v.kind)}</span>${v.company ? " · " + esc(v.company) : ""} · arrived ${esc(timeOfDay(v.arrived_at))}</span>
         </span>
         ${roll ? `<button class="btn ${vmarks[v.id] ? "" : "ghost"}" type="button" data-vmark="${esc(v.id)}" aria-label="${vmarks[v.id] ? "Marked safe" : "Mark safe"}">${vmarks[v.id] ? "Safe ✓" : "Safe"}</button>` : ""}
-      </div>`).join("")}
+      </div>`, !!(roll && !vmarks[v.id]))).join("")}
     </div>` : "";
   const foot = roll ? `<div class="rollend"><button class="btn ghost wide" type="button" id="rollEnd">End ${roll.kind === "drill" ? "drill" : "roll call"}</button></div>` : "";
   body.innerHTML = head + (total ? list + vgroup : '<p class="empty">Nobody is recorded on site.</p>') + foot;
@@ -991,6 +1003,12 @@ mountCardSwipe({
   onRight: (id) => record(id, "in",  { fromSwipe: true }),
   onLeft:  (id) => record(id, "out", { fromSwipe: true }),
 });
+
+// Roll call: a swipe either way on a row marks the person safe. Rows render
+// with a swipe wrapper only while a roll call is running and the person is
+// not yet marked (see swipeWrap in renderRoll), so nothing else slides.
+const markBySwipe = (id, el) => (el.dataset.vid ? markVisit(el.dataset.vid) : markRoll(id));
+mountCardSwipe({ selector: ".swipe > .rollrow", onRight: markBySwipe, onLeft: markBySwipe });
 
 // Card clicks are delegated so re-rendering never orphans a listener.
 document.addEventListener("click", (e) => {
