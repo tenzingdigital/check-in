@@ -500,3 +500,15 @@ means the place; the screen name is the only thing that changed. The
 setting that lets a sign-in count as the day's check-in is renamed to
 match and carries a note to leave it off where the policy makes the
 resident responsible for their own check-in, as this centre's does.
+
+## The help guide, second pass (8 September 2026)
+
+"Hard to read, very text heavy." The first pass fixed the palette; the
+shape was still an essay. Now it is task first: an "I want to…" grid of
+ten cards at the top, one section per task, each opening with one
+sentence, a drawn swipe card where the words were describing a picture,
+a numbered recipe of three or four steps in big cards, a row of chips for
+the facts worth knowing, and everything else folded under "More detail".
+Roughly a third of the words are visible with the folds closed; nothing
+was cut, only put away until asked for. Section anchors kept, so the
+app's help links still land.
