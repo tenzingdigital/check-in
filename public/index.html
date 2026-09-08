@@ -33,7 +33,14 @@
   .swipe > .rollrow { margin-bottom: 0; }
   #rollBody .swipe { margin-bottom: 6px; }
   #rollBody .swipe-bg.right, #rollBody .swipe-bg.left { background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); }
-  .rollend { margin-top: 16px; display: flex; gap: 10px; }
+  /* The mode line: a real evacuation must not look like a practice. Red for
+     an incident, amber for a drill, and the End button beside the count so
+     it is on screen from the first second, not below two hundred rows. */
+  .rollmode { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid transparent; font-weight: 650; }
+  .rollmode.incident { background: color-mix(in srgb, var(--bad) 22%, var(--surface)); border-color: var(--bad); color: var(--text); }
+  .rollmode.drill    { background: color-mix(in srgb, var(--warn) 22%, var(--surface)); border-color: var(--warn); color: var(--text); }
+  .rollmode small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+  .rollmode .btn { flex: none; }
   /* Assistance required, at a glance: amber, tappable, a filter when pressed. */
   .needchip {
     display: block; width: 100%; text-align: left; margin-top: 10px; padding: 10px 12px; border-radius: 12px;
@@ -659,8 +666,12 @@ async function renderRoll() {
       ${roll ? `<b>${needingUnsafe}</b> of ${needing.length} needing assistance still to find` : `<b>${needing.length}</b> need${needing.length === 1 ? "s" : ""} assistance`}${state.rollNeedOnly ? " · showing only them, tap for everyone" : " · tap to see who"}
     </button>` : "";
   const head = roll ? `
+    <div class="rollmode ${roll.kind === "drill" ? "drill" : "incident"}" role="status">
+      <div>${roll.kind === "drill" ? "Drill" : "Evacuation roll call"}<small>${roll.kind === "drill" ? "A practice. The record says so." : "A real event. Account for everyone."} Started ${esc(timeOfDay(roll.started_at))}.</small></div>
+      <button class="btn ghost sm" type="button" id="rollEnd">End ${roll.kind === "drill" ? "drill" : "roll call"}</button>
+    </div>
     <div class="rollhead">
-      <div><b>${accounted} of ${total}</b> <span class="hint">safe · ${roll.kind === "drill" ? "drill" : "roll call"} started ${esc(timeOfDay(roll.started_at))}</span></div>
+      <div><b>${accounted} of ${total}</b> <span class="hint">safe</span></div>
       <span class="hint">${total - accounted} still to find</span>
     </div>
     <div class="rollprog"><div id="rollProg"></div></div>${needChip}` : `
@@ -705,7 +716,7 @@ async function renderRoll() {
         ${roll ? `<button class="btn ${vmarks[v.id] ? "" : "ghost"}" type="button" data-vmark="${esc(v.id)}" aria-label="${vmarks[v.id] ? "Marked safe" : "Mark safe"}">${vmarks[v.id] ? "Safe ✓" : "Safe"}</button>` : ""}
       </div>`, !!(roll && !vmarks[v.id]))).join("")}
     </div>` : "";
-  const foot = roll ? `<div class="rollend"><button class="btn ghost wide" type="button" id="rollEnd">End ${roll.kind === "drill" ? "drill" : "roll call"}</button></div>` : "";
+  const foot = "";
   body.innerHTML = head + (total ? list + vgroup : '<p class="empty">Nobody is recorded on site.</p>') + foot;
   // Width through the CSSOM: a style="" attribute would be refused by the CSP.
   const prog = $("rollProg");
