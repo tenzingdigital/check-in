@@ -58,6 +58,9 @@ for f in server.js database.js jobs.js staff.js seed-today.js seed-rooms.js lib/
 done
 [ "$fail" -eq 0 ] && echo "server, lib/, routes/ and test/ parse"
 
+step "The brochure site is consistent"
+python3 tools/check-site.py || fail=1
+
 step "The permission matrix document is current"
 node tools/gen-permissions-doc.js --check || fail=1
 

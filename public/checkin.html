@@ -94,15 +94,31 @@
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>CheckSteady <span>Daily register</span></h1>
-  <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
-  <div id="loginError" class="alert" hidden></div>
-  <form id="loginForm" autocomplete="on">
-    <input id="email" class="field" type="email" placeholder="Email" autocomplete="username" required>
-    <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
-    <button id="loginBtn" class="btn" type="submit">Log in</button>
-  </form>
-  <p class="hint centre"><a href="/help.html">New here? How CheckSteady works</a></p>
+  <div class="logincard">
+    <!-- mountBrand() puts the mark inside the h1. The screen's name is its own
+         line rather than a span inside the heading: at 380px "Daily register"
+         wrapped under the wordmark and left the mark stranded beside it. -->
+    <h1>CheckSteady</h1>
+    <p class="loginwhich">Daily register</p>
+    <p class="loginlede">Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
+    <div id="loginError" class="alert" hidden></div>
+    <form id="loginForm" autocomplete="on">
+      <label class="lbl" for="email">Email</label>
+      <input id="email" class="field" type="email" autocomplete="username"
+             autocapitalize="off" spellcheck="false" enterkeyhint="next" required>
+      <label class="lbl" for="password">Password</label>
+      <input id="password" class="field" type="password" autocomplete="current-password"
+             enterkeyhint="go" required>
+      <button id="loginBtn" class="btn" type="submit">Log in</button>
+    </form>
+    <!-- mountResetUI() inserts "Forgot your password?" and its panels after
+         the form; showMfa() inserts the code panel in the same place. -->
+  </div>
+  <p class="loginfoot">
+    <a href="/help.html">New here? How CheckSteady works</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://checksteady.ie/">checksteady.ie</a>
+  </p>
 </section>
 
 <!-- ========================= APP ========================= -->

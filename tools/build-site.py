@@ -67,7 +67,7 @@ def head(title, desc, canon, extra_ld=None, img="/og.png"):
         '<script type="application/ld+json">%s</script>' % json.dumps(b, separators=(",", ":"))
         for b in ld)
     return f"""<!doctype html>
-<html lang="en">
+<html lang="en-IE">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -91,6 +91,8 @@ def head(title, desc, canon, extra_ld=None, img="/og.png"):
 <meta name="twitter:description" content="{desc}">
 <meta name="twitter:image" content="{SITE}{img}">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preload" href="/fonts/plusjakartasans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
 {blocks}
 </head>"""
