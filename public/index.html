@@ -147,7 +147,15 @@
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
       <p class="jobline"><b class="gate">In &amp; out:</b><span>tap Sign in or Sign out on the card, or swipe it right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
-      <p class="hint tight">Verify the person first. Tap a name for detail. Tick two or more to sign them in or out together. <button class="selectbtn" type="button" id="selectAll" aria-pressed="false" data-tip="Ticks everyone the search and the tile filter show: type a room or pick Off site, then tick them all and sign them in or out together."><span class="box" aria-hidden="true"></span><span class="lbl">Select all shown</span></button></p>
+      <p class="hint tight">Verify the person first. Tap a name for detail. Tick two or more to sign them in or out together.</p>
+      <!-- "Select all shown" heads the tick column: its box sits in the same
+           48px slot as every card's, directly above them, so it reads as that
+           column's own control rather than a button that happens to be nearby.
+           The bar at the bottom carries the same act as "All" once anyone is
+           ticked; this is the one that is there before you start. -->
+      <div class="selectall">
+        <button class="selectbtn" type="button" id="selectAll" aria-pressed="false" data-tip="Ticks everyone the search and the tile filter show: type a room or pick Off site, then tick them all and sign them in or out together."><span class="box" aria-hidden="true"></span><span class="lbl">Select all shown</span></button>
+      </div>
       <div id="searchResults" class="list"></div>
       <div id="detail" class="detail" hidden></div>
       <div id="multiBar" class="multibar" hidden>
@@ -997,7 +1005,7 @@ async function enterApp() {
   syncRoll();
   mountTips();
   mountCoach({ app: "gate", title: "The gate in three lines", before: "searchResults", points: [
-    "Tap Sign in or Sign out on the card, or swipe it right for IN, left for OUT. Or tap the name and use the buttons on the sheet.",
+    "Tap Sign in or Sign out on the card, or swipe it right to sign IN, left to sign OUT. Or tap the name and use the buttons on the sheet.",
     "The three tiles at the top filter the list. Tap one, tap it again for everyone. Hold a tile for what it counts.",
     "Today's check-in is a different act. It lives on the Daily register, one tap away at the top.",
   ] });

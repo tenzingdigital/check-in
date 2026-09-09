@@ -601,6 +601,25 @@
   .selectbtn[aria-pressed="true"] .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .selectbtn[aria-pressed="true"] .box::before { content: "✓"; }
   .selectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* "Select all shown" above the register, heading the column of ticks.
+     It is the same control as .selectbtn, but laid out as a column header
+     rather than a chip: no border, and its box centred in the same 48px slot
+     .pick occupies on every card below it, so the two line up down the page.
+     22px to match .pick::before; (48 - 22) / 2 = 13px either side. */
+  /* padding-left is the card's own 1px border: .pick starts inside it, so
+     without this the header's box sits a pixel left of the column it heads. */
+  .selectall { display: flex; align-items: center; margin: 10px 0 6px; padding-left: 1px; }
+  .selectall .selectbtn {
+    margin-left: 0; padding: 4px 10px 4px 0; gap: 0;
+    border-color: transparent; background: transparent;
+  }
+  .selectall .selectbtn .box { width: 22px; height: 22px; border-radius: 6px; margin: 0 13px; flex: none; }
+  .selectall .selectbtn .lbl { padding-left: 6px; }   /* where a card's name starts */
+  .selectall .selectbtn:hover .box { border-color: var(--accent); }
+  .selectall .selectbtn[aria-pressed="true"] { border-color: transparent; }
+  .selectall .selectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+  .selectall .selectbtn[disabled] { opacity: .45; cursor: default; }
+  .selectall .selectbtn[disabled]:hover .box { border-color: var(--line-hover); }
   .grow        { flex: 1; }
   .mt6  { margin-top: 6px; }
   .mt8  { margin-top: 8px; }
