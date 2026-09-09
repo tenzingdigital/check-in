@@ -48,6 +48,7 @@ module.exports = [
   { area: 'Gate and register', name: 'The 30-day strip under the sheet', method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/days`, expect: STAFF },
   { area: 'Gate and register', name: "A resident's household members", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/household`, expect: STAFF },
   { area: 'Gate and register', name: "A resident's history: every movement and check-in over a range", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/history`, expect: STAFF },
+  { area: 'Gate and register', name: "Export a resident's history as a file; logged", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/history?format=csv&reason=matrix`, expect: SUPERVISOR },
   { area: 'Gate and register', name: "A resident's authorised absences", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/absences`, expect: STAFF },
   { area: 'Gate and register', name: "A resident's room history", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/rooms`, expect: STAFF },
   { area: 'Gate and register', name: "A resident's breach reports", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/breaches`, expect: STAFF },

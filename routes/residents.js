@@ -12,6 +12,7 @@
 // RPCs take the guard identity from auth.uid() precisely so that no argument
 // can be used to act as somebody else.
 const express = require('express');
+const { csv } = require('../lib/csv');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const { HttpError, uuidParam, intParam, dateParam } = require('../lib/api');
@@ -237,19 +238,36 @@ router.get('/:id/days', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-// GET /api/residents/:id/history?from=&to= — every movement and check-in
-// for one resident over a range (default the last 30 days, at most a year),
-// newest first, with who recorded it. What the centre managers asked for:
-// "search a name and see all their history with the date and time". Any
-// staff member: the same rows the log and the register already show, seen
-// from the person's side.
+// GET /api/residents/:id/history?from=&to=&kind= — every movement and
+// check-in for one resident over a range (default the last 30 days, at most
+// a year), newest first, with who recorded it. What the centre managers
+// asked for: "search a name and see all their history with the date and
+// time". Any staff member: the same rows the log and the register already
+// show, seen from the person's side.
+//
+// kind narrows it to one register: "gate" (In & out movements) or "checkin"
+// (the daily register); anything else, or nothing, is both.
+//
+// With format=csv the same rows come as a file. That is an export, so it
+// follows the rules every other export follows: a supervisor or admin, a
+// reason, and a line in the audit record (note_report, migration 019) with
+// the range — the same function the reports use, so the same 403 for a
+// guard. Viewing on screen stays open to any staff member and is not logged
+// here; opening the sheet is already on the access log.
+const HISTORY_KINDS = new Set(['all', 'gate', 'checkin']);
 router.get('/:id/history', wrap(async (req, res) => {
   const id = uuidParam(req.params.id, 'resident id');
   const to = req.query.to ? dateParam(req.query.to, 'to') : null;
   const from = req.query.from ? dateParam(req.query.from, 'from') : null;
   if (from && to && to < from) throw new HttpError(400, 'to must not be before from');
   if (from && to && (Date.parse(to) - Date.parse(from)) / 86400000 > 366) throw new HttpError(400, 'A history covers at most a year at a time');
-  const rows = await db.withIdentity(req.session.userId, async (client) => {
+  const kind = HISTORY_KINDS.has(req.query.kind) ? req.query.kind : 'all';
+  const asCsv = req.query.format === 'csv';
+  const reason = String(req.query.reason || '').trim();
+  if (asCsv && (!reason || reason.length > 200)) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
+
+  const { rows, resident } = await db.withIdentity(req.session.userId, async (client) => {
+    if (asCsv) await client.query('select note_report($1, $2, $3, $4)', ['resident_history:' + id, reason, from, to]);
     const { rows } = await client.query(
       `with s as (select local_timezone as tz from app_settings where id),
             b as (select coalesce($2::date, site_today() - 29) as d0, coalesce($3::date, site_today()) as d1)
@@ -263,12 +281,33 @@ router.get('/:id/history', wrap(async (req, res) => {
          ) x, s, b
         where x.occurred_at >= (b.d0::timestamp) at time zone s.tz
           and x.occurred_at <  ((b.d1 + 1)::timestamp) at time zone s.tz
+          and ($4 = 'all' or ($4 = 'gate' and x.kind in ('in', 'out')) or ($4 = 'checkin' and x.kind = 'checkin'))
         order by x.occurred_at desc
         limit 2000`,
-      [id, from, to]);
-    return rows;
+      [id, from, to, kind]);
+    let resident = null;
+    if (asCsv) {
+      const r = await client.query(`select first_name || ' ' || last_name as full_name from residents where id = $1`, [id]);
+      resident = r.rows[0] ? r.rows[0].full_name : null;
+    }
+    return { rows, resident };
+  }).catch((err) => {
+    if (err && err.code === '42501') throw new HttpError(403, 'Only a supervisor or admin can export a history');
+    throw err;
   });
-  res.json(rows);
+  if (!asCsv) return res.json(rows);
+
+  const label = { in: 'IN', out: 'OUT', checkin: 'Check-in' };
+  const out = rows.map((e) => ({
+    resident: resident || '', register: e.kind === 'checkin' ? 'Daily register' : 'In & out', event: label[e.kind] || e.kind,
+    occurred_at: e.occurred_at, recorded_at: e.recorded_at, recorded_offline: e.late_entry ? 'yes' : '', recorded_by: e.guard_name,
+  }));
+  const slug = String(resident || 'resident').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'resident';
+  const range = from || to ? `-${from || 'start'}-to-${to || 'today'}` : '-last-30-days';
+  const which = kind === 'all' ? '' : `-${kind === 'gate' ? 'in-and-out' : 'check-ins'}`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="history-${slug}${which}${range}.csv"`);
+  res.send('\ufeff' + csv(out));
 }));
 
 // Authorised absences (migration 028). Any staff member sees them; only a

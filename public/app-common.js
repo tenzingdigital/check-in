@@ -483,7 +483,12 @@ function mountRangePresets(container, fromEl, toEl, onPick) {
 // A resident's history: every movement and check-in with the date and time,
 // over a range, newest first. Shared by the gate sheet, the register sheet
 // and the admin edit sheet; each hands it a container to draw into.
-function mountHistory(container, residentId) {
+// One person's history: the movements from In & out and the check-ins from
+// the daily register together, newest first. The register filter shows one
+// or the other; canExport (a supervisor or admin) adds a CSV download, which
+// like every export asks for a reason and goes on the audit record — the
+// server refuses it for anyone else, so the button is only drawn for them.
+function mountHistory(container, residentId, { canExport = false } = {}) {
   const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 29);
   container.innerHTML = `
     <div class="history">
@@ -494,16 +499,27 @@ function mountHistory(container, residentId) {
         <button class="btn ghost sm" type="submit">Show</button>
       </form>
       <div class="chips hpresets"></div>
+      <div class="row hkind" role="group" aria-label="Which register">
+        <button type="button" data-kind="all" aria-pressed="true">Both</button>
+        <button type="button" data-kind="gate" aria-pressed="false">In &amp; out</button>
+        <button type="button" data-kind="checkin" aria-pressed="false">Check-ins</button>
+        ${canExport ? `<button type="button" class="hexport" aria-expanded="false">Export CSV</button>` : ""}
+      </div>
+      ${canExport ? `<form class="row hexportform" hidden>
+        <input class="field grow" name="reason" type="text" maxlength="200" required placeholder="Reason for the export" aria-label="Reason for the export">
+        <button class="btn sm" type="submit">Download</button>
+      </form>` : ""}
       <div class="hlist"><span class="hint">Loading…</span></div>
     </div>`;
   const list = container.querySelector(".hlist");
   const form = container.querySelector(".hrange");
+  let kind = "all";
+  const query = () => `from=${encodeURIComponent(form.elements.from.value)}&to=${encodeURIComponent(form.elements.to.value)}&kind=${kind}`;
   const load = async () => {
     if (typeof Offline !== "undefined" && !Offline.isOnline()) { list.innerHTML = '<p class="hint">History needs a connection.</p>'; return; }
-    const f = form.elements.from.value, t = form.elements.to.value;
-    const rows = await guarded(() => apiGet(`/api/residents/${residentId}/history?from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`), (err) => { list.innerHTML = `<p class="hint">${esc(err.message)}</p>`; });
+    const rows = await guarded(() => apiGet(`/api/residents/${residentId}/history?${query()}`), (err) => { list.innerHTML = `<p class="hint">${esc(err.message)}</p>`; });
     if (!rows) return;
-    if (!rows.length) { list.innerHTML = '<p class="hint">Nothing recorded in this range.</p>'; return; }
+    if (!rows.length) { list.innerHTML = `<p class="hint">${kind === "all" ? "Nothing recorded in this range." : kind === "gate" ? "No movements in this range." : "No check-ins in this range."}</p>`; return; }
     const label = { in: "IN", out: "OUT", checkin: "Check-in" };
     list.innerHTML = rows.map((e) => `
       <div class="logrow">
@@ -514,6 +530,29 @@ function mountHistory(container, residentId) {
   };
   form.addEventListener("submit", (e) => { e.preventDefault(); load(); });
   mountRangePresets(container.querySelector(".hpresets"), form.elements.from, form.elements.to, load);
+  container.querySelectorAll(".hkind button[data-kind]").forEach((b) => b.addEventListener("click", () => {
+    kind = b.dataset.kind;
+    container.querySelectorAll(".hkind button[data-kind]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    load();
+  }));
+  const exportBtn = container.querySelector(".hexport"), exportForm = container.querySelector(".hexportform");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", () => {
+      exportForm.hidden = !exportForm.hidden;
+      exportBtn.setAttribute("aria-expanded", String(!exportForm.hidden));
+      if (!exportForm.hidden) exportForm.elements.reason.focus();
+    });
+    exportForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const reason = exportForm.elements.reason.value.trim();
+      if (!reason) { toast("Give the reason for the export", "err"); exportForm.elements.reason.focus(); return; }
+      if (typeof Offline !== "undefined" && !Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
+      // A file download: the browser saves it and stays on the page.
+      window.location.href = `/api/residents/${residentId}/history?${query()}&format=csv&reason=${encodeURIComponent(reason)}`;
+      toast("Export recorded and downloading", "ok");
+      exportForm.hidden = true; exportBtn.setAttribute("aria-expanded", "false");
+    });
+  }
   load();
 }
 
@@ -752,6 +791,45 @@ function mountCardSwipe({ selector = "button.card", onRight, onLeft } = {}) {
     e.stopPropagation();
     e.preventDefault();
   }, true);
+}
+
+// ---- the detail sheet: a bar that stays put, and three more ways off it ----
+// The sheet's only exit used to be the Close button under the actions, which
+// on a phone is below the fold once the sheet has scrolled. Every sheet now
+// opens with this bar at the top: the grab handle and a ✕ that stay in view
+// while the rest scrolls (position: sticky). Each page's renderDetail() puts
+// it first in the markup.
+function sheetBar() {
+  return `<div class="sheetbar"><button class="x" type="button" aria-label="Close" title="Close">✕</button></div>`;
+}
+
+// Installed once per page. Closes the sheet on: a tap on the bar (the ✕ or
+// the handle), Escape on a keyboard, and a tap on the dimmed page behind the
+// sheet. The outside tap runs in the capture phase, so a tap on another
+// resident's card closes this sheet first and then the card's own handler
+// opens theirs — one tap, not two. A tap on the toast or a tooltip is
+// neither inside nor outside, and leaves the sheet alone. Escape while
+// typing in a field on the sheet is the field's (the admin edit form would
+// otherwise lose its changes to a stray key); the ✕ is there for that.
+function mountSheetDismiss(onClose, { id = "detail" } = {}) {
+  const open = () => { const d = $(id); return d && !d.hidden ? d : null; };
+  document.addEventListener("click", (e) => {
+    const d = open();
+    if (!d) return;
+    if (e.target.closest(".sheetbar")) { onClose(); return; }
+    if (d.contains(e.target)) return;
+    if (e.target.closest("#toast, #tipPop")) return;
+    onClose();
+  }, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    const d = open();
+    if (!d) return;
+    const a = document.activeElement;
+    if (a && d.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    e.preventDefault();
+    onClose();
+  });
 }
 
 async function logout() {

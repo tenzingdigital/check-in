@@ -1546,6 +1546,31 @@ async function main() {
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
+  await test("a resident's history filters by register and exports as CSV for a supervisor with a reason", async () => {
+    const found = await supC.fetch("/api/residents?q=brennan");
+    const rid = found.json[0].id;
+    const all = await api.fetch(`/api/residents/${rid}/history`);
+    assert.equal(all.status, 200, all.text);
+    assert.ok(all.json.some((e) => e.kind === "checkin"), "expected a check-in in the history");
+    const chk = await api.fetch(`/api/residents/${rid}/history?kind=checkin`);
+    assert.ok(chk.json.length > 0 && chk.json.every((e) => e.kind === "checkin"), "kind=checkin left a movement in");
+    const gate = await api.fetch(`/api/residents/${rid}/history?kind=gate`);
+    assert.ok(gate.json.every((e) => e.kind === "in" || e.kind === "out"), "kind=gate left a check-in in");
+    assert.equal(all.json.length, chk.json.length + gate.json.length, "the two registers together are the whole history");
+    const asGuard = await api.fetch(`/api/residents/${rid}/history?format=csv&reason=test`);
+    assert.equal(asGuard.status, 403, "a guard exported a history");
+    const noReason = await supC.fetch(`/api/residents/${rid}/history?format=csv`);
+    assert.equal(noReason.status, 400);
+    const csvRes = await supC.fetch(`/api/residents/${rid}/history?format=csv&kind=checkin&reason=Solicitor+request`);
+    assert.equal(csvRes.status, 200, csvRes.text);
+    assert.match(csvRes.headers.get("content-type"), /text\/csv/);
+    assert.match(csvRes.headers.get("content-disposition"), /history-.*check-ins.*\.csv/);
+    assert.match(csvRes.text, /^\ufeff?resident,register,event,occurred_at,recorded_at,recorded_offline,recorded_by\r\n/);
+    assert.ok(csvRes.text.split("\r\n").slice(1).filter(Boolean).every((l) => /Daily register,Check-in,/.test(l)), "a movement row is in a check-ins export");
+    const logged = await withOwner((c) => c.query(`select 1 from public.admin_audit where table_name = 'reports' and row_id = $1 and note like 'Solicitor request%'`, ["resident_history:" + rid]));
+    assert.equal(logged.rows.length, 1, "the export is not on the audit record");
+  });
+
   await test("the register and attendance reports come as CSV and JSON, and the export is logged", async () => {
     const today = siteToday();
     const from = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
