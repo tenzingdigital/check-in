@@ -11,12 +11,19 @@ and it is deliberately the first thing in the file.
 | **Web service** | `hut-check-in` — Node 22, serves `public/` and `/api` |
 | **Database** | `hut-db` — Render Postgres 16 |
 | **Nightly cron** | `hut-nightly` — the maintenance `pg_cron` used to run |
-| **Live URL** | _fill in_ |
+| **Brochure site** | `checksteady-site` — static, published from `site/` |
+| **App URL** | `app.checksteady.ie` |
+| **Site URL** | `checksteady.ie` (and `www.`) |
 
-One vendor, one region, one bill. There is no Supabase project and no separate
-static host: the same Express service that serves the two HTML files also
-serves the API they call, which is why the session cookie is a first-party
-cookie and why there is no CORS configuration anywhere in this repo.
+One vendor, one region, one bill. The same Express service that serves the two
+HTML files also serves the API they call, which is why the session cookie is a
+first-party cookie and why there is no CORS configuration anywhere in this
+repo. The brochure site is the one exception and is a separate static service:
+an edit to marketing copy must not restart the app mid-shift.
+
+**Both hostnames are declared in `render.yaml` but are inert until DNS points
+at Render.** Add the records Render's dashboard shows for each service: a CNAME
+for `app.` and `www.`, and an A or ALIAS record for the apex.
 
 The stack and the file layout mirror `tenzingdigital/scheduler` — Express on
 Node 22, `pg`, numbered SQL migrations applied at boot, vanilla front end with
@@ -216,6 +223,61 @@ carries dates of birth. Guards read `v_resident_status` and
 birth. The acceptance suite asserts this.
 
 ---
+
+## Self-serve trials
+
+A centre can start its own trial from `checksteady.ie/trial/` without anyone at
+Tenzing doing anything. Migration 009 already built the whole trial
+*lifecycle* — `status = 'trial'`, `trial_ends_at`, `tenant_may_write()` going
+false when it lapses, `expire_lapsed_trials()` in the nightly job. Migration
+034 added the front door.
+
+    POST /signup            writes public.signup_requests, sends one email
+    GET  /signup/confirm    provisions the centre, then redirects to /?reset=…
+
+**Nothing is provisioned before the email is proven.** Provisioning runs
+`create schema` plus the whole of `tenant/template.sql`, and a public endpoint
+that does that on an unverified POST is a way to fill the database from a
+script. The POST writes a pending row and sends a link; the click on the link
+is what creates the centre. That is the single most important property of this
+route, and `test/signup.test.js` asserts it first.
+
+What else guards it, in order of how much work it does:
+
+- Per-address (3/hour, in Postgres, survives a restart) and per-IP (5/hour, in
+  memory, same reasoning as the login throttle) rate limits.
+- Throwaway email domains refused. Not a security control — it removes the
+  casual case and keeps trials contactable.
+- An address that already has a login is told to sign in, rather than getting
+  a second centre it cannot reach.
+- The link is single-use and lasts 24 hours; a failure part-way through unwinds
+  the tenant, the schema and the login before returning.
+
+The `/api` cross-origin check is deliberately **not** extended to `/signup`:
+the form lives on `checksteady.ie` and posts to `app.checksteady.ie`, so it is
+cross-origin by design. The site's own CSP names that origin in `form-action`
+— with `form-action 'none'` the browser blocks the submit *silently*.
+
+### Sample data
+
+The form asks whether to start with sample residents or empty, because the
+answer changes what the person sees in the first second and because fabricated
+residents must never appear in a register somebody believed was empty.
+
+`lib/demoSeed.js` writes about thirty fictional residents across rooms, with
+families, evacuation needs, three weeks of check-ins, somebody on the attention
+list and somebody on an authorised absence — and turns on the buildings,
+evacuation, households and visitors features, which default to off. A trial
+exists to show the product.
+
+**Every row it writes is registered in `public.tenant_demo_rows`**, so
+`DELETE /api/settings/demo-data` removes exactly those people and nothing else.
+A trial can become a real register without fabricated people staying in it, and
+the button that does it sits at the top of Admin → Residents until it is used.
+The registry lives in `public` rather than as a column on the tenant's own
+`residents` table because there is no per-tenant migration ledger yet
+(`docs/MULTI-TENANCY.md`): a column in `tenant/template.sql` would reach
+centres provisioned afterwards and not the ones already running.
 
 ## Setup
 

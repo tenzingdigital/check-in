@@ -9,6 +9,8 @@ const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const { HttpError } = require('../lib/api');
+const tenancy = require('../lib/tenancy');
+const { clearDemoCentre } = require('../lib/demoSeed');
 
 const router = express.Router();
 
@@ -95,6 +97,45 @@ router.patch('/', wrap(async (req, res) => {
   });
   if (!row) throw new HttpError(403, 'Only an administrator can change settings');
   res.json(row);
+}));
+
+// ---------------------------------------------------------------------------
+// Sample data — what a trial started with, and how to be rid of it
+// ---------------------------------------------------------------------------
+//   GET    /api/settings/demo-data   how many sample residents are left
+//   DELETE /api/settings/demo-data   remove exactly those, and nothing else
+//
+// A trial that started with sample residents may become a real register.
+// Fabricated people must never sit in a statutory record beside real ones, so
+// every row the seed wrote is registered in public.tenant_demo_rows
+// (migration 034) and this removes exactly that set. Anything the centre added
+// itself — including a real resident moved into a sample room — stays, which
+// is why the rooms are only removed when nothing is left in them.
+//
+// Runs as the owner because the registry lives in public and the delete
+// crosses into the tenant's schema, so the caller's admin role is checked here
+// explicitly rather than by a row policy.
+async function demoContext(req) {
+  const t = await db.withOwner((client) => tenancy.schemaForUser(client, req.session.userId));
+  return t;
+}
+
+router.get('/demo-data', wrap(async (req, res) => {
+  const t = await demoContext(req);
+  const n = await db.withOwner(async (client) => (await client.query(
+    `select count(*)::int as n from public.tenant_demo_rows
+      where tenant_id = $1 and kind = 'resident'`, [t.tenantId])).rows[0].n);
+  res.json({ residents: n });
+}));
+
+router.delete('/demo-data', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') {
+    throw new HttpError(403, 'Only an administrator can clear the sample data');
+  }
+  const t = await demoContext(req);
+  const out = await db.withOwner((client) =>
+    clearDemoCentre(client, { schema: t.schema, tenantId: t.tenantId }));
+  res.json(out);
 }));
 
 module.exports = router;

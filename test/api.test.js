@@ -645,7 +645,11 @@ async function main() {
         where table_schema = $1
         order by table_name, column_name`, [schema]));
 
-    const shared = new Set(["tenants", "schema_migrations"]);
+    // Platform tables: they live in public and are deliberately NOT per-tenant.
+    // signup_requests holds trial requests before any centre exists;
+    // tenant_demo_rows says which rows a sample seed wrote, across every
+    // tenant (migration 034).
+    const shared = new Set(["tenants", "schema_migrations", "signup_requests", "tenant_demo_rows"]);
     const ref = (await cols("public")).rows.filter((r) => !shared.has(r.table_name));
     const tenant = (await cols("t_verify")).rows;
 
@@ -657,7 +661,7 @@ async function main() {
 
   await test("every view, function, policy and index is provisioned too", async () => {
     const count = (sql, schema) => withOwner((c) => c.query(sql, [schema]));
-    const shared = `('tenants','schema_migrations','immutable_unaccent','touch_updated_at','tenant_may_write','expire_lapsed_trials','handle_new_user')`;
+    const shared = `('tenants','schema_migrations','signup_requests','tenant_demo_rows','immutable_unaccent','touch_updated_at','tenant_may_write','expire_lapsed_trials','sweep_signup_requests','handle_new_user')`;
 
     const views = async (s) => (await count(
       `select table_name from information_schema.views where table_schema=$1 order by 1`, s)).rows.map((r) => r.table_name);

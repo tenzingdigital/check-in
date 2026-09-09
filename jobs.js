@@ -57,6 +57,10 @@ const PLATFORM_JOBS = [
   ["purge-expired-login-events", "select auth.purge_expired_login_events()"],
   ["purge-expired-mfa", "select auth.purge_expired_mfa()"],
   ["expire-lapsed-trials", "select public.expire_lapsed_trials()"],
+  // Self-serve trial requests: unconfirmed ones are rubbish after a day,
+  // confirmed ones are kept a fortnight so support can answer "I signed up and
+  // nothing arrived", then go. Neither holds resident data (migration 034).
+  ["sweep-signup-requests", "select public.sweep_signup_requests()"],
 ];
 
 // Every run leaves a row, so v_system_health can say when close-out last

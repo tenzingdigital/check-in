@@ -132,6 +132,19 @@
   .btn.small { padding: 12px 14px; font-size: 15px; flex: none; }
   .danger { color: var(--bad); }
   .btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
+  /* The sample-data notice on a trial. Amber, because it is a thing to do
+     before going live, not an error. */
+  .demobar {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin: 10px 0; padding: 12px 14px; border-radius: var(--radius);
+    background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  }
+  .demobar > div { flex: 1; min-width: 15rem; display: flex; flex-direction: column; gap: 2px; }
+  .demobar b { font-size: 15px; }
+  .demobar span { font-size: 13px; color: var(--muted); }
+  .demobar .btn { flex: none; }
+
   .pill.departed { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
   .notice { padding: 14px 16px; }
   /* Staff cards on a phone: the actions get a row of their own. */
@@ -214,6 +227,18 @@
         <button type="button" data-status="departed" aria-pressed="false">Departed</button>
       </nav>
       <p class="hint tight" id="famHint">Tap a name to open the record. <button class="selectbtn" type="button" id="famToggle" aria-pressed="false" data-tip="Tick several people, then act on them all: make them a family, or mark them departed on one date. A child in a family appears with a parent on the roll call; if one of them is already in a family, the others join it."><span class="box" aria-hidden="true"></span><span class="lbl">Select several</span></button></p>
+      <!-- Sample data. Shown only to a trial that started with it, and only
+           to an administrator, because clearing it deletes residents. The
+           promise made on the trial page is kept here: a centre can turn a
+           demo into its own register without fabricated people staying in it. -->
+      <div id="demoBar" class="demobar" hidden>
+        <div>
+          <b>This site opened with sample residents.</b>
+          <span id="demoCount">Fictional people, so every screen had something in it.</span>
+          <span>Clear them before you record anyone real — nothing you added yourself is touched.</span>
+        </div>
+        <button class="btn ghost sm danger-ghost" type="button" id="demoClear">Remove the sample residents</button>
+      </div>
       <div id="famBar" class="multibar" hidden>
         <b id="famCount">0 selected</b>
         <button class="btn primary-in sm" type="button" id="famMake" hidden>Family</button>
@@ -562,6 +587,48 @@ async function makeFamily() {
 }
 
 let searchToken = 0;
+// Sample data: ask once per load of the Residents tab whether any is left.
+// A centre that never had it, and every centre after it is cleared, sees
+// nothing — so this costs one cheap request and no screen space.
+async function refreshDemoBar() {
+  const bar = $("demoBar");
+  if (!canStaff()) { bar.hidden = true; return; }   // admins only; clearing deletes people
+  const out = await guarded(() => apiGet("/api/settings/demo-data"), () => {});
+  const n = out && out.residents;
+  bar.hidden = !n;
+  if (n) {
+    $("demoCount").textContent =
+      `${n} fictional ${n === 1 ? "person" : "people"}, so every screen had something in it.`;
+  }
+}
+
+$("demoClear").addEventListener("click", async () => {
+  const btn = $("demoClear");
+  if (btn.dataset.armed !== "1") {
+    // One deliberate second tap, the same shape as every other destructive
+    // act here: this removes residents and everything recorded against them.
+    btn.dataset.armed = "1";
+    btn.textContent = "Tap again to remove them";
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove the sample residents"; }, 5000);
+    return;
+  }
+  btn.dataset.armed = "";
+  btn.disabled = true;
+  const out = await guarded(
+    () => apiDelete("/api/settings/demo-data"),
+    (err) => { btn.disabled = false; btn.textContent = "Remove the sample residents"; toast("Not cleared: " + err.message, "err"); },
+  );
+  btn.disabled = false;
+  btn.textContent = "Remove the sample residents";
+  if (!out) return;
+  toast(out.keptRooms
+    ? `Sample residents removed. The rooms stayed — somebody real is in them.`
+    : `Sample residents removed.`, "ok");
+  refreshDemoBar();
+  loadResidents();
+  loadBuildings();
+});
+
 async function loadResidents() {
   const token = ++searchToken;
   const q = $("q").value.trim();
@@ -1609,7 +1676,7 @@ function selectTab(name) {
     $("panel" + cap).hidden = t !== name;
   }
   renderDetail(null);
-  if (name === "residents") loadResidents();
+  if (name === "residents") { loadResidents(); refreshDemoBar(); }
   if (name === "absences") loadAbsences();
   if (name === "buildings") loadBuildings();
   if (name === "reports") loadReports();

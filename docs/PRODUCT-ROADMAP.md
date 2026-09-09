@@ -262,6 +262,34 @@ evacuation ends (migration 033). Still to confirm with the centre: the
 "not seen after N hours" figure, and whether 90 days is long enough for
 the movement log.
 
+## Stage 5b — Self-serve trials
+
+**Status: built 9 September 2026 (migration 034).** Stage 5 made many centres
+possible; this makes a centre able to start one without us. The lifecycle was
+already there from migration 009 — the missing piece was only the front door.
+
+- `POST /signup` from the brochure site writes a pending request and sends one
+  email. It provisions nothing: the click on the emailed link is the proof of
+  an inbox, and only that creates a schema.
+- `GET /signup/confirm` provisions, seeds if asked, creates the first
+  administrator and redirects into the app to choose a password — one email and
+  one click, not two.
+- The form asks sample-or-empty. A demo centre with nothing in it teaches
+  nobody anything; a register with fabricated people in it that somebody
+  believed was empty is worse. So it is a question, and every seeded row is
+  registered so Admin can clear exactly those.
+- Rate limits per address and per connection, throwaway domains refused, an
+  existing account told to sign in, single-use links that expire in a day.
+- `test/signup.test.js` and `./test/signup.sh`, wired into `check.sh`.
+
+**Still open.** A trial has no banner of its own inside the app yet: a centre
+on day six is not told so, and a centre on day eight discovers the site is
+read-only by trying to record a check-in and being refused. The refusal is
+correct and the data is safe, but it should be announced before it happens —
+the session endpoint would need to return the tenant's status and
+`trial_ends_at`, and both front ends a strip under the header. That is the next
+piece of this stage.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**
