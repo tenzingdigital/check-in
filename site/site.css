@@ -299,3 +299,123 @@ a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .footbar a { color: var(--foot-ink); text-decoration: underline; text-underline-offset: 2px; }
 @media (max-width: 860px) { .footgrid { grid-template-columns: 1fr 1fr; row-gap: 32px; } .footcol-brand { grid-column: 1 / -1; } }
 @media (max-width: 520px) { .footgrid { grid-template-columns: 1fr; } .footbar .wrap { justify-content: flex-start; } }
+
+/* ===========================================================================
+   Inner pages — added 9 September 2026 with the feature, sector and pricing
+   pages. The home page was the whole site until then, so everything below is
+   for a page that is mostly prose: a breadcrumb, a page header, body copy at a
+   readable measure, a FAQ list, and the trial sign-up form.
+
+   Two constraints shape all of it, both from the site's CSP in render.yaml:
+   there is no JavaScript on this site at all (default-src 'none' and no
+   script-src), and no style="" attributes (style-src 'self'). Anything that
+   would normally be a toggle is a <details>, and every rule lives here.
+   ========================================================================= */
+
+/* ---- breadcrumb ---- */
+.crumb { font-size: 14px; color: var(--text-muted); padding-top: 26px; }
+.crumb a { color: var(--text-2); text-decoration: none; border-bottom: 1px solid transparent; }
+.crumb a:hover { border-bottom-color: var(--text-2); }
+.crumb span { padding: 0 6px; color: var(--border-2); }
+
+/* ---- page header ---- */
+.pagehead { padding: clamp(2rem, 5vw, 3.25rem) 0 clamp(1.5rem, 4vw, 2.5rem); }
+.pagehead .eyebrow {
+  font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--primary); margin: 0 0 12px;
+}
+.pagehead h1 { max-width: 18ch; }
+.pagehead + .section { padding-top: clamp(1rem, 2vw, 1.75rem); border-top: 0; }
+.pagehead .lede { color: var(--text-2); max-width: 60ch; }
+
+/* ---- prose ---- */
+.prose h2 { margin-top: 2.5rem; }
+.prose h2:first-child { margin-top: 0; }
+.prose h3 { font-size: 1.15rem; margin: 2rem 0 .6rem; }
+.prose ul, .prose ol { margin: 0 0 1rem; padding-left: 1.25rem; max-width: 62ch; color: var(--text-2); }
+.prose li { margin-bottom: .5rem; line-height: 1.6; }
+.prose li strong { color: var(--text); }
+
+/* A claim and its consequence, side by side. Two columns on a desk, stacked
+   on a phone; the border is the only decoration. */
+.pairs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--border);
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 1.5rem 0; }
+.pairs > div { background: var(--surface); padding: 20px 22px; }
+.pairs h3 { margin: 0 0 6px; font-size: 1rem; }
+.pairs p { margin: 0; font-size: 15px; line-height: 1.6; }
+@media (max-width: 700px) { .pairs { grid-template-columns: 1fr; } }
+
+/* ---- FAQ. <details> because the site has no JavaScript. ---- */
+.faq { margin: 1.5rem 0 0; max-width: 62ch; }
+.faq details { border-bottom: 1px solid var(--border); }
+.faq summary {
+  cursor: pointer; padding: 16px 28px 16px 0; font-weight: 600; color: var(--text);
+  list-style: none; position: relative; line-height: 1.45;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: "+"; position: absolute; right: 4px; top: 14px;
+  font-size: 20px; font-weight: 400; color: var(--text-muted);
+}
+.faq details[open] summary::after { content: "\2212"; }
+.faq summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.faq details > p { padding: 0 0 16px; margin: 0; }
+.faq details > p + p { padding-top: 0; margin-top: -8px; }
+
+/* ---- the trial sign-up form ---- */
+/* It posts to the app's origin, which is why render.yaml names that origin in
+   form-action. No JavaScript: the app answers the POST with a full page. */
+.signup {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: clamp(20px, 4vw, 32px); box-shadow: var(--shadow); max-width: 30rem;
+}
+.signup h2 { font-size: 1.25rem; margin-bottom: 6px; }
+.signup .sub { font-size: 15px; margin-bottom: 20px; }
+.field-row { margin-bottom: 16px; }
+.field-row label { display: block; font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.field-row .note { display: block; font-weight: 400; color: var(--text-muted); font-size: 13px; margin-top: 2px; }
+.field-row input[type="text"], .field-row input[type="email"] {
+  width: 100%; padding: 11px 13px; font: inherit; font-size: 16px; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--radius-sm);
+}
+.field-row input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
+/* The sample-data choice: two radio cards, because it is the one decision on
+   the form and a select would hide half of it. */
+/* A fieldset, for the grouping a screen reader needs — but stripped of the
+   browser's default border and inset legend, which read as an unintended box. */
+.choice { display: grid; gap: 10px; margin: 0 0 20px; padding: 0; border: 0; }
+.choice legend {
+  padding: 0; margin-bottom: 8px; float: left; width: 100%;
+  font-size: 14px; font-weight: 600; color: var(--text);
+}
+.choice legend + label { clear: both; }
+.choice label {
+  display: flex; gap: 11px; align-items: flex-start; padding: 13px 15px; cursor: pointer;
+  border: 1px solid var(--border-2); border-radius: var(--radius); background: var(--surface-2);
+}
+.choice input { margin: 3px 0 0; flex: none; accent-color: var(--primary); width: 17px; height: 17px; }
+.choice b { display: block; font-size: 15px; color: var(--text); }
+.choice span { display: block; font-size: 13.5px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
+.choice label:has(input:checked) { border-color: var(--primary); background: var(--primary-50); }
+.choice label:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.signup button {
+  width: 100%; padding: 13px 20px; font: inherit; font-size: 16px; font-weight: 600;
+  color: var(--primary-ink); background: var(--primary); border: 0;
+  border-radius: var(--radius); cursor: pointer;
+}
+.signup button:hover { background: var(--primary-700); }
+.signup .smallprint { font-size: 13px; color: var(--text-muted); margin: 14px 0 0; line-height: 1.55; }
+
+/* ---- a two-column page: prose beside the form ---- */
+.split { display: grid; grid-template-columns: 1fr 30rem; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+/* ---- "next" links at the foot of an inner page ---- */
+.nextlinks { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 14px; margin-top: 1.5rem; }
+.nextlinks a {
+  display: block; padding: 18px 20px; text-decoration: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.nextlinks a:hover { border-color: var(--border-2); box-shadow: var(--shadow); }
+.nextlinks b { display: block; color: var(--text); font-size: 15.5px; margin-bottom: 3px; }
+.nextlinks span { display: block; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
