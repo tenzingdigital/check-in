@@ -279,6 +279,40 @@ The registry lives in `public` rather than as a column on the tenant's own
 (`docs/MULTI-TENANCY.md`): a column in `tenant/template.sql` would reach
 centres provisioned afterwards and not the ones already running.
 
+### What a trial costs, and what an abandoned one costs
+
+Measured, not estimated, on a database provisioned from these migrations:
+
+| | Empty trial | Sample-data trial |
+|---|---|---|
+| Its own tables and indexes | 1.1 MB | 2.1 MB |
+| Database growth, including overhead | ~1.5 MB | ~2.1 MB |
+| Rows added to `pg_class` / `pg_attribute` | 129 / 730 | 129 / 730 |
+| Time to provision | 226 ms | 981 ms |
+
+Disk is not the constraint — a hundred trials is about 210 MB. The catalogue
+rows are: they are memory, and `hut-db` is on the 256 MB plan, which section 7b
+already says to leave before a second centre goes live. Trials bring that
+upgrade forward; they do not create it.
+
+**An abandoned trial is not free, and used to be worse.** `expire_lapsed_trials()`
+sets the status to `expired` and deliberately deletes nothing — losing a
+centre's evidence would be the worse failure — so a dead trial keeps its schema
+indefinitely. It also used to keep running the *whole* nightly job set: measured
+on an abandoned sample trial, one run wrote 60 rows into `daily_compliance` and
+30 into the overnight snapshot, recording every night that thirty fictional
+people had missed their check-in.
+
+`jobs.js` now asks of each centre the same question `tenant_may_write()` asks of
+the API. A centre that may not write — an expired trial, a suspended contract —
+gets the purges and nothing else. The purges must keep running: retention is a
+promise in the DPA and they only ever delete. Nothing is lost by waiting, because
+`close_out_compliance_days()` backfills every day it missed, so a centre that
+later activates is closed out from where it left off on the next run.
+
+Reviewing and closing dead trials stays a deliberate act on `/org.html`, not
+something the schedule does on its own.
+
 ## Setup
 
 Everything below is one Render blueprint plus two commands. There is no second

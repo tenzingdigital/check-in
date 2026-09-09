@@ -65,6 +65,12 @@ async function main() {
     return rows[0];
   });
 
+  // The nightly cron, run for real as a child process: jobs.js is a script
+  // that closes the pool and exits, so it cannot be required in here.
+  const runNightly = () => require('child_process').execFileSync(
+    process.execPath, [require('path').join(__dirname, '..', 'jobs.js')],
+    { encoding: 'utf8', env: process.env });
+
   console.log('\n== self-serve trials ==');
 
   // ---- the POST half ------------------------------------------------------
@@ -386,7 +392,74 @@ async function main() {
     assert.equal(res.status, 403, 'a guard was allowed to clear the register');
   });
 
+  // ---- what a dead trial costs every night ------------------------------
+  await test('the nightly run closes out a live trial, and leaves an expired one alone', async () => {
+    const schema = tenancy.schemaForSlug('harbour-house');
+    const count = () => withOwnerIn(schema, async (c) =>
+      (await c.query('select count(*)::int n from daily_compliance')).rows[0].n);
+    // Three days that have already ended, so close-out is entitled to write
+    // them back. Today is deliberately excluded: the day is not over.
+    const wipeThreeClosedDays = () => withOwnerIn(schema, async (c) =>
+      (await c.query(`delete from daily_compliance
+                       where compliance_date between site_today() - 3 and site_today() - 1`)).rowCount);
+
+    // Counts are compared by direction, never by arithmetic. close_out is
+    // entitled to write MORE rows than the seed did: the seed marks the days
+    // it writes as closed, so close-out skips them, but a day whose rows are
+    // deleted becomes unclosed again and is then written in full — including
+    // residents the seed deliberately left with no history. What this test is
+    // about is whether anything is written at all.
+    const beforeWipe = await count();
+    const wiped = await wipeThreeClosedDays();
+    const afterWipe = await count();
+    assert.ok(wiped > 0 && afterWipe < beforeWipe, 'nothing was wiped, so the test proves nothing');
+
+    // A live trial: the days that were wiped are closed out again.
+    let log = runNightly();
+    assert.match(log, /harbour-house · close-out-compliance-days/, 'a live trial was not closed out');
+    assert.ok(await count() > afterWipe, 'close-out wrote nothing to a live trial');
+
+    // The same centre, expired. Nothing may be recorded against it any more,
+    // so writing its register would be recording days nobody was asked to
+    // attend — and doing so nightly, forever, for a centre nobody will open.
+    await wipeThreeClosedDays();
+    const lowered = await count();
+    await withOwner((c) => c.query(
+      `update public.tenants set status = 'expired' where slug = 'harbour-house'`));
+
+    log = runNightly();
+    assert.match(log, /harbour-house · expired — purges only/, 'the skip was not announced');
+    assert.doesNotMatch(log, /harbour-house · close-out-compliance-days/,
+      'close-out wrote to an expired trial');
+    assert.doesNotMatch(log, /harbour-house · snapshot-overnight-absences/,
+      'the overnight snapshot wrote to an expired trial');
+    assert.equal(await count(), lowered, 'an expired trial gained rows overnight');
+
+    // The purges must still run: retention is a promise in the DPA, and they
+    // only ever delete.
+    assert.match(log, /harbour-house · purge-expired-compliance/,
+      'the purges stopped running for an expired trial — its data would age past retention');
+    assert.match(log, /harbour-house · purge-resident-views/);
+
+    // And it is recoverable: activate the centre and the days it missed are
+    // backfilled on the next run, exactly as after any cron outage.
+    await withOwner((c) => c.query(
+      `update public.tenants set status = 'active' where slug = 'harbour-house'`));
+    runNightly();
+    assert.ok(await count() > lowered, 'an activated centre was not backfilled');
+  });
+
   await test('spent and expired requests are swept away', async () => {
+    // Its own expired request, rather than one left behind by an earlier test:
+    // the nightly run above sweeps as a platform job, so anything lying around
+    // has already gone by the time this runs.
+    await post({ full_name: 'Sweep Me', email: 'sweep@centre.example',
+                 centre_name: 'Sweep Centre', seed: 'empty' },
+               { 'x-forwarded-for': '203.0.113.40' });
+    await withOwner((c) => c.query(
+      `update public.signup_requests set expires_at = now() - interval '1 minute'
+        where email = 'sweep@centre.example'`));
+
     const n = await withOwner(async (c) =>
       (await c.query('select public.sweep_signup_requests() as n')).rows[0].n);
     assert.ok(n >= 1, 'the sweep removed nothing, though an expired request exists');
