@@ -280,4 +280,34 @@ select pg_temp.try('anon reads the staff list',               'select * from pub
 reset role;
 
 \echo ''
+\echo '=========== N. THE WEEKLY REPORT FLAG (migration 037) ==========='
+-- Dedicated accounts, not the shared guard/supervisor/admin above: this
+-- section changes a role directly by SQL, and compliance.sql (run next by
+-- test/sql.sh, same database) still expects those three at the roles set up
+-- at the top of this file.
+reset role;
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('99999999-9999-9999-9999-999999999901', 'wr-guard@hut.example', '{"full_name":"Wendy Guard","role":"guard"}'),
+  ('99999999-9999-9999-9999-999999999902', 'wr-super@hut.example', '{"full_name":"Sian Supervisor","role":"supervisor"}');
+
+\echo '--- a guard can never carry the flag, not even by a direct write as the owner:'
+\echo '    the guarantee lives in a check constraint, not the route'
+select pg_temp.try('a direct UPDATE ticks the weekly report flag on a guard',
+  'update public.profiles set weekly_report = true where id = ''99999999-9999-9999-9999-999999999901''');
+
+\echo '--- demoting a ticked supervisor to guard clears the flag by trigger rather than fail'
+update public.profiles set weekly_report = true where id = '99999999-9999-9999-9999-999999999902';
+update public.profiles set role = 'guard' where id = '99999999-9999-9999-9999-999999999902';
+do $$
+declare v boolean;
+begin
+  select weekly_report into v from public.profiles where id = '99999999-9999-9999-9999-999999999902';
+  if v is distinct from false then
+    raise exception 'demoting a ticked supervisor to guard did not clear weekly_report (got %)', v;
+  end if;
+end $$;
+\echo '    weekly_report cleared on demotion — ok'
+reset role;
+
+\echo ''
 \echo '=========== DONE ==========='

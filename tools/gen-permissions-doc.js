@@ -26,7 +26,7 @@ function table(area) {
   for (const r of rows.filter((x) => x.area === area)) {
     const cells = ROLES.map((role) => SYMBOL[expectFor(r, role)]);
     const name = r.note ? `${r.name}<br><small>${r.note}</small>` : r.name;
-    lines.push(`| ${name}<br><code>${r.method} ${r.path({ residentId: ':id', buildingId: ':id', roomId: ':id', rollCallId: ':id', staffId: ':id', tenantId: ':id', absenceWindowId: ':id', today: 'DATE' }).replace(/\?.*$/, '')}</code> | ${cells.join(' | ')} |`);
+    lines.push(`| ${name}<br><code>${r.method} ${r.path({ residentId: ':id', buildingId: ':id', roomId: ':id', rollCallId: ':id', staffId: ':id', weeklyReportStaffId: ':id', tenantId: ':id', absenceWindowId: ':id', today: 'DATE' }).replace(/\?.*$/, '')}</code> | ${cells.join(' | ')} |`);
   }
   return lines.join('\n');
 }

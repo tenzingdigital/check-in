@@ -2822,6 +2822,16 @@ async function main() {
         const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [`target${Math.floor(Math.random() * 1e9)}@hut.example`, PASSWORD, "Target Staff", "guard"]));
         fx.staffId = rows[0].id;
       },
+      // A supervisor of its own: fx.staffId is a guard by the time the role
+      // row above runs (it demotes it, and is not itself fresh), which would
+      // make an "allow" attempt here hit the check constraint (400) instead
+      // of genuinely succeeding — proving nothing about whether an admin can
+      // actually tick the flag. This fixture is marked fresh precisely so
+      // admin and platform each get a real supervisor to target.
+      weeklyReportStaff: async () => {
+        const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [`wr${Math.floor(Math.random() * 1e9)}@hut.example`, PASSWORD, "Weekly Report Target", "supervisor"]));
+        fx.weeklyReportStaffId = rows[0].id;
+      },
       visit: async () => {
         const v = await guardC.fetch("/api/visits", { method: "POST", body: { kind: "visitor", name: `Matrix Visitor ${Math.floor(Math.random() * 1e6)}` } });
         assert.equal(v.status, 201, v.text);
@@ -2851,7 +2861,7 @@ async function main() {
         fx.absenceWindowId = w.json.id;
       },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "absence", "roster", "tenant", "absenceWindow"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "weeklyReportStaff", "visit", "absence", "roster", "tenant", "absenceWindow"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 
