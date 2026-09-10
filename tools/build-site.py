@@ -13,7 +13,11 @@ re-run it, and commit both. Two rules the site's Content-Security-Policy
 imposes and this file must respect:
 
   * no JavaScript on the site at all (default-src 'none', no script-src), so
-    anything interactive is a <details> or a plain form;
+    anything interactive is a <details> or a plain form — with ONE deliberate
+    exception: the Cloudflare Web Analytics beacon, gated by CF_BEACON_TOKEN
+    below. It is the only <script> this file ever emits, it is a single
+    external, deferred file with no inline code, and it is inert (nothing is
+    written to the page) while the token is empty;
   * no style="" attributes (style-src 'self'), so every rule lives in
     site/site.css.
 
@@ -40,8 +44,38 @@ SITE = "https://checksteady.com"
 APP  = "https://app.checksteady.com"
 # Display-only form of SITE for the footer ("checksteady.com", no scheme).
 SITE_HOST = SITE.split("://", 1)[1]
+
+# Cloudflare Web Analytics beacon token. Empty until the owner creates the
+# site at https://dash.cloudflare.com (Web Analytics) and pastes the token
+# it gives them here. Chosen over Google Analytics because it is cookieless
+# and needs no consent banner. The token is meant to be public — it is not a
+# secret, it appears in every page's source once set — so there is no reason
+# to keep it out of the repo. With this empty, beacon() below emits nothing
+# and the site is byte-for-byte what it was before analytics existed;
+# pasting a token in and re-running this file is the whole job.
+CF_BEACON_TOKEN = ""
 OUT  = "site"
 WRITTEN = []
+
+def beacon():
+    """The one JavaScript exception on the site: a single external, deferred
+    script with no inline code, emitted only once CF_BEACON_TOKEN is set."""
+    if not CF_BEACON_TOKEN:
+        return ""
+    return (f'\n<script defer src="https://static.cloudflareinsights.com/beacon.min.js" '
+            f'data-cf-beacon=\'{{"token": "{CF_BEACON_TOKEN}"}}\'></script>')
+
+def analytics_note():
+    """One honest sentence for the security-and-gdpr page, shown only once
+    the beacon above is actually live — never claim tracking that isn't
+    happening yet."""
+    if not CF_BEACON_TOKEN:
+        return ""
+    return ('\n    <p>This site — not the app — counts visits using '
+            '<a href="https://www.cloudflare.com/en-gb/web-analytics/" '
+            'target="_blank" rel="noopener">Cloudflare Web Analytics</a>, which '
+            'is cookieless and needs no consent banner: it sees an aggregate '
+            'count of page views and cannot identify anyone.</p>')
 
 MARK = ('<svg class="mark" viewBox="0 0 64 64" aria-hidden="true">'
         '<rect width="64" height="64" rx="16" fill="#1d4ed8"/>'
@@ -104,7 +138,7 @@ def head(title, desc, canon, extra_ld=None, img="/og.png"):
 <link rel="preload" href="/fonts/plusjakartasans-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
-{blocks}
+{blocks}{beacon()}
 </head>"""
 
 def nav():
@@ -546,14 +580,14 @@ faqs = [
 body = (
   phead("Trust", "Security and GDPR",
         "What is held, who can reach it, how it is proved, and how it is erased.") +
-  sec("""    <h2>The record is the product</h2>
+  sec(f"""    <h2>The record is the product</h2>
     <p>A register is only worth keeping if it cannot be quietly rewritten afterwards. Check-ins, movements, drills and notices in CheckSteady are append-only: they cannot be edited or deleted by a staff member, a supervisor, an administrator, or by us. Every entry carries who recorded it and when, and nobody can act as somebody else.</p>
     <div class="pairs">
-      <div><h3>Hosted in the EU</h3><p>Frankfurt, encrypted in transit and at rest. No third-party analytics, trackers or external fonts.</p></div>
+      <div><h3>Hosted in the EU</h3><p>Frankfurt, encrypted in transit and at rest. No third-party analytics, trackers or external fonts on the app.</p></div>
       <div><h3>Separated by construction</h3><p>Each centre has its own database schema. One centre cannot read, change, export or erase another's records, and the tests prove it.</p></div>
       <div><h3>Data minimisation</h3><p>Lists carry a name and what the screen needs. Dates of birth and identity numbers appear only on a record opened deliberately — and each opening is logged.</p></div>
       <div><h3>Roles in the database</h3><p>Staff record. Supervisors also manage the register. Administrators also manage accounts and run export and erasure. The rules are enforced below the screen.</p></div>
-    </div>
+    </div>{analytics_note()}
     <h2>Subject access and erasure</h2>
     <p>A subject access request is one click: a resident's complete file, ready to send. Erasure runs on a schedule for departed residents and is itself logged, so you can evidence that it happened and when. An export asks for the reason it was taken, and that reason is kept with it.</p>
     <h2>Accounts and devices</h2>
