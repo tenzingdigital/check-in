@@ -2903,6 +2903,23 @@ async function main() {
     assert.equal(res.json.ok, true);
   });
 
+  await test("the app is installable: a manifest in standalone mode, linked from every page, allowed by the CSP", async () => {
+    const m = await api.fetch("/manifest.webmanifest");
+    assert.equal(m.status, 200);
+    assert.match(m.headers.get("content-type"), /application\/manifest\+json/);
+    const manifest = JSON.parse(m.text);
+    assert.equal(manifest.display, "standalone"); assert.equal(manifest.start_url, "/");
+    assert.ok(manifest.icons.some((i) => i.sizes === "512x512"), "a 512 icon");
+    for (const page of ["/index.html", "/checkin.html", "/admin.html", "/org.html"]) {
+      const res = await api.fetch(page);
+      assert.match(res.text, /<link rel="manifest" href="\/manifest.webmanifest">/, `${page} lacks the manifest link`);
+      assert.match(res.text, /<meta name="apple-mobile-web-app-capable" content="yes">/, `${page} lacks the Apple meta`);
+      assert.match(res.headers.get("content-security-policy"), /manifest-src 'self'/);
+    }
+    const icon = await api.fetch("/apple-touch-icon.png");
+    assert.equal(icon.status, 200); assert.match(icon.headers.get("content-type"), /image\/png/);
+  });
+
   server.close();
   await closePool();
   console.log(`\nPASS: ${passed} HTTP assertions.`);
