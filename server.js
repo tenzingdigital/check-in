@@ -32,6 +32,17 @@ app.disable('x-powered-by');
 // lib/auth.js's per-IP login lockout into one global counter. `1` trusts
 // exactly one hop (Render's own edge); trusting more hops than actually exist
 // would let a client spoof X-Forwarded-For itself.
+//
+// checksteady.com and app.checksteady.com went live behind the owner's own
+// Cloudflare zone on 10 Sep 2026, which raised the question of whether that
+// added a second hop here. Checked: both records are DNS-only ("grey cloud")
+// — `dig A checksteady.com` and `app.checksteady.com`'s CNAME chain resolve
+// straight to Render's own IPs/`.onrender.com`, not a Cloudflare edge range —
+// so the owner's Cloudflare is not proxying this traffic and there is no
+// extra hop. This stays `1`. (Render fronts its own domains with its own,
+// separate Cloudflare CDN layer regardless; that is what `1` has always
+// accounted for, and predates the custom domain.) See lib/request-ip.js for
+// where a request's address is actually read.
 app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3000;

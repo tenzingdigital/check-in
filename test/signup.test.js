@@ -358,6 +358,35 @@ async function main() {
     assert.equal(res.status, 429, 'the sixth request from one connection was accepted');
   });
 
+  await test('a fabricated left-most X-Forwarded-For entry cannot dodge the per-address limit', async () => {
+    // The trusted address is the right-most entry (server.js trusts exactly
+    // one hop); anything a caller prepends to the left of it is the caller's
+    // own claim and must not be treated as a fresh address to reset the
+    // limit against. Same real address, five different fake prefixes.
+    const real = '198.51.100.88';
+    for (let i = 0; i < 5; i++) {
+      const res = await post({ full_name: 'S', email: `spoof${i}@centre.example`,
+                               centre_name: `Spoof ${i}`, seed: 'empty' },
+                             { 'x-forwarded-for': `attacker-claims-${i}, ${real}` });
+      assert.equal(res.status, 202, `request ${i + 1} behind the real address should have been accepted`);
+    }
+    const res = await post({ full_name: 'S', email: 'spoof9@centre.example',
+                             centre_name: 'Spoof 9', seed: 'empty' },
+                           { 'x-forwarded-for': `attacker-claims-new, ${real}` });
+    assert.equal(res.status, 429, 'a new fake left-most entry reset the per-address limit');
+  });
+
+  await test('the recorded requested_ip is the trusted address, not a fabricated one', async () => {
+    const email = 'trusted-ip@centre.example';
+    const res = await post({ full_name: 'T', email, centre_name: 'Trusted IP House', seed: 'empty' },
+                           { 'x-forwarded-for': '203.0.113.250, 198.51.100.201' });
+    assert.equal(res.status, 202);
+    const { rows } = await withOwner((c) =>
+      c.query('select host(requested_ip) as ip from public.signup_requests where email = $1', [email]));
+    assert.equal(rows[0].ip, '198.51.100.201',
+      'requested_ip should be the right-most (trusted) address, not the caller-supplied left-most one');
+  });
+
   // ---- the whole journey, and the promise made on the trial page ---------
   await test('the trial link sets a password, signs in, and clears the sample data', async () => {
     // Take a fresh centre so the earlier tests' state cannot mask anything.

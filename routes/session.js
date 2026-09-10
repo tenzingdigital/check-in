@@ -8,13 +8,14 @@ const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const auth = require('../lib/auth');
 const geo = require('../lib/geo');
+const { clientIp } = require('../lib/request-ip');
 
 const router = express.Router();
 
 // POST /api/session — log in.
 router.post('/', wrap(async (req, res) => {
   const { email, password } = req.body || {};
-  const ip = req.ip;
+  const ip = clientIp(req);
 
   if (auth.lockedOut(email, ip)) {
     await auth.noteLocked(email, { ip, userAgent: req.get('user-agent') });
@@ -51,7 +52,7 @@ router.post('/', wrap(async (req, res) => {
 // POST /api/session/mfa — the second step: { challenge, code, trust_device }.
 router.post('/mfa', wrap(async (req, res) => {
   const { challenge, code, trust_device } = req.body || {};
-  const ip = req.ip;
+  const ip = clientIp(req);
   if (auth.lockedOut(`mfa:${challenge}`, ip)) {
     return res.status(429).json({ error: 'Too many attempts. Wait five minutes and log in again.' });
   }

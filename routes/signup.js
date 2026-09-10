@@ -34,6 +34,7 @@ const db = require('../database');
 const tenancy = require('../lib/tenancy');
 const mail = require('../lib/mail');
 const { seedDemoCentre } = require('../lib/demoSeed');
+const { clientIp } = require('../lib/request-ip');
 
 const router = express.Router();
 
@@ -181,7 +182,12 @@ router.post('/signup', wrap(async (req, res) => {
       'Please use your organisation\u2019s email address \u2014 the trial link is sent there, and it is the only way we can reach you about it.'));
   }
 
-  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  // clientIp() reads req.ip, which Express derives via the trusted hop count
+  // (server.js, app.set('trust proxy', 1)) rather than trusting whatever a
+  // caller puts first in X-Forwarded-For — the old `.split(',')[0]` here took
+  // the left-most entry regardless of how many real proxies exist, which is
+  // exactly what a direct, unproxied request can set to anything it likes.
+  const ip = clientIp(req) || 'unknown';
   if (tooManyFromIp(ip)) {
     return res.status(429).send(problem('Too many requests',
       'Several trials have been started from this connection in the last hour. Try again later, or email us and we will set one up.'));
