@@ -82,14 +82,16 @@ services:
           property: connectionString
       - key: NODE_VERSION
         value: "22"
-      # The origin used to build links in outgoing mail. For login links and
-      # the trial's verification link, the web tier falls back to the
-      # request's Host header without it, which is right until something
-      # sits in front of the app and it quietly is not. The Sunday weekly
-      # report does not fall back at all: unset means that email carries no
-      # link, by design, because it goes to several people at once and an
-      # origin taken from a header is one an attacker can choose. Set it
-      # once, explicitly.
+      # The origin used to build links in outgoing mail — required, not a
+      # fallback. Password reset, staff invitations and the trial's
+      # verification link (lib/mail.js publicUrl()) refuse the request
+      # outright without it, rather than build a link from the request's
+      # Host header: a caller can forge Host, and a forged origin riding
+      # into a genuine, DKIM-signed email carrying a live single-use token
+      # is exactly what this variable exists to prevent. The Sunday weekly
+      # report follows the same rule and predates it: unset means that email
+      # carries no link, by design, because it goes to several people at
+      # once. Set it once, explicitly, here.
       #
       # The custom domain, not the Render-assigned one (verified live: `curl
       # https://app.checksteady.com/healthz` returns 200 — see the domains:

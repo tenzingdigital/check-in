@@ -76,6 +76,23 @@ async function main() {
     assert.ok(!/bearer/i.test(joined), 'no request header should reach the log');
   });
 
+  await test('strips a URL from the logged body, in case the provider echoes the request', async () => {
+    const body = JSON.stringify({
+      message: 'invalid recipient',
+      // What a provider echoing our own request back would look like: the
+      // single-use link this send() call was carrying.
+      original: 'Reset link: https://app.checksteady.com/?reset=abc123DEADBEEF',
+    });
+    const { logs } = await withFetch(
+      async () => ({ ok: false, status: 422, text: async () => body }),
+      () => mail.send({ to: 'owner@example.com', subject: 'Test', text: 'body' }),
+    );
+    const joined = logs.join('\n');
+    assert.ok(!joined.includes('reset=abc123DEADBEEF'), 'a single-use link in the provider response must never reach the log');
+    assert.ok(joined.includes('[link removed]'), 'the redaction should be visible, not silently dropped');
+    assert.match(joined, /invalid recipient/, 'the rest of the provider explanation should still be logged');
+  });
+
   await test('truncates a large body instead of flooding the log', async () => {
     const hugeBody = '<html>' + 'x'.repeat(5000) + '</html>';
     const { logs } = await withFetch(

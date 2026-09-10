@@ -426,16 +426,24 @@ The request form never says whether an address has an account. That is
 deliberate: a reset endpoint that distinguishes real staff from strangers is a
 staff directory for anyone who can reach the login page.
 
-**Email delivery needs two variables.** Set `RESEND_API_KEY` (a key from
-resend.com) and `MAIL_FROM` (a verified sender). Optionally set `PUBLIC_URL`
-so the link points at your own domain rather than the host Render answers on.
+**Email delivery needs three variables.** Set `RESEND_API_KEY` (a key from
+resend.com), `MAIL_FROM` (a verified sender) and `PUBLIC_URL` (your own
+domain — `https://app.checksteady.com` in render.yaml). `PUBLIC_URL` is not
+optional: the link in every password reset, staff invitation and trial
+sign-up email is built from it and from nothing else — never the request's
+Host header, which a caller can forge — so without it those three routes
+refuse the request outright rather than send a link pointing somewhere an
+attacker chose.
 
-> **With neither set the link is written to the service log instead**, with a
-> warning, rather than silently going nowhere. On a single-site deployment the
-> operator already has log access, and with it the database URL, so this grants
-> them nothing they did not have. It is still a fallback: anyone who can read
-> your logs can take an account during the hour a link is live. Configure mail
-> before you have staff who are not you.
+> **With `RESEND_API_KEY`/`MAIL_FROM` unset the link is written to the
+> service log instead**, with a warning, rather than silently going nowhere
+> — but only once `PUBLIC_URL` is set; without it there is no link to build
+> and the request is refused before mail is even attempted. On a
+> single-site deployment the operator already has log access, and with it
+> the database URL, so the log fallback grants them nothing they did not
+> have. It is still a fallback: anyone who can read your logs can take an
+> account during the hour a link is live. Configure all three before you
+> have staff who are not you.
 
 Two other routes exist and always have: an admin can send anyone a fresh
 login link from the **Admin** page, and `node staff.js passwd <email>` works
@@ -603,8 +611,16 @@ out of the two working apps:
   before after three wrong passwords, must type the emailed code. Unknown
   addresses are not treated as abroad. The country table is the bundled
   GeoLite2 data in `geoip-country`; update the package with `npm update`
-  every few months, or set `HUT_TRUST_CF_COUNTRY=1` once the service sits
-  behind Cloudflare on its own domain and the header does the work.
+  every few months. `HUT_TRUST_CF_COUNTRY=1` is a faster alternative, but
+  **do not set it yet**: checksteady.com and app.checksteady.com sit at
+  Cloudflare DNS-only ("grey cloud") — traffic reaches Render directly, so
+  Cloudflare never sets `CF-IPCountry`, and with the flag on `lib/geo.js`
+  would trust that header verbatim from whoever sends it, letting anyone
+  forge `CF-IPCountry: IE` and walk straight past this guard. Before turning
+  it on, check the record is actually proxied (orange cloud in the
+  Cloudflare dashboard, or `dig` the hostname and confirm it resolves to a
+  Cloudflare range rather than straight to Render) — only then is the header
+  trustworthy.
 - **Organisation page** (`/org.html`, platform administrators only, on the
   working branch until it has been proven on a copy of the live database):
   a level above any one site. Every centre on the service with its counts,

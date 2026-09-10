@@ -222,7 +222,14 @@ session is an `HttpOnly`, `__Host-` cookie.
 image from anyone else, and the content-security policy (`default-src
 'none'`, `connect-src 'self'`, scripts admitted by hash, no inline styles)
 enforces it. A resident's browser never exists here; a staff browser
-contacts exactly one host.
+contacts exactly one host. This describes the app, at app.checksteady.com,
+where residents' data lives. It does not describe checksteady.com, the
+brochure site: that site's pages (including the trial and this
+data-protection page) load Cloudflare Web Analytics, a cookieless beacon
+that briefly transmits the visitor's address to Cloudflare, which acts as a
+processor for it there — Cloudflare neither stores nor exposes it, and no
+resident data ever reaches that site, but a centre's data protection
+officer should know a third party is in the browser on that domain.
 
 **What leaves by email.** Invitations and password resets carry no resident
 data: a staff member's own address, name and a single-use link. Of the two

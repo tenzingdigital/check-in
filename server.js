@@ -12,6 +12,7 @@ const express = require('express');
 
 const db = require('./database');            // pool + migrate() + the RLS helpers
 const auth = require('./lib/auth');
+const mail = require('./lib/mail');
 const { securityHeaders } = require('./lib/security');
 const { translateDbError } = require('./lib/api');
 
@@ -63,6 +64,26 @@ app.use(securityHeaders());
 // ordering exists to prevent. The runner holds an advisory lock, so two
 // instances coming up together during a deploy cannot race each other.
 async function boot() {
+  // PUBLIC_URL is required by lib/mail.js's publicUrl() for every emailed
+  // link (password reset, staff invitation, trial sign-up) — see that file
+  // for why a request's Host header is not an acceptable substitute. This
+  // is logged, not fatal: unlike an unapplied migration, a missing
+  // PUBLIC_URL does not put the register at risk of serving against a
+  // schema it does not understand, and a single admin who already has a
+  // password can run the gate and the register for days without ever
+  // touching one of the three routes that need it. Refusing to boot over it
+  // would take the whole service down for a guard at 3am over a
+  // misconfiguration that has nothing to do with them. It gets the same
+  // loud, unmissable treatment as the ADMIN_EMAIL/ADMIN_PASSWORD check
+  // below, for the same reason: "the deploy still succeeds and the log says
+  // plainly" what will not work, found once at startup rather than three
+  // times as a user's 500.
+  if (!mail.publicUrl()) {
+    console.error('\n*** PUBLIC_URL is not set.');
+    console.error('*** Password reset, staff invitations and the trial sign-up email will');
+    console.error('*** all refuse to send until it is configured. See README.md.\n');
+  }
+
   await db.migrate();
 
   // Demo databases only: SEED_TODAY_CHECKINS=1 gives every active resident a
