@@ -482,7 +482,9 @@ out of the two working apps:
   summary, the movement log, *Out and back* (one row per absence: building,
   room, date and time out, date and time back, hours away, who signed
   each), the drill record, visitors and *Absent overnight* for a date
-  range, and occupancy, the evacuation list and *Absent now* as they stand, each as a CSV download or a printable page.
+  range, the *Weekly register update* (the Sunday report to head office:
+  absence spans with approval in words, the weekend's, departures, rooms
+  under maintenance or with free beds), and occupancy, the evacuation list and *Absent now* as they stand, each as a CSV download or a printable page.
   A reason is required and every export is on the audit record with the
   range.
 - **Authorised absences** (migration 028): a supervisor records the days a
@@ -491,6 +493,12 @@ out of the two working apps:
   close-out writes those days as not required, so they never count as
   missed; cards say *Away until*; a report covers a range. Nothing else is
   held.
+- **The Sunday email** (migration 035): under Settings, a switch and up to
+  ten addresses; early Sunday the nightly job emails the Weekly register
+  update for the previous Sunday night through Saturday night, and *Send
+  last week's now* checks it. **Permitted absence periods** (migration
+  036): the IPAS windows as dates under Settings; a holiday authorised
+  outside them is recorded with a warning, never refused.
 - **Room history** (migration 028): every room a resident has had, from
   when to when and who moved them, kept by a trigger as the room changes
   and closed when they leave. On the edit sheet and as a report. The label

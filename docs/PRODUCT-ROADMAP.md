@@ -251,8 +251,8 @@ the visit points back at the list entry, and the roll call names them.
 
 Still to do from the call, in the order the centre ranked them:
 rename Door to In & out (done 8 September, at the centre's request); archive rooms rather than delete, with contracted
-capacity and bed configuration (done 8 September, migration 031); the weekly IPAS report from their template
-(nationality held for that report only) — waiting on the template. Done
+capacity and bed configuration (done 8 September, migration 031); the weekly IPAS report — the Sunday email is
+Stage 2f; matching head office's two Excel files column for column waits on copies of them. Done
 8 September: a search box and building filter on the roll call;
 "Practice drill" and "Real evacuation" wording; a default view per tablet
 (`?view=` or the tick on the chooser); bulk depart; the nightly House
@@ -261,6 +261,34 @@ site pinned to the light palette; a note for the record when a drill or
 evacuation ends (migration 033). Still to confirm with the centre: the
 "not seen after N hours" figure, and whether 90 days is long enough for
 the movement log.
+
+## Stage 2f — The Sunday report (Brighton's Weekly Register document, 10 September 2026)
+
+**Status: built 10 September 2026 (migrations 035 and 036), on the
+working branch.** Spec: `docs/superpowers/specs/2026-09-10-weekly-register-update-design.md`.
+
+- *Absences as "from Monday to Wednesday"*: consecutive nights in the
+  overnight snapshot become one span, approved by construction when every
+  night is inside an authorised absence, "partly approved (2 of 3
+  nights)" otherwise. Spans that begin on a Friday or Saturday night are
+  "Updates from the weekend". Departures in the week are "Resident
+  removals". Rooms gain a status (open, maintenance) and a one-line note
+  for the return; "Room updates" lists maintenance and free contracted
+  beds. One SQL function builds the rows and the sentences, so the CSV,
+  the printable page and the email agree.
+- *Sent on a Sunday*: a switch and up to ten addresses in Settings; the
+  nightly job, after Saturday night's snapshot, emails the previous
+  Sunday night through Saturday night. "Send last week's now" for
+  checking, on the audit record.
+- *The IPAS permitted periods*: dates under Settings; a holiday outside
+  every window is recorded with a warning, never refused.
+- *The iPad as a fixed terminal*: a manifest and the Apple meta tags, so
+  the app installs to the home screen without Safari's bar; Guided Access
+  does the locking. In the guide.
+- Not done: the "Weekly Register Change" section (nobody has said what
+  goes in it); matching head office's two Excel files (we do not have
+  them); an hours-based rule (nights at midnight is the centre's own
+  midnight list).
 
 ## Stage 5b — Self-serve trials
 

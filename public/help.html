@@ -120,6 +120,7 @@
     <li><a href="#residents"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg></span>Add or change a resident</a></li>
     <li><a href="#absences"><span class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span>Record an authorised absence</a></li>
     <li><a href="#reports"><span class="ico"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h6M9 17h6M9 9h3"/></svg></span>Print or export a report</a></li>
+    <li><a href="#sunday"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/></svg></span>Send the Sunday report</a></li>
     <li><a href="#start"><span class="ico"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M10 18h4"/></svg></span>Set up a tablet</a></li>
     <li><a href="#trouble"><span class="ico amber"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>Something is wrong</a></li>
   </ul>
@@ -131,6 +132,7 @@
     <li><span>Enter your email and password.<small>No password yet? <span class="ui">Forgot your password?</span> emails a link that works once, for a day.</small></span></li>
     <li><span>Answer <span class="ui">What are you recording?</span><small>In &amp; out for the gate tablet, Daily register for the check-in tablet.</small></span></li>
     <li><span>Tick <span class="ui">Always open this on this tablet</span>.<small>That device skips the question from then on. <span class="ui">?view=choose</span> on the address undoes it.</small></span></li>
+    <li><span>Fix it to one job: <span class="ui">Share → Add to Home Screen</span>, then open it from the icon.<small>No address bar, no tabs. On an iPad, then turn on <span class="ui">Guided Access</span> (Settings → Accessibility → Guided Access, set a passcode), open the app, triple-click the side button and tap <span class="ui">Start</span>. The tablet stays in the app until the passcode is entered. Managed tablets call the same thing Single App Mode.</small></span></li>
   </ol>
   <ul class="facts">
     <li><b>Blue</b> is In &amp; out</li>
@@ -218,7 +220,7 @@
     <li><span>A period: the <span class="ui">Log</span> tab.<small><span class="ui">Yesterday</span>, <span class="ui">This week</span>, <span class="ui">This month</span> or two dates; type a name or room to filter.</small></span></li>
   </ol>
   <details class="more"><summary>For a report or an inspection</summary>
-    <p>Supervisors and admins have three reports under <span class="ui">Admin → Reports</span>. <span class="ui">Absent now</span> is everyone off site this moment, with when they left, who signed them out, and whether the absence is authorised. <span class="ui">Absent overnight</span> is who was off site at midnight on each night in a range: the app takes that snapshot itself just after midnight and keeps it as long as the register, so a night months ago is still there after the movement log has been cleared. <span class="ui">Out and back</span> is the check-out and check-in list: one row per absence with room, date and time out, date and time back, hours away, and who signed each. All three mark under-18s, so a child's overnight absence stands out.</p>
+    <p>Supervisors and admins have three reports under <span class="ui">Admin → Reports</span>. <span class="ui">Absent now</span> is everyone off site this moment, with when they left, who signed them out, and whether the absence is authorised. <span class="ui">Absent overnight</span> is who was off site at midnight on each night in a range: the app takes that snapshot itself just after midnight and keeps it as long as the register, so a night months ago is still there after the movement log has been cleared. <span class="ui">Out and back</span> is the check-out and check-in list: one row per absence with room, date and time out, date and time back, hours away, and who signed each. All three mark under-18s, so a child's overnight absence stands out. The <span class="ui">Weekly register update</span> is the Sunday report to head office: each absence as one line, "was absent from Monday to Wednesday, back on Thursday. Approved by management", the weekend's on their own, the week's departures, and rooms under maintenance or with free beds.</p>
     <p>On one person's <span class="ui">History</span>, <span class="ui">Both</span> / <span class="ui">In &amp; out</span> / <span class="ui">Check-ins</span> narrows it to one register, and supervisors and admins also see <span class="ui">Export CSV</span>: give a reason and the rows shown download as a spreadsheet, on the record like any other export.</p>
   </details>
   <a class="top" href="#top">Back to the top</a>
@@ -332,11 +334,25 @@
   </ol>
   <ul class="facts">
     <li>Daily register</li><li>Attendance</li><li>Movement log</li><li>Out and back</li><li>Absent now</li><li>Absent overnight</li>
+    <li>Weekly register update</li>
     <li>Authorised absences</li><li>Breach reports</li><li>Drills</li><li>Who was marked safe</li><li>Visitors</li><li>Occupancy</li><li>Vacancies</li><li>Evacuation list</li><li>Room history</li>
   </ul>
   <details class="more"><summary>What each one is</summary>
-    <p><b>Daily register</b>: one row per resident per day, required, presented, first seen. <b>Attendance</b>: one row per resident with days required, presented and missed. <b>Movement log</b>: every sign in and out. <b>Out and back</b>: one row per absence, out and back on one line, hours away. <b>Absent now</b>, <b>Absent overnight</b>: see <a href="#absent">off site</a>. <b>Drills</b> and <b>Who was marked safe</b>: the roll-call record. <b>Occupancy</b> and <b>Vacancies</b>: per room, the latter against contracted beds. <b>Evacuation list</b>: everyone with room, presence and need. Administrators also have <b>Who viewed which record</b>.</p>
+    <p><b>Daily register</b>: one row per resident per day, required, presented, first seen. <b>Attendance</b>: one row per resident with days required, presented and missed. <b>Movement log</b>: every sign in and out. <b>Out and back</b>: one row per absence, out and back on one line, hours away. <b>Absent now</b>, <b>Absent overnight</b>: see <a href="#absent">off site</a>. <b>Weekly register update</b>: the Sunday report, see <a href="#sunday">Send the Sunday report</a>. <b>Drills</b> and <b>Who was marked safe</b>: the roll-call record. <b>Occupancy</b> and <b>Vacancies</b>: per room, the latter against contracted beds. <b>Evacuation list</b>: everyone with room, presence and need. Administrators also have <b>Who viewed which record</b>.</p>
   </details>
+
+  <h3 id="sunday">Send the Sunday report</h3>
+  <ol class="recipe">
+    <li><span>Under <span class="ui">Admin → Settings → Weekly register update</span>, tick the switch and type the addresses.<small>Comma-separated, up to ten. Head office and the manager, usually.</small></span></li>
+    <li><span>Tap <span class="ui">Send last week's now</span>.<small>The same email that will go on Sunday, so you can see it arrive. It is on the audit record.</small></span></li>
+    <li><span>Keep rooms honest under <span class="ui">Admin → Buildings</span>.<small>Mark a room <span class="ui">Under maintenance</span> and write the note for the return, e.g. "1 bed free for a single woman". The report reads it.</small></span></li>
+  </ol>
+  <ul class="facts">
+    <li>Sent early Sunday, after Saturday night's snapshot</li>
+    <li>Nights counted at midnight, site time</li>
+    <li>Inside an authorised absence: approved</li>
+    <li>Permitted periods (IPAS) live under Settings; a holiday outside them is recorded with a warning, never refused</li>
+  </ul>
 
   <h3 id="staff">Staff</h3>
   <ol class="recipe">
