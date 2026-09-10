@@ -8,6 +8,7 @@
 #   1. Every JavaScript file parses — the two front ends and the service
 #   2. The database suite — authorisation model and calendar-day compliance
 #   3. The HTTP suite — the web tier that replaced PostgREST and GoTrue
+#   4. The self-serve trial suite — the one unauthenticated write there is
 #
 # Layers 2 and 3 need the PostgreSQL server binaries (Debian/Ubuntu:
 # postgresql-16). If they are missing both are skipped with a warning rather
@@ -57,6 +58,9 @@ for f in server.js database.js jobs.js staff.js seed-today.js seed-rooms.js lib/
 done
 [ "$fail" -eq 0 ] && echo "server, lib/, routes/ and test/ parse"
 
+step "The brochure site is consistent"
+python3 tools/check-site.py || fail=1
+
 step "The permission matrix document is current"
 node tools/gen-permissions-doc.js --check || fail=1
 
@@ -81,8 +85,17 @@ if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/nu
     tail -20 /tmp/hut-check-api.log
     fail=1
   fi
+  step "Self-serve trial suite"
+  ./test/signup.sh >/tmp/hut-check-signup.log 2>&1
+  if [ $? -eq 0 ]; then
+    tail -2 /tmp/hut-check-signup.log | head -1
+  else
+    echo "FAIL — full output in /tmp/hut-check-signup.log"
+    tail -20 /tmp/hut-check-signup.log
+    fail=1
+  fi
 else
-  step "Database and HTTP suites"
+  step "Database, HTTP and trial suites"
   echo "SKIPPED — PostgreSQL server binaries not found (install postgresql-16)"
 fi
 

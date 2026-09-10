@@ -28,10 +28,24 @@ const tenancy = require('./lib/tenancy');
 // Per-tenant jobs: run inside each centre's schema (search_path), so every
 // unqualified name here resolves to that centre's copy. Since migration 020
 // the nightly run visits every open tenant, the legacy one (public) included.
+//
+// The third element marks a job that only makes sense for a centre that may
+// still record: a trial or an active contract. A centre that may not write —
+// an expired trial, a suspended contract — gets the purges below and nothing
+// else. See `live` in main().
+//
+// This is not a micro-optimisation. Measured on an abandoned sample trial,
+// one nightly run wrote 60 rows into daily_compliance and 30 into the
+// overnight snapshot: the register dutifully recording, every night, that
+// thirty fictional people had missed their check-in in a centre nobody will
+// open again. The purges must keep running regardless — retention is a
+// promise in the DPA, and they only ever delete.
+const LIVE_ONLY = true;
+
 const TENANT_JOBS = [
-  ["close-out-compliance-days", "select close_out_compliance_days()"],
+  ["close-out-compliance-days", "select close_out_compliance_days()", LIVE_ONLY],
   // Who was off site at midnight, for the night just ended (migration 027).
-  ["snapshot-overnight-absences", "select snapshot_overnight_absences()"],
+  ["snapshot-overnight-absences", "select snapshot_overnight_absences()", LIVE_ONLY],
   ["purge-expired-gate-events", "select purge_expired_gate_events()"],
   ["purge-expired-checkin-events", "select purge_expired_checkin_events()"],
   ["purge-expired-compliance", "select purge_expired_compliance()"],
@@ -47,7 +61,7 @@ const TENANT_JOBS = [
   // planner's default guess of ~300 rows forever. Cross-joined into every
   // view, that guess is how a 200-row query was costed at 85,000 rows and
   // JIT-compiled on every run (docs/KNOWN-ISSUES.md 19d). Cheap, nightly.
-  ["analyze-small-tables", "analyze app_settings, residents, profiles, daily_compliance"],
+  ["analyze-small-tables", "analyze app_settings, residents, profiles, daily_compliance", LIVE_ONLY],
 ];
 
 // Platform jobs: shared tables, run once.
@@ -57,6 +71,10 @@ const PLATFORM_JOBS = [
   ["purge-expired-login-events", "select auth.purge_expired_login_events()"],
   ["purge-expired-mfa", "select auth.purge_expired_mfa()"],
   ["expire-lapsed-trials", "select public.expire_lapsed_trials()"],
+  // Self-serve trial requests: unconfirmed ones are rubbish after a day,
+  // confirmed ones are kept a fortnight so support can answer "I signed up and
+  // nothing arrived", then go. Neither holds resident data (migration 034).
+  ["sweep-signup-requests", "select public.sweep_signup_requests()"],
 ];
 
 // Every run leaves a row, so v_system_health can say when close-out last
@@ -163,7 +181,20 @@ async function main() {
     let schema;
     try { schema = tenancy.schemaForSlug(t.slug); } catch (err) { console.error(`[jobs] ${t.slug}: ${err.message}`); failed += 1; continue; }
     const label = t.slug === tenancy.LEGACY_SLUG ? "" : `${t.slug} · `;
-    for (const [name, sql] of TENANT_JOBS) {
+
+    // The same question public.tenant_may_write() asks of the API, asked here
+    // of the night's work: may this centre still record anything? A lapsed
+    // trial or a suspended contract may not, so writing its register would be
+    // recording days nobody was ever asked to attend. It keeps the purges.
+    //
+    // Nothing is lost by waiting: close_out_compliance_days() backfills every
+    // day it missed, so a centre that later activates has its register closed
+    // out from where it left off on the next run.
+    const live = t.status === 'trial' || t.status === 'active';
+    if (!live) console.log(`[jobs] ${label}${t.status} — purges only`);
+
+    for (const [name, sql, liveOnly] of TENANT_JOBS) {
+      if (liveOnly && !live) continue;
       if (!(await runJob(schema, label, name, sql))) failed += 1;
       if (name === 'close-out-compliance-days' && !(await notifyThresholds(schema, label))) failed += 1;
     }

@@ -67,6 +67,13 @@ services:
     # instead of serving errors to guards.
     healthCheckPath: /healthz
 
+    # The app answers on app.checksteady.ie; the brochure site takes the apex
+    # and www (see checksteady-site below). Add the CNAME Render shows you for
+    # each name in its dashboard — until DNS points here these entries are
+    # inert, so committing them early is safe.
+    domains:
+      - app.checksteady.ie
+
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -74,6 +81,12 @@ services:
           property: connectionString
       - key: NODE_VERSION
         value: "22"
+      # The origin used to build links in outgoing mail (login links, the
+      # trial's verification link). Without it lib/mail.js falls back to the
+      # request's Host header, which is right until something sits in front of
+      # the app and it quietly is not. Set it once, explicitly.
+      - key: PUBLIC_URL
+        value: https://app.checksteady.ie
       # 12 hours: a shift, not a fortnight. A hut terminal is a shared physical
       # device, and a session that outlives the shift is one the next person
       # inherits.
@@ -146,13 +159,23 @@ services:
     name: checksteady-site
     runtime: static
     staticPublishPath: ./site
+    # The apex and www. Render serves both; point the apex A/ALIAS record and
+    # a www CNAME at the values its dashboard shows for this service.
+    domains:
+      - checksteady.ie
+      - www.checksteady.ie
     # The same header set the app sends (lib/security.js), for the same brand.
     # The site is static HTML with its own stylesheet and fonts and nothing
     # else, so the policy can refuse everything but those.
+    #
+    # form-action is the one exception: the trial sign-up form on /trial/ posts
+    # to the app's origin. With the old `form-action 'none'` the browser blocks
+    # that submit SILENTLY — no console error, the button simply does nothing —
+    # so the app origin is named here explicitly and nowhere else is allowed.
     headers:
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        value: "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self' https://app.checksteady.ie; frame-ancestors 'none'"
       - path: /*
         name: X-Content-Type-Options
         value: nosniff

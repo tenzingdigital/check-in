@@ -601,6 +601,25 @@
   .selectbtn[aria-pressed="true"] .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .selectbtn[aria-pressed="true"] .box::before { content: "✓"; }
   .selectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* "Select all shown" above the register, heading the column of ticks.
+     It is the same control as .selectbtn, but laid out as a column header
+     rather than a chip: no border, and its box centred in the same 48px slot
+     .pick occupies on every card below it, so the two line up down the page.
+     22px to match .pick::before; (48 - 22) / 2 = 13px either side. */
+  /* padding-left is the card's own 1px border: .pick starts inside it, so
+     without this the header's box sits a pixel left of the column it heads. */
+  .selectall { display: flex; align-items: center; margin: 10px 0 6px; padding-left: 1px; }
+  .selectall .selectbtn {
+    margin-left: 0; padding: 4px 10px 4px 0; gap: 0;
+    border-color: transparent; background: transparent;
+  }
+  .selectall .selectbtn .box { width: 22px; height: 22px; border-radius: 6px; margin: 0 13px; flex: none; }
+  .selectall .selectbtn .lbl { padding-left: 6px; }   /* where a card's name starts */
+  .selectall .selectbtn:hover .box { border-color: var(--accent); }
+  .selectall .selectbtn[aria-pressed="true"] { border-color: transparent; }
+  .selectall .selectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+  .selectall .selectbtn[disabled] { opacity: .45; cursor: default; }
+  .selectall .selectbtn[disabled]:hover .box { border-color: var(--line-hover); }
   .grow        { flex: 1; }
   .mt6  { margin-top: 6px; }
   .mt8  { margin-top: 8px; }
@@ -608,11 +627,59 @@
   .field.compact { width: auto; padding: 8px 10px; }
 
   /* ---- login ---- */
-  .login { max-width: 380px; margin: 12vh auto; padding: 0 20px; }
-  .login h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
-  .login p  { color: var(--muted); margin: 0 0 22px; font-size: 14px; }
-  .login .field { margin-bottom: 10px; }
-  .login .btn { width: 100%; background: var(--accent); color: var(--on-accent); border-color: transparent; }
+  /* ---- sign in ----
+     The first screen a new trial sees after clicking the link in their email,
+     and the screen a guard meets at three in the morning. It sits on a card
+     rather than bare on the background: on a dark phone the old version was
+     text floating in space with no edge to it, and nothing said where the
+     form began.
+
+     Centred with min-height rather than a fixed 12vh top margin, so a short
+     phone in landscape does not push the button off the bottom. */
+  .login {
+    max-width: 400px; margin: 0 auto; padding: 24px 20px 40px;
+    min-height: 100svh; display: flex; flex-direction: column; justify-content: center;
+  }
+  .logincard {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--lift);
+    padding: 26px 24px 24px;
+  }
+  .login h1 { font-size: 25px; margin: 0; letter-spacing: -0.02em; }
+  /* The screen's name, under the wordmark and aligned to it rather than to
+     the card: the mark is 40px plus a 10px gap. */
+  .loginwhich {
+    margin: 2px 0 0 50px; font-size: 14px; font-weight: 600;
+    color: var(--accent); letter-spacing: .01em;
+  }
+  body.app-register .loginwhich { color: var(--ok); }
+  .loginlede { color: var(--muted); margin: 16px 0 20px; font-size: 13.5px; line-height: 1.55; }
+  .login .lbl {
+    display: block; font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; margin: 0 0 5px;
+  }
+  .login .field { margin-bottom: 14px; width: 100%; }
+  .login .btn {
+    width: 100%; margin-top: 4px;
+    background: var(--accent); color: var(--on-accent); border-color: transparent;
+    font-weight: 650;
+  }
+  .login .alert { margin-bottom: 16px; }
+  /* The two links under the card: one row, not two stacked centred lines. */
+  .loginfoot {
+    margin: 18px 0 0; text-align: center; font-size: 13px; color: var(--muted);
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  }
+  .loginfoot a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+  .loginfoot a:hover { color: var(--text); }
+  /* The panels mountResetUI() and showMfa() insert live inside the card. */
+  .logincard #resetPanel .btn, .logincard #newPassPanel .btn, .logincard #mfaPanel .btn { width: 100%; }
+  /* "Forgot your password?" and "Start again" sit directly under the primary
+     button. In the accent they compete with it for the same glance, so they
+     read as quiet text until hovered. */
+  .logincard .hint.centre { margin: 14px 0 0; }
+  .logincard .hint.centre a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+  .logincard .hint.centre a:hover { color: var(--text); }
 
   .alert {
     background: color-mix(in srgb, var(--bad) 14%, transparent);

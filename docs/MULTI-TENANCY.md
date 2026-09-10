@@ -137,6 +137,13 @@ existing advisory lock keeps two instances from racing.
 Deprovisioning is `drop schema ... cascade` plus the tenant row, and is only
 reached from the deletion timeline in the DPA.
 
+Since migration 034 there are two callers of this, not one:
+`POST /api/tenants` (a platform administrator, on `/org.html`) and
+`GET /signup/confirm` (a centre starting its own trial, having proved its email
+address first — see the Self-serve trials section of the README). Both go
+through `tenancy.provisionSchema()`; neither builds a schema name from anything
+a user typed.
+
 ## The existing deployment
 
 `public` keeps its current objects and remains the `default` tenant, mapped by

@@ -87,6 +87,22 @@ app.get('/healthz', (req, res, next) => {
 });
 
 /* --------------------------------------------------------------------------
+   Self-serve trials
+   ------------------------------------------------------------------------ */
+// Mounted ahead of everything under /api, and outside it: nobody signing up
+// has an account yet, so none of the session middleware below applies.
+//
+// The /api CSRF check is deliberately NOT extended here. The sign-up form
+// lives on checksteady.ie and posts to app.checksteady.ie, so it is
+// cross-origin by design; an Origin check would refuse the only request this
+// endpoint exists to serve. What protects it instead is that a POST writes a
+// pending row and sends an email and provisions nothing — the expensive act
+// needs a click on a link in an inbox — plus the per-IP and per-address rate
+// limits in the route itself.
+app.use(express.urlencoded({ extended: false, limit: '16kb' }));
+app.use(require('./routes/signup'));
+
+/* --------------------------------------------------------------------------
    API
    ------------------------------------------------------------------------ */
 
