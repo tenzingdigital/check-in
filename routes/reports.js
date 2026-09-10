@@ -85,7 +85,8 @@ const REPORTS = {
     ranged: false,
     sql: `select o.building, o.floor, o.room, o.bed_config as beds,
                  o.capacity as physical_beds, coalesce(o.contracted_capacity, o.capacity) as contracted_beds,
-                 o.occupants, coalesce(o.contracted_capacity, o.capacity) - o.occupants as vacancies
+                 o.occupants, coalesce(o.contracted_capacity, o.capacity) - o.occupants as vacancies,
+                 o.status, o.note
             from v_room_occupancy o
            where not o.archived
            order by o.building_sort, o.building, o.room_sort, o.floor, o.room`,

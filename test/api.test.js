@@ -2014,6 +2014,38 @@ async function main() {
     assert.equal(removed.status, 200); assert.equal(removed.json.archived, false);
   });
 
+  console.log("\n== rooms: status and note for the weekly return (migration 035) ==");
+
+  await test("a room can be marked under maintenance with a note, and the vacancies report carries both", async () => {
+    const bld = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Weekly Block" } });
+    assert.equal(bld.status, 201, bld.text);
+    const made = await supC.fetch(`/api/buildings/${bld.json.id}/rooms`, { method: "POST", body: { rooms: [{ floor: "", number: "W1", capacity: 2 }, { floor: "", number: "W2", capacity: 3 }] } });
+    assert.equal(made.status, 201, made.text);
+    const w1 = made.json.find((r) => r.number === "W1"), w2 = made.json.find((r) => r.number === "W2");
+    assert.equal(w1.status, "open", "a new room is open");
+    const bad = await supC.fetch(`/api/rooms/${w1.id}`, { method: "PATCH", body: { status: "closed" } });
+    assert.equal(bad.status, 400);
+    const set = await supC.fetch(`/api/rooms/${w1.id}`, { method: "PATCH", body: { status: "maintenance", note: "Boiler out until Friday" } });
+    assert.equal(set.status, 200, set.text);
+    assert.equal(set.json.status, "maintenance"); assert.equal(set.json.note, "Boiler out until Friday");
+    const cleared = await supC.fetch(`/api/rooms/${w2.id}`, { method: "PATCH", body: { note: "   " } });
+    assert.equal(cleared.status, 200); assert.equal(cleared.json.note, null, "a blank note is stored as null");
+    const tooLong = await supC.fetch(`/api/rooms/${w2.id}`, { method: "PATCH", body: { note: "x".repeat(121) } });
+    assert.equal(tooLong.status, 400);
+    const asGuard = await api.fetch(`/api/rooms/${w1.id}`, { method: "PATCH", body: { status: "open" } });
+    assert.equal(asGuard.status, 403);
+    const list = await api.fetch("/api/buildings");
+    const block = list.json.find((b) => b.name === "Weekly Block");
+    assert.ok(block, "the building is missing from the list");
+    const room = block.rooms.find((r) => r.number === "W1");
+    assert.equal(room.status, "maintenance"); assert.equal(room.note, "Boiler out until Friday");
+    const rep = await supC.fetch("/api/reports/vacancies?reason=return&format=json");
+    assert.equal(rep.status, 200, rep.text);
+    const row = rep.json.rows.find((r) => r.room === "W1");
+    assert.equal(row.status, "maintenance"); assert.equal(row.note, "Boiler out until Friday");
+    assert.equal(Object.keys(row).slice(-2).join(","), "status,note", "status and note are the last two columns");
+  });
+
   console.log("\n== the nightly House Rules reminder by email (migration 032) ==");
 
   await test("with the switch on, supervisors and admins are emailed the residents at a figure; off, nothing goes", async () => {

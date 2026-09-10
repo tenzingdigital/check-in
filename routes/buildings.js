@@ -53,13 +53,15 @@ async function listBuildings(client) {
               select jsonb_agg(jsonb_build_object(
                        'id', o.room_id, 'floor', o.floor, 'number', o.room, 'capacity', o.capacity,
                        'contracted_capacity', o.contracted_capacity, 'bed_config', o.bed_config,
-                       'sort', o.room_sort, 'occupants', o.occupants, 'on_site', o.on_site, 'residents', o.residents)
+                       'sort', o.room_sort, 'occupants', o.occupants, 'on_site', o.on_site, 'residents', o.residents,
+                       'status', o.status, 'note', o.note)
                      order by o.room_sort, o.floor, o.room)
                 from v_room_occupancy o where o.building_id = b.id and not o.archived), '[]'::jsonb) as rooms,
             coalesce((
               select jsonb_agg(jsonb_build_object(
                        'id', o.room_id, 'floor', o.floor, 'number', o.room, 'capacity', o.capacity,
-                       'contracted_capacity', o.contracted_capacity, 'bed_config', o.bed_config)
+                       'contracted_capacity', o.contracted_capacity, 'bed_config', o.bed_config,
+                       'status', o.status, 'note', o.note)
                      order by o.room_sort, o.floor, o.room)
                 from v_room_occupancy o where o.building_id = b.id and o.archived), '[]'::jsonb) as archived_rooms
        from buildings b
@@ -141,7 +143,7 @@ router.post('/buildings/:id/rooms', wrap(async (req, res) => {
         `insert into rooms (building_id, floor, number, capacity, sort)
          values ($1, $2, $3, $4, (select coalesce(max(sort), 0) + 10 from rooms where building_id = $1))
          on conflict (building_id, floor, number) do update set capacity = excluded.capacity
-         returning id, floor, number, capacity, sort`,
+         returning id, floor, number, capacity, sort, status, note`,
         [buildingId, r.floor, r.number, r.capacity],
       );
       if (rows[0]) created.push(rows[0]);
@@ -167,10 +169,17 @@ router.patch('/rooms/:id', wrap(async (req, res) => {
     set('contracted_capacity', v === null || v === '' ? null : int(v, 'Contracted beds', 0, 30, 0));
   }
   if (Object.prototype.hasOwnProperty.call(body, 'bed_config')) set('bed_config', optText(body.bed_config, 80, 'Bed configuration') || null);
+  // Status and note (migration 035): for the weekly return.
+  if (Object.prototype.hasOwnProperty.call(body, 'status')) {
+    const v = String(body.status || '');
+    if (!['open', 'maintenance'].includes(v)) throw new HttpError(400, 'status must be open or maintenance');
+    set('status', v);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'note')) set('note', optText(body.note, 120, 'Note') || null);
   if (!sets.length) throw new HttpError(400, 'Nothing to change');
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `update rooms set ${sets.join(', ')} where id = $1 returning id, building_id, floor, number, capacity, contracted_capacity, bed_config, sort, archived_at`, args);
+      `update rooms set ${sets.join(', ')} where id = $1 returning id, building_id, floor, number, capacity, contracted_capacity, bed_config, sort, archived_at, status, note`, args);
     return rows[0];
   }).catch((err) => { throw supervisorOnly(err); });
   if (!row) throw new HttpError(403, 'Only a supervisor or admin can change rooms');
@@ -204,7 +213,7 @@ router.post('/rooms/:id/restore', wrap(async (req, res) => {
   const id = uuidParam(req.params.id, 'room id');
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `update rooms set archived_at = null where id = $1 returning id, building_id, floor, number, capacity, contracted_capacity, bed_config, sort, archived_at`, [id]);
+      `update rooms set archived_at = null where id = $1 returning id, building_id, floor, number, capacity, contracted_capacity, bed_config, sort, archived_at, status, note`, [id]);
     return rows[0];
   }).catch((err) => { throw supervisorOnly(err); });
   if (!row) throw req.session.role === 'guard' ? new HttpError(403, 'Only a supervisor or admin can change buildings and rooms') : new HttpError(404, 'No such room');

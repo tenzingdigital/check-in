@@ -1487,6 +1487,7 @@ async function loadBuildings({ quiet = false } = {}) {
           <div class="roomhead">
             <b>${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}</b>
             <span class="hint">${r.occupants}/${r.contracted_capacity ?? r.capacity}${r.contracted_capacity != null && r.contracted_capacity !== r.capacity ? ` (${r.capacity} beds)` : ""}${r.bed_config ? ` · ${esc(r.bed_config)}` : ""}${r.occupants ? ` · ${r.on_site} on site` : ""}</span>
+            ${r.status === "maintenance" ? `<span class="pill departed" title="${esc(r.note || "Under maintenance")}">maintenance</span>` : ""}
             <button class="linkish" type="button" data-edit-room="${esc(r.id)}" aria-label="Edit room ${esc(r.number)}">edit</button>
             <button class="linkish" type="button" data-del-room="${esc(r.id)}" aria-label="Archive room ${esc(r.number)}">archive</button>
           </div>
@@ -1495,6 +1496,10 @@ async function loadBuildings({ quiet = false } = {}) {
               <div><label class="lbl">Beds</label><input class="field reCap" type="number" min="1" max="30" value="${r.capacity}" aria-label="Physical beds"></div>
               <div><label class="lbl">Contracted</label><input class="field reContract" type="number" min="0" max="30" value="${r.contracted_capacity ?? ""}" placeholder="${r.capacity}" aria-label="Contracted beds"></div>
               <div><label class="lbl">Bed set-up</label><input class="field reBeds" type="text" maxlength="80" value="${esc(r.bed_config || "")}" placeholder="double + bunk" aria-label="Bed configuration"></div>
+            </div>
+            <div class="grid2">
+              <div><label class="lbl">Status</label><select class="field reStatus" aria-label="Room status"><option value="open" ${r.status !== "maintenance" ? "selected" : ""}>Open</option><option value="maintenance" ${r.status === "maintenance" ? "selected" : ""}>Under maintenance</option></select></div>
+              <div><label class="lbl">Note for the weekly return</label><input class="field reNote" type="text" maxlength="120" value="${esc(r.note || "")}" placeholder="e.g. 1 bed free for a single woman" aria-label="Room note"></div>
             </div>
             <div class="actions"><button class="btn sm" type="submit">Save</button><button class="btn ghost sm" type="button" data-cancel-edit="${esc(r.id)}">Cancel</button></div>
           </form>
@@ -1546,7 +1551,8 @@ $("buildingList").addEventListener("submit", async (e) => {
   if (!form) return;
   e.preventDefault();
   const contract = form.querySelector(".reContract").value;
-  const body = { capacity: Number(form.querySelector(".reCap").value || 1), contracted_capacity: contract === "" ? null : Number(contract), bed_config: form.querySelector(".reBeds").value.trim() };
+  const body = { capacity: Number(form.querySelector(".reCap").value || 1), contracted_capacity: contract === "" ? null : Number(contract), bed_config: form.querySelector(".reBeds").value.trim(),
+                 status: form.querySelector(".reStatus").value, note: form.querySelector(".reNote").value.trim() };
   const out = await guarded(() => apiPatch(`/api/rooms/${form.dataset.rid}`, body), (err) => toast("Not saved: " + err.message, "err"));
   if (!out) return;
   toast("Room saved", "ok");

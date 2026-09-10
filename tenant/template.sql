@@ -21,6 +21,9 @@
 --   tenant_may_write
 --   expire_lapsed_trials
 --   handle_new_user
+--   signup_requests
+--   tenant_demo_rows
+--   sweep_signup_requests
 
 -- pg_dump sets this in its own preamble and it is not optional here either.
 -- SQL-language functions are parsed at CREATE time, and pg_dump orders
@@ -2342,11 +2345,15 @@ CREATE TABLE __TENANT__.rooms (
     archived_at timestamp with time zone,
     contracted_capacity integer,
     bed_config text,
+    status text DEFAULT 'open'::text NOT NULL,
+    note text,
     CONSTRAINT rooms_bed_config_check CHECK (((bed_config IS NULL) OR (length(bed_config) <= 80))),
     CONSTRAINT rooms_capacity_check CHECK (((capacity >= 1) AND (capacity <= 30))),
     CONSTRAINT rooms_contracted_capacity_check CHECK (((contracted_capacity IS NULL) OR ((contracted_capacity >= 0) AND (contracted_capacity <= 30)))),
     CONSTRAINT rooms_floor_check CHECK ((length(floor) <= 20)),
-    CONSTRAINT rooms_number_check CHECK (((length(btrim(number)) >= 1) AND (length(btrim(number)) <= 20)))
+    CONSTRAINT rooms_note_check CHECK (((note IS NULL) OR (length(note) <= 120))),
+    CONSTRAINT rooms_number_check CHECK (((length(btrim(number)) >= 1) AND (length(btrim(number)) <= 20))),
+    CONSTRAINT rooms_status_check CHECK ((status = ANY (ARRAY['open'::text, 'maintenance'::text])))
 );
 
 
@@ -2470,13 +2477,15 @@ CREATE VIEW __TENANT__.v_room_occupancy AS
     COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'full_name', v.full_name, 'presence', v.presence, 'is_adult', v.is_adult, 'evac_need', r.evac_need, 'household_id', r.household_id) ORDER BY r.household_id, v.last_name, v.first_name) FILTER (WHERE (v.id IS NOT NULL)), '[]'::jsonb) AS residents,
     rm.contracted_capacity,
     rm.bed_config,
-    (rm.archived_at IS NOT NULL) AS archived
+    (rm.archived_at IS NOT NULL) AS archived,
+    rm.status,
+    rm.note
    FROM (((__TENANT__.buildings b
      JOIN __TENANT__.rooms rm ON ((rm.building_id = b.id)))
      LEFT JOIN __TENANT__.residents r ON (((r.room_id = rm.id) AND (r.status = 'active'::text))))
      LEFT JOIN __TENANT__.v_resident_status v ON ((v.id = r.id)))
   WHERE __TENANT__.is_staff()
-  GROUP BY b.id, b.name, b.sort, rm.id, rm.floor, rm.number, rm.capacity, rm.contracted_capacity, rm.bed_config, rm.archived_at, rm.sort;
+  GROUP BY b.id, b.name, b.sort, rm.id, rm.floor, rm.number, rm.capacity, rm.contracted_capacity, rm.bed_config, rm.archived_at, rm.status, rm.note, rm.sort;
 
 
 --
