@@ -63,16 +63,21 @@ SITE_HOST = SITE.split("://", 1)[1]
 # to keep it out of the repo. With this empty, beacon() below emits nothing
 # and the site is byte-for-byte what it was before analytics existed;
 # pasting a token in and re-running this file is the whole job.
-CF_BEACON_TOKEN = ""
+CF_BEACON_TOKEN = "764f40ae8a8b4ba4a51c618d89701a94"
 OUT  = "site"
 WRITTEN = []
 
 def beacon():
     """The one JavaScript exception on the site: a single external, deferred
-    script with no inline code, emitted only once CF_BEACON_TOKEN is set."""
+    script with no inline code, emitted only once CF_BEACON_TOKEN is set.
+    type="module" (not defer) matches Cloudflare's own supplied snippet
+    exactly: both defer execution until after parsing, but a module script
+    is fetched in CORS mode and evaluated exactly once, which is what
+    Cloudflare tests its beacon against — so this stays byte-for-byte their
+    supported embed rather than our own reimplementation of it."""
     if not CF_BEACON_TOKEN:
         return ""
-    return (f'\n<script defer src="https://static.cloudflareinsights.com/beacon.min.js" '
+    return (f'\n<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" '
             f'data-cf-beacon=\'{{"token": "{CF_BEACON_TOKEN}"}}\'></script>')
 
 def analytics_note():
