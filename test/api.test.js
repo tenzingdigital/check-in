@@ -2139,13 +2139,47 @@ async function main() {
     assert.equal(asSup.status, 403);
   });
 
-  await test("lastWeek and compose are pure", async () => {
-    const { lastWeek, compose } = require("../lib/weeklyReport");
+  await test("lastWeek is pure", async () => {
+    const { lastWeek } = require("../lib/weeklyReport");
     assert.deepEqual(lastWeek("2026-09-13"), { from: "2026-09-06", to: "2026-09-12" });
-    const out = compose({ siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows: [
-      { section: "Resident absences", line: "A was absent." }, { section: "Room updates", line: "B1 is under maintenance." }] });
+  });
+
+  await test("compose() carries counts and a link, never a resident name — the security property", async () => {
+    const { compose } = require("../lib/weeklyReport");
+    const secretName = "Zbigniew Notaperson";
+    const rows = [
+      { section: "Resident absences", status: "not approved", resident: secretName, line: `${secretName} was absent from Monday to Wednesday.` },
+      { section: "Resident absences", status: "approved", resident: "Other Resident", line: "Other Resident was absent." },
+      { section: "Updates from the weekend", status: "partly approved", resident: "Weekend Resident", line: "Weekend Resident was absent at the weekend." },
+      { section: "Resident removals", status: "departed", resident: "Departed Resident", line: "Departed Resident departed." },
+      { section: "Room updates", status: "maintenance", resident: null, line: "Weekly Block W1 is under maintenance." },
+    ];
+    const out = compose({
+      siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows,
+      link: "https://hut-check-in.onrender.com/admin.html",
+    });
     assert.equal(out.subject, "Slaney: Weekly register update, 6 September to 12 September 2026");
-    assert.match(out.text, /^Slaney: Weekly register update, 6 September to 12 September 2026\n\nResident absences\n- A was absent\.\n\nUpdates from the weekend\n\(none\)\n\nResident removals\n\(none\)\n\nRoom updates\n- B1 is under maintenance\.\n\nNights are counted at midnight/);
+    assert.match(out.text, /^Slaney: Weekly register update, 6 September to 12 September 2026/);
+    assert.match(out.text, /Resident absences: 2 \(1 not approved by management\)/);
+    assert.match(out.text, /Updates from the weekend: 1 \(1 not approved by management\)/);
+    assert.match(out.text, /Resident removals: 1/);
+    assert.match(out.text, /Room updates: 1/);
+    assert.ok(out.text.includes("https://hut-check-in.onrender.com/admin.html"), "the link is in the body");
+    assert.match(out.text, /Admin → Reports/, "names the report's home in the app");
+    // The security property this task exists for: no resident name, and no
+    // per-row sentence (which would carry room, dates and the child marker),
+    // appears anywhere in the composed message.
+    for (const r of rows) if (r.resident) assert.ok(!out.text.includes(r.resident), `${r.resident} must not appear in the email`);
+    assert.ok(!out.text.includes(secretName), "no resident name anywhere in the composed email");
+    assert.ok(!/was absent|departed on|under maintenance/.test(out.text), "no per-row sentence in the composed email");
+  });
+
+  await test("compose() omits the link when none is given, but still says where to find the report", async () => {
+    const { compose } = require("../lib/weeklyReport");
+    const out = compose({ siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows: [] });
+    assert.ok(!/https?:\/\//.test(out.text), "never a broken or relative link when none is given");
+    assert.match(out.text, /Admin → Reports/, "names where to find the report instead");
+    assert.match(out.text, /Resident absences: 0/);
   });
 
   await test("send now emails every recipient ticked on the staff record, and is on the audit record; refused without recipients or to a supervisor", async () => {

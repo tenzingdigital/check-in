@@ -150,6 +150,15 @@ router.delete('/demo-data', wrap(async (req, res) => {
 const mail = require('../lib/mail');
 const weekly = require('../lib/weeklyReport');
 
+// The web tier has a request to build a link from, unlike the nightly job
+// (jobs.js reportLink()): PUBLIC_URL if it is set, else the origin the
+// browser actually used, same pattern as routes/password-reset.js baseUrl().
+function reportLink(req) {
+  const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  const base = configured || `${req.get('x-forwarded-proto') || req.protocol || 'https'}://${req.get('host')}`;
+  return `${base}/admin.html`;
+}
+
 router.post('/weekly-report/send', wrap(async (req, res) => {
   if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can send the weekly report');
   const out = await db.withIdentity(req.session.userId, async (client) => {
@@ -157,17 +166,15 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
       `select site_name, to_char(site_today(), 'YYYY-MM-DD') as today from app_settings where id`);
     // Recipients are the staff ticked to receive it (migration 037), not a
     // setting: every address is a known person with a login.
-    const { rows: staff } = await client.query(
-      `select u.email from profiles p join auth.users u on u.id = p.id
-        where p.active and p.weekly_report and u.email is not null`);
+    const staff = await weekly.recipients(client);
     if (!staff.length) throw new HttpError(400, 'Tick at least one supervisor or admin to receive it under Staff first');
     const { from, to } = weekly.lastWeek(s.today);
     await client.query('select note_report($1, $2, $3, $4)', ['weekly', 'sent by hand', from, to]);
     const { rows } = await client.query('select * from weekly_register_rows($1, $2)', [from, to]);
-    const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows });
+    const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows, link: reportLink(req) });
     let sent = 0;
-    for (const r of staff) {
-      const mailed = await mail.send({ to: r.email, subject, text });
+    for (const email of staff) {
+      const mailed = await mail.send({ to: email, subject, text });
       if (mailed.delivered) sent += 1;
     }
     return { sent, recipients: staff.length, from, to };

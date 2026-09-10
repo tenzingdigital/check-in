@@ -173,10 +173,22 @@ async function notifyThresholds(schema, label) {
 
 // The Sunday Weekly Register Update (migration 035): on a Sunday, after
 // Saturday night's snapshot, the staff ticked to receive it (migration 037)
-// are emailed the week's absences, weekend updates, removals and room
-// updates as plain text. The rows come from weekly_register_rows_unchecked(),
-// the owner's copy: the checked one asks is_supervisor(), which a job is not.
+// are emailed counts and a link, never a resident name (migration 038 — see
+// lib/weeklyReport.js compose()). The rows come from
+// weekly_register_rows_unchecked(), the owner's copy: the checked one asks
+// is_supervisor(), which a job is not.
 const weekly = require('./lib/weeklyReport');
+
+// The cron process has no request to build a link from, so it reads
+// PUBLIC_URL directly (see render.yaml). Unset — a misconfigured deploy — is
+// not the job's problem to fix: compose() sends the email regardless, with
+// the link left out and a sentence naming Admin → Reports instead. Never a
+// relative or broken link.
+function reportLink() {
+  const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  return configured ? `${configured}/admin.html` : null;
+}
+
 async function weeklyRegister(schema, label, { force = false } = {}) {
   const name = 'weekly-register-email';
   const started = Date.now();
@@ -189,9 +201,7 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
       if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
       // Recipients are the staff ticked to receive it (migration 037), not a
       // setting: every address is a known person with a login.
-      const { rows: staff } = await client.query(
-        `select u.email from profiles p join auth.users u on u.id = p.id
-          where p.active and p.weekly_report and u.email is not null`);
+      const staff = await weekly.recipients(client);
       if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
       if (s.dow !== 7 && !force) { await record(client, name, true, 'not Sunday'); return 'not Sunday'; }
       // Idempotence: a second run today (an operator re-running `node
@@ -213,10 +223,10 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
       if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
       const { from, to } = weekly.lastWeek(s.today);
       const { rows } = await client.query('select * from weekly_register_rows_unchecked($1, $2)', [from, to]);
-      const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows });
+      const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows, link: reportLink() });
       let delivered = 0;
-      for (const r of staff) {
-        const out = await mail.send({ to: r.email, subject, text });
+      for (const email of staff) {
+        const out = await mail.send({ to: email, subject, text });
         if (out.delivered) delivered += 1;
       }
       const result = `${rows.length} rows, ${delivered}/${staff.length} emailed`;

@@ -82,11 +82,17 @@ services:
       - key: NODE_VERSION
         value: "22"
       # The origin used to build links in outgoing mail (login links, the
-      # trial's verification link). Without it lib/mail.js falls back to the
-      # request's Host header, which is right until something sits in front of
-      # the app and it quietly is not. Set it once, explicitly.
+      # trial's verification link, the Sunday weekly report). Without it the
+      # web tier falls back to the request's Host header, which is right
+      # until something sits in front of the app and it quietly is not. Set
+      # it once, explicitly.
+      #
+      # This is the Render-assigned domain: the app runs here for now. It
+      # becomes https://app.checksteady.com once the custom domain is wired
+      # up (checksteady.com is bought; DNS and the domains: block below are
+      # not done yet).
       - key: PUBLIC_URL
-        value: https://app.checksteady.ie
+        value: https://hut-check-in.onrender.com
       # 12 hours: a shift, not a fortnight. A hut terminal is a shared physical
       # device, and a session that outlives the shift is one the next person
       # inherits.
@@ -147,6 +153,13 @@ services:
           property: connectionString
       - key: NODE_VERSION
         value: "22"
+      # The nightly job has no request to build a link from (jobs.js
+      # reportLink()), so the Sunday weekly report link comes from here or
+      # not at all — unset, the email still sends with the link left out.
+      # Same Render-assigned domain as hut-check-in above; becomes
+      # https://app.checksteady.com once the custom domain is wired up.
+      - key: PUBLIC_URL
+        value: https://hut-check-in.onrender.com
 
   # -------------------------------------------------------------------------
   # The brochure site (checksteady.ie) — static, no build step, published
