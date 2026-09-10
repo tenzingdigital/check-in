@@ -1546,7 +1546,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 16);
+    assert.equal(list.json.length, 17);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -2044,6 +2044,85 @@ async function main() {
     const row = rep.json.rows.find((r) => r.room === "W1");
     assert.equal(row.status, "maintenance"); assert.equal(row.note, "Boiler out until Friday");
     assert.equal(Object.keys(row).slice(-2).join(","), "status,note", "status and note are the last two columns");
+  });
+
+  console.log("\n== the Weekly register update: spans, approval, weekend, removals, rooms (migration 035) ==");
+
+  // Nights well in the past so the migration-027 snapshot of "today" cannot
+  // interfere. The range is a Sunday night to the Saturday night after it.
+  const wkTo = (() => { const d = new Date(siteToday() + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 30); while (d.getUTCDay() !== 6) d.setUTCDate(d.getUTCDate() - 1); return d; })();
+  const wkDay = (offset) => { const d = new Date(wkTo); d.setUTCDate(d.getUTCDate() + offset); return d.toISOString().slice(0, 10); };
+  const wkFrom = wkDay(-6);   // the Sunday night
+
+  await test("consecutive nights collapse into one span with approval in words", async () => {
+    const jane = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Jane", last_name: "Weekly", date_of_birth: "1988-02-02" } });
+    assert.equal(jane.status, 201, jane.text);
+    const block = (await api.fetch("/api/buildings")).json.find((b) => b.name === "Weekly Block");
+    const w2 = block.rooms.find((r) => r.number === "W2");
+    assert.equal((await supC.fetch(`/api/residents/${jane.json.id}`, { method: "PATCH", body: { room_id: w2.id } })).status, 200);
+    await withOwner((c) => c.query(`update public.residents set registered_at = now() - interval '60 days' where id = $1`, [jane.json.id]));
+    // Mon, Tue, Wed nights out; Fri night out on its own.
+    await withOwner((c) => c.query(
+      `insert into public.overnight_absences (night, resident_id) values ($2::date, $1), ($3::date, $1), ($4::date, $1), ($5::date, $1) on conflict do nothing`,
+      [jane.json.id, wkDay(-5), wkDay(-4), wkDay(-3), wkDay(-1)]));
+    // Approved for Monday and Tuesday only.
+    await withOwner((c) => c.query(
+      `insert into public.authorised_absences (resident_id, from_date, to_date, reason) values ($1, $2::date, $3::date, 'family')`,
+      [jane.json.id, wkDay(-5), wkDay(-4)]));
+    const rep = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.equal(rep.json.title, "Weekly register update");
+    const mine = rep.json.rows.filter((r) => r.resident === "Jane Weekly");
+    assert.equal(mine.length, 2, JSON.stringify(mine));
+    const [span, fri] = mine;
+    assert.equal(span.section, "Resident absences");
+    assert.equal(span.from_date, wkDay(-5)); assert.equal(span.to_date, wkDay(-3)); assert.equal(span.nights, 3);
+    assert.equal(span.back_on, wkDay(-2), "back the day after the last absent night");
+    assert.equal(span.status, "partly approved");
+    assert.match(span.line, /^Jane Weekly from Weekly Block W2 was absent from \w+day \d+ \w+ to \w+day \d+ \w+ \d{4} \(3 nights\), back on \w+day \d+ \w+\. Partly approved \(2 of 3 nights\)\.$/);
+    assert.equal(fri.section, "Updates from the weekend", "a span starting Friday night is a weekend update");
+    assert.equal(fri.nights, 1); assert.equal(fri.status, "not approved");
+    assert.match(fri.line, /\(1 night\), back on .*\. Not approved\.$/);
+  });
+
+  await test("a span reaching the last night is still away; a fully authorised one is approved; a guard is refused", async () => {
+    const tom = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Tom", last_name: "Weekly", date_of_birth: "2015-06-06" } });
+    assert.equal(tom.status, 201, tom.text);
+    await withOwner((c) => c.query(`update public.residents set registered_at = now() - interval '60 days' where id = $1`, [tom.json.id]));
+    await withOwner((c) => c.query(
+      `insert into public.overnight_absences (night, resident_id) values ($2::date, $1), ($3::date, $1) on conflict do nothing`, [tom.json.id, wkDay(-1), wkDay(0)]));
+    await withOwner((c) => c.query(
+      `insert into public.authorised_absences (resident_id, from_date, to_date, reason, guardian_agreed) values ($1, $2::date, $3::date, 'holiday', true)`,
+      [tom.json.id, wkDay(-1), wkDay(0)]));
+    const rep = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday&format=json`);
+    const row = rep.json.rows.find((r) => r.resident === "Tom Weekly");
+    assert.ok(row, "Tom is missing");
+    assert.equal(row.child, "child"); assert.equal(row.back_on, null); assert.equal(row.status, "approved");
+    assert.match(row.line, /^Tom Weekly \(child\) was absent from .*\(2 nights\), still away\. Approved by management\.$/);
+    const asGuard = await api.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday&format=json`);
+    assert.equal(asGuard.status, 403);
+  });
+
+  await test("removals and room updates are on the same report, in order, and the CSV header is fixed", async () => {
+    const gone = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Gone", last_name: "Weekly", date_of_birth: "1970-01-01" } });
+    assert.equal(gone.status, 201, gone.text);
+    const dep = await supC.fetch(`/api/residents/${gone.json.id}`, { method: "PATCH", body: { status: "departed", departed_on: wkDay(-2) } });
+    assert.equal(dep.status, 200, dep.text);
+    const rep = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday&format=json`);
+    const sections = rep.json.rows.map((r) => r.section);
+    const order = ["Resident absences", "Updates from the weekend", "Resident removals", "Room updates"];
+    assert.deepEqual([...new Set(sections)], order.filter((s) => sections.includes(s)), "sections out of order");
+    const removal = rep.json.rows.find((r) => r.section === "Resident removals" && r.resident === "Gone Weekly");
+    assert.ok(removal, "the departure is missing"); assert.equal(removal.status, "departed");
+    assert.match(removal.line, /^Gone Weekly departed on \w+day \d+ \w+ \d{4}\.$/);
+    const maint = rep.json.rows.find((r) => r.section === "Room updates" && r.room === "W1");
+    assert.equal(maint.status, "maintenance");
+    assert.equal(maint.line, "Weekly Block W1 is under maintenance: Boiler out until Friday.");
+    const free = rep.json.rows.find((r) => r.section === "Room updates" && r.room === "W2");
+    assert.equal(free.status, "2 free", "W2 has 3 beds and one occupant");
+    assert.equal(free.line, "Weekly Block W2: 2 of 3 beds free.");
+    const csv = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday`);
+    assert.match(csv.text, /^﻿?section,building,room,resident,child,from_date,to_date,nights,back_on,status,line\r\n/);
   });
 
   console.log("\n== the nightly House Rules reminder by email (migration 032) ==");

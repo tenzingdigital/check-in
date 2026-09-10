@@ -55,3 +55,141 @@ group by b.id, b.name, b.sort, rm.id, rm.floor, rm.number, rm.capacity, rm.contr
 
 revoke all on public.v_room_occupancy from anon, public;
 grant select on public.v_room_occupancy to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 2. Absence spans
+-- ---------------------------------------------------------------------------
+-- Consecutive nights in overnight_absences become one span per resident.
+-- back_on is the day on whose midnight the resident was on site again, or
+-- null while the span reaches p_to. Approval is by construction: a night
+-- inside an authorised absence is approved. Base tables only: the nightly
+-- job runs this as owner, and the v_* views filter on is_staff().
+create or replace function public.weekly_absence_spans(p_from date, p_to date)
+returns table (
+  resident_id uuid, resident text, building text, room text, child boolean,
+  first_night date, last_night date, nights integer, back_on date,
+  authorised_nights integer, approval text, weekend boolean,
+  last_name text, first_name text
+)
+language sql stable security definer set search_path = public
+as $$
+  with nights as (
+    select o.resident_id, o.night,
+           o.night - (row_number() over (partition by o.resident_id order by o.night))::integer as grp
+      from public.overnight_absences o
+     where o.night between p_from and p_to
+  ),
+  spans as (
+    select n.resident_id, min(n.night) as first_night, max(n.night) as last_night, count(*)::integer as nights,
+           count(*) filter (where public.absence_authorised(n.resident_id, n.night))::integer as authorised_nights
+      from nights n
+     group by n.resident_id, n.grp
+  )
+  select s.resident_id,
+         btrim(r.first_name) || ' ' || btrim(r.last_name),
+         b.name, rm.number,
+         (r.date_of_birth > (s.first_night - make_interval(years => st.adult_age_years))::date),
+         s.first_night, s.last_night, s.nights,
+         case when s.last_night < p_to then s.last_night + 1 end,
+         s.authorised_nights,
+         case when s.authorised_nights = s.nights then 'approved'
+              when s.authorised_nights = 0       then 'not approved'
+              else 'partly approved' end,
+         extract(isodow from s.first_night) in (5, 6),
+         r.last_name, r.first_name
+    from spans s
+    join public.residents r on r.id = s.resident_id
+    left join public.rooms rm on rm.id = r.room_id
+    left join public.buildings b on b.id = rm.building_id
+    cross join (select adult_age_years from public.app_settings where id) st;
+$$;
+revoke all on function public.weekly_absence_spans(date, date) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. The report rows, sentences included
+-- ---------------------------------------------------------------------------
+-- Four sections in a fixed order. The sentence is built here so the CSV,
+-- the printable page and the Sunday email can never disagree.
+create or replace function public.weekly_register_rows_unchecked(p_from date, p_to date)
+returns table (
+  section text, building text, room text, resident text, child text,
+  from_date date, to_date date, nights integer, back_on date, status text, line text
+)
+language sql stable security definer set search_path = public
+as $$
+  select q.section, q.building, q.room, q.resident, q.child, q.from_date, q.to_date, q.nights, q.back_on, q.status, q.line
+    from (
+      -- Absences, then the weekend
+      select case when s.weekend then 2 else 1 end as seq,
+             s.first_night::text as k1, s.last_name as k2, s.first_name as k3,
+             case when s.weekend then 'Updates from the weekend' else 'Resident absences' end as section,
+             s.building, s.room, s.resident, case when s.child then 'child' else '' end as child,
+             s.first_night as from_date, s.last_night as to_date, s.nights, s.back_on,
+             s.approval as status,
+             s.resident || case when s.child then ' (child)' else '' end
+               || case when s.room is not null then ' from ' || s.building || ' ' || s.room else '' end
+               || ' was absent from ' || to_char(s.first_night, 'FMDay FMDD FMMonth')
+               || ' to ' || to_char(s.last_night, 'FMDay FMDD FMMonth YYYY')
+               || ' (' || s.nights || ' night' || case when s.nights = 1 then '' else 's' end || '), '
+               || case when s.back_on is null then 'still away' else 'back on ' || to_char(s.back_on, 'FMDay FMDD FMMonth') end
+               || '. '
+               || case s.approval when 'approved' then 'Approved by management.'
+                                  when 'not approved' then 'Not approved.'
+                                  else 'Partly approved (' || s.authorised_nights || ' of ' || s.nights || ' nights).' end as line
+        from public.weekly_absence_spans(p_from, p_to) s
+      union all
+      -- Removals
+      select 3, r.departed_on::text, r.last_name, r.first_name,
+             'Resident removals', b.name, rm.number,
+             btrim(r.first_name) || ' ' || btrim(r.last_name),
+             case when r.date_of_birth > (r.departed_on - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
+             r.departed_on, r.departed_on, null::integer, null::date, 'departed',
+             btrim(r.first_name) || ' ' || btrim(r.last_name)
+               || case when r.date_of_birth > (r.departed_on - make_interval(years => st.adult_age_years))::date then ' (child)' else '' end
+               || case when rm.id is not null then ' from ' || b.name || ' ' || rm.number else '' end
+               || ' departed on ' || to_char(r.departed_on, 'FMDay FMDD FMMonth YYYY') || '.'
+        from public.residents r
+        left join public.rooms rm on rm.id = r.room_id
+        left join public.buildings b on b.id = rm.building_id
+        cross join (select adult_age_years from public.app_settings where id) st
+       where r.status = 'departed' and r.departed_on between p_from and p_to
+      union all
+      -- Rooms under maintenance or with free contracted beds
+      select 4, lpad(b.sort::text, 6, '0') || b.name, lpad(rm.sort::text, 6, '0') || rm.floor, rm.number,
+             'Room updates', b.name, rm.number, null, '',
+             null, null, null, null,
+             case when rm.status = 'maintenance' then 'maintenance' else x.free || ' free' end,
+             case when rm.status = 'maintenance'
+                  then b.name || ' ' || rm.number || ' is under maintenance' || coalesce(': ' || rm.note, '') || '.'
+                  else b.name || ' ' || rm.number || ': ' || x.free || ' of ' || x.contracted || ' bed' || case when x.contracted = 1 then '' else 's' end || ' free'
+                       || coalesce(' (' || rm.bed_config || ')', '') || coalesce(': ' || rm.note, '') || '.' end
+        from public.rooms rm
+        join public.buildings b on b.id = rm.building_id
+        cross join lateral (
+          select coalesce(rm.contracted_capacity, rm.capacity) as contracted,
+                 coalesce(rm.contracted_capacity, rm.capacity)
+                   - (select count(*)::integer from public.residents r where r.room_id = rm.id and r.status = 'active') as free
+        ) x
+       where rm.archived_at is null and (rm.status = 'maintenance' or x.free > 0)
+    ) q
+   order by q.seq, q.k1, q.k2, q.k3;
+$$;
+revoke all on function public.weekly_register_rows_unchecked(date, date) from public, anon, authenticated;
+
+-- What the API calls: a supervisor's report, refused to a guard.
+create or replace function public.weekly_register_rows(p_from date, p_to date)
+returns table (
+  section text, building text, room text, resident text, child text,
+  from_date date, to_date date, nights integer, back_on date, status text, line text
+)
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if not public.is_supervisor() then
+    raise exception 'Only a supervisor or admin may run the weekly register' using errcode = '42501';
+  end if;
+  return query select * from public.weekly_register_rows_unchecked(p_from, p_to);
+end;
+$$;
+revoke all on function public.weekly_register_rows(date, date) from public, anon;
+grant execute on function public.weekly_register_rows(date, date) to authenticated;

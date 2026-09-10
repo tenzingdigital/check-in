@@ -15,6 +15,7 @@
 //   roll-call-marks  who was marked safe on each roll call, by whom
 //   room-history     every room each resident has had
 //   breaches    breach reports issued to IPAS in the range (migration 029)
+//   weekly      the Sunday Weekly Register Update: absence spans, weekend, removals, rooms (migration 035)
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -198,6 +199,16 @@ REPORTS.away = {
           and ev.occurred_at >= ($1::date::timestamp) at time zone s.tz
           and ev.occurred_at <  (($2::date + 1)::timestamp) at time zone s.tz
         order by ev.occurred_at desc, r.last_name, r.first_name`,
+};
+
+// The Sunday Weekly Register Update (migration 035): absences as spans of
+// nights with approval in words, the weekend's on their own, the week's
+// departures, and rooms under maintenance or with free beds. The sentence
+// in `line` is what head office reads; the other columns are the facts.
+REPORTS.weekly = {
+  title: 'Weekly register update',
+  ranged: true,
+  sql: `select * from weekly_register_rows($1, $2)`,
 };
 
 // Authorised absences overlapping the range, and who was marked safe on
