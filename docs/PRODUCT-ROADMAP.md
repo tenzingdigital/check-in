@@ -264,7 +264,7 @@ the movement log.
 
 ## Stage 2f — The Sunday report (Brighton's Weekly Register document, 10 September 2026)
 
-**Status: built 10 September 2026 (migrations 035 and 036), on the
+**Status: built 10 September 2026 (migrations 035, 036 and 037), on the
 working branch.** Spec: `docs/superpowers/specs/2026-09-10-weekly-register-update-design.md`.
 
 - *Absences as "from Monday to Wednesday"*: consecutive nights in the
@@ -274,12 +274,22 @@ working branch.** Spec: `docs/superpowers/specs/2026-09-10-weekly-register-updat
   "Updates from the weekend". Departures in the week are "Resident
   removals". Rooms gain a status (open, maintenance) and a one-line note
   for the return; "Room updates" lists maintenance and free contracted
-  beds. One SQL function builds the rows and the sentences, so the CSV,
-  the printable page and the email agree.
-- *Sent on a Sunday*: a switch and up to ten addresses in Settings; the
-  nightly job, after Saturday night's snapshot, emails the previous
-  Sunday night through Saturday night. "Send last week's now" for
-  checking, on the audit record.
+  beds. One SQL function builds the rows and the sentences; the report
+  under Admin → Reports, viewed or downloaded as a CSV, reads them in
+  full, but the emailed version reads only their counts (below).
+- *Sent on a Sunday, counts and a link only* (migration 037): the staff
+  ticked "Gets the Sunday report" on their record — offered only to
+  supervisors and admins, since only they may run the report it
+  summarises — are emailed the previous Sunday night through Saturday
+  night as a count per section and a link into the app, never a resident
+  name, room or date. A switch under Settings turns the send on or off
+  for the site; "Send last week's now" checks it regardless of the
+  switch, on the audit record. Recipients moved off a comma-separated
+  address list typed into Settings: they are now always known staff, so a
+  colleague who leaves stops receiving resident data automatically, and
+  because no resident data leaves by this email at all, none of it lives
+  on in an inbox, a forward, or a mail provider's own backups outside the
+  app's retention rules.
 - *The IPAS permitted periods*: dates under Settings; a holiday outside
   every window is recorded with a warning, never refused.
 - *The iPad as a fixed terminal*: a manifest and the Apple meta tags, so

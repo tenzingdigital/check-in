@@ -493,12 +493,16 @@ out of the two working apps:
   close-out writes those days as not required, so they never count as
   missed; cards say *Away until*; a report covers a range. Nothing else is
   held.
-- **The Sunday email** (migration 035): under Settings, a switch and up to
-  ten addresses; early Sunday the nightly job emails the Weekly register
-  update for the previous Sunday night through Saturday night, and *Send
-  last week's now* checks it. **Permitted absence periods** (migration
-  036): the IPAS windows as dates under Settings; a holiday authorised
-  outside them is recorded with a warning, never refused.
+- **The Sunday email** (migrations 035 and 037): early Sunday the nightly
+  job emails the previous Sunday night through Saturday night as counts and
+  a link, never a resident name, to the staff ticked *Gets the Sunday
+  report* on their record — offered only to supervisors and admins, since
+  only they may run the report it summarises, and cleared automatically on
+  a demotion to guard. A switch under Settings turns the send on or off for
+  the site; *Send last week's now* checks it regardless of the switch.
+  **Permitted absence periods** (migration 036): the IPAS windows as dates
+  under Settings; a holiday authorised outside them is recorded with a
+  warning, never refused.
 - **Room history** (migration 028): every room a resident has had, from
   when to when and who moved them, kept by a trigger as the room changes
   and closed when they leave. On the edit sheet and as a report. The label

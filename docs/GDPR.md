@@ -18,6 +18,15 @@ disclosure of resident data by email to addresses that need not belong to
 the centre. The Resend section below and the processor table were wrong
 about this and are corrected.
 
+Updated again 10 September 2026 against migration 037 and the same day's
+rewrite of the email's content (`lib/weeklyReport.js`). The disclosure above
+lasted less than a day. Recipients of the Weekly register update are now a
+tick on the staff record, offered only to supervisors and admins, and the
+email itself carries counts and a link only — no resident name, room, date
+or child marker. The email now goes only to the centre's own staff, and no
+resident data leaves by it at all. The Resend section and processor table
+below are corrected again.
+
 **This is not legal advice.** A system that records the daily presence of
 residents in accommodation, some of whom are in the international protection
 process, is systematic monitoring of people who are frequently vulnerable.
@@ -216,29 +225,28 @@ enforces it. A resident's browser never exists here; a staff browser
 contacts exactly one host.
 
 **What leaves by email.** Invitations and password resets carry no resident
-data: a staff member's own address, name and a single-use link. Two other
-messages do carry resident data.
+data: a staff member's own address, name and a single-use link. Of the two
+recurring reports below, one carries resident data and one does not.
 
 The nightly House Rules reminder (migration 032), where the centre has
 turned it on, goes to the centre's own active supervisors and
 administrators: each resident at or over a figure, their name and room
 label, and the count of nights against the site's House Rules settings.
 
-The Sunday Weekly register update (migration 035), where the centre has
-turned it on — or at any time an administrator sends it by hand from
-Settings, switch or no switch — goes to the addresses an administrator
-configures under Settings — which may be outside the centre, since nothing
-ties them to a staff account. It carries residents' names, whether a
-resident is marked as a child, their building and room, the span of nights
-each was away and whether every night falls inside an authorised absence,
-who departed and when, and the one-line note a supervisor wrote about a
-room for the vacancy line.
+The Sunday Weekly register update (migrations 035 and 037), where the
+centre has turned it on — or at any time an administrator sends it by hand
+from Settings, switch or no switch — goes to the centre's own staff ticked
+"Gets the Sunday report" on their record, offered only to supervisors and
+admins because only they may run the report it summarises. It carries no
+resident data at all: a count for resident absences, weekend updates,
+removals and room updates, and a link into the app. The names, rooms and
+dates behind those counts stay in the app, under Admin → Reports, where
+they can also be downloaded as a spreadsheet.
 
-Neither message carries a date of birth — though the Sunday report marks a
-resident under the site's adult age as a child — an identity-document
-number, an evacuation need, or any free text about a person. The room note
-is the only free text involved, and the schema and the admin screen both
-say it is about the room, never the resident.
+Neither message carries a date of birth, an identity-document number, an
+evacuation need, or any free text about a person. The House Rules reminder
+is the only one of the two that names a resident, and it carries nothing
+beyond a name, a room label and a night count.
 
 ---
 
@@ -270,7 +278,7 @@ may be in dispute with staff, that matters.
 | Processor | Purpose | Where |
 |---|---|---|
 | Render Services, Inc. | Hosting, the managed database, backups, the nightly scheduler | Frankfurt (EU); fixed at creation in `render.yaml` |
-| Resend, Inc. | Invitation and password-reset email to staff; the nightly House Rules reminder to the centre's own supervisors and administrators; the Sunday Weekly register update to the addresses Settings configures, which may be outside the centre | EU/US; see DPA section 6 |
+| Resend, Inc. | Invitation and password-reset email to staff; the nightly House Rules reminder to the centre's own supervisors and administrators; the Sunday Weekly register update, which carries no resident data, to the centre's own staff ticked to receive it | EU/US; see DPA section 6 |
 
 Both are US companies with EU data residency, so the transfer basis (Standard
 Contractual Clauses plus the EU–US Data Privacy Framework, as each provider
@@ -310,7 +318,7 @@ list of people holding either is kept in
 - [ ] Render's and Resend's DPAs and SCCs on file; transfer impact assessment written
 - [ ] Database confirmed in Frankfurt on a paid plan with point-in-time recovery, and not the smallest plan (`docs/KNOWN-ISSUES.md` 19c)
 - [ ] Email configured (`RESEND_API_KEY`), so invitation links go to their owner and not to an administrator's screen
-- [ ] If the Weekly register update is turned on, its recipients (Settings → Weekly register update) are checked: only people who should receive resident names, rooms, absence and departure detail by email outside the centre
+- [ ] If the Weekly register update is turned on, the staff ticked "Gets the Sunday report" (Admin → Staff) are the right supervisors and admins — the email itself carries no resident data, so this is a check on who holds those roles rather than on what leaves by email
 - [ ] A named person at the centre who actions access and erasure requests, and a named person at Tenzing who receives breach reports
 - [ ] The list of people holding the external connection string is written down and short
 - [ ] The paper fallback sheet is printed and in the hut
