@@ -64,6 +64,12 @@ python3 tools/check-site.py || fail=1
 step "The permission matrix document is current"
 node tools/gen-permissions-doc.js --check || fail=1
 
+# Needs no database or running server — lib/mail.js's send() is exercised
+# directly with a stand-in fetch(), so this runs unconditionally rather than
+# only when the PostgreSQL binaries below are present.
+step "Mail provider error logging"
+node test/mail.test.js || fail=1
+
 if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/null 2>&1; then
   step "Database suite"
   ./test/sql.sh >/tmp/hut-check-suite.log 2>&1
