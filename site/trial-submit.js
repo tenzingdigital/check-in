@@ -13,10 +13,22 @@
 (function () {
   var form = document.getElementById('trial-signup');
   if (!form) return;
+  var button = form.querySelector('button[type="submit"]');
+  var originalLabel = button ? button.textContent : null;
   form.addEventListener('submit', function () {
-    var button = form.querySelector('button[type="submit"]');
     if (!button) return;
     button.disabled = true;
     button.textContent = 'Sending...';
+  });
+  // Submit, then press Back: Safari and Firefox restore the page from the
+  // back-forward cache exactly as it was left, button and all, rather than
+  // reloading it — so without this the form is stuck disabled and reading
+  // "Sending..." and cannot be resubmitted. `event.persisted` is true only
+  // for a bfcache restore, never a fresh load, so this never touches a
+  // button that was never disabled in the first place.
+  window.addEventListener('pageshow', function (event) {
+    if (!event.persisted || !button) return;
+    button.disabled = false;
+    button.textContent = originalLabel;
   });
 })();

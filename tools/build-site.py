@@ -70,14 +70,18 @@ WRITTEN = []
 def beacon():
     """The one JavaScript exception on the site: a single external, deferred
     script with no inline code, emitted only once CF_BEACON_TOKEN is set.
-    type="module" (not defer) matches Cloudflare's own supplied snippet
-    exactly: both defer execution until after parsing, but a module script
-    is fetched in CORS mode and evaluated exactly once, which is what
-    Cloudflare tests its beacon against — so this stays byte-for-byte their
-    supported embed rather than our own reimplementation of it."""
+    `defer`, matching Cloudflare's own documented embed exactly — not
+    `type="module"`, which happened to also work here but only by two
+    coincidences worth not depending on: module scripts fetch in CORS mode,
+    which only succeeds because static.cloudflareinsights.com happens to
+    send a permissive CORS header, and document.currentScript is null for a
+    module script, so beacon.min.js finding its own <script> tag (to read
+    data-cf-beacon off it) would rely on an undocumented fallback lookup
+    rather than the direct one Cloudflare actually tests against. `defer`
+    needs neither."""
     if not CF_BEACON_TOKEN:
         return ""
-    return (f'\n<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" '
+    return (f'\n<script defer src="https://static.cloudflareinsights.com/beacon.min.js" '
             f'data-cf-beacon=\'{{"token": "{CF_BEACON_TOKEN}"}}\'></script>')
 
 def analytics_note():
@@ -89,8 +93,8 @@ def analytics_note():
     return ('\n    <p>This site — not the app — counts visits using '
             '<a href="https://www.cloudflare.com/en-gb/web-analytics/" '
             'target="_blank" rel="noopener">Cloudflare Web Analytics</a>, which '
-            'is cookieless and needs no consent banner: it sees an aggregate '
-            'count of page views and cannot identify anyone.</p>')
+            'is cookieless and needs no consent banner: we see only aggregate '
+            'counts of page views, never anything tied to one visitor.</p>')
 
 MARK = ('<svg class="mark" viewBox="0 0 64 64" aria-hidden="true">'
         '<rect width="64" height="64" rx="16" fill="#1d4ed8"/>'

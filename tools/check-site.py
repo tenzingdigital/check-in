@@ -76,12 +76,15 @@ def check_page(path):
                 if q["name"] not in visible:
                     problem(f"{path}: FAQ markup claims a question the page does not show — {q['name']!r}")
 
-    # Internal links must land somewhere.
-    for href in sorted(set(re.findall(r'href="(/[^"#]*)"', html))):
-        target = href.strip("/")
+    # Internal links must land somewhere — href= (a normal link) and src=
+    # (a local script, e.g. trial-submit.js) alike. Only local paths
+    # (starting with "/") are checked; an external src, such as the
+    # Cloudflare beacon, is out of scope here.
+    for attr_value in sorted(set(re.findall(r'(?:href|src)="(/[^"#]*)"', html))):
+        target = attr_value.strip("/")
         candidates = [os.path.join(SITE, target, "index.html"), os.path.join(SITE, target)]
         if not any(os.path.exists(c) for c in candidates):
-            problem(f"{path}: broken internal link {href}")
+            problem(f"{path}: broken internal link {attr_value}")
     return rel
 
 
@@ -114,6 +117,26 @@ def main():
             continue                       # hand-written, not generated
         if hashlib.sha256(open(p, "rb").read()).hexdigest() != digest:
             problem(f"{p} differs from what tools/build-site.py produces — re-run it and commit the result")
+
+    # site/index.html is hand-written, so the drift check above skips it —
+    # but it carries its own hand-copied Cloudflare Web Analytics beacon
+    # (build-site.py cannot write it in for you), and nothing else here
+    # would notice if the token changed, the tag's attributes changed, or
+    # the tag were dropped or left behind after the token was cleared. A
+    # freshly generated page (just rebuilt above) is the source of truth for
+    # what that tag should be.
+    beacon_tag = re.compile(r'<script[^>]*cloudflareinsights[^>]*></script>')
+    reference = next((p for p in pages if p != f"{SITE}/index.html"), None)
+    if reference:
+        expected = beacon_tag.search(open(reference).read())
+        actual = beacon_tag.search(open(f"{SITE}/index.html").read())
+        if (expected is None) != (actual is None):
+            problem("site/index.html: the hand-copied analytics beacon is present on one but not "
+                    "the other of index.html and the generated pages — copy tools/build-site.py's "
+                    "beacon() output into index.html by hand, or remove it from both")
+        elif expected and expected.group(0) != actual.group(0):
+            problem(f"site/index.html: the hand-copied analytics beacon does not match the "
+                     f"generated pages (e.g. {reference}) — re-copy it by hand and commit the result")
 
     if FAIL:
         for f in FAIL:
