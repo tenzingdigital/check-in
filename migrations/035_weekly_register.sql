@@ -193,3 +193,15 @@ end;
 $$;
 revoke all on function public.weekly_register_rows(date, date) from public, anon;
 grant execute on function public.weekly_register_rows(date, date) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 4. Sent on a Sunday
+-- ---------------------------------------------------------------------------
+-- Off by default. On, the nightly job (jobs.js) emails the addresses below
+-- the report for the previous Sunday night through Saturday night, early on
+-- Sunday morning, after Saturday night's snapshot. Needs email configured.
+alter table public.app_settings
+  add column if not exists weekly_report_email boolean not null default false,
+  add column if not exists weekly_report_recipients text check (weekly_report_recipients is null or length(weekly_report_recipients) <= 400);
+comment on column public.app_settings.weekly_report_email is 'Email the Weekly register update every Sunday (jobs.js).';
+comment on column public.app_settings.weekly_report_recipients is 'Comma-separated addresses that receive it. Null: nobody.';

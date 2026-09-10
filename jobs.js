@@ -171,6 +171,46 @@ async function notifyThresholds(schema, label) {
   }
 }
 
+// The Sunday Weekly Register Update (migration 035): on a Sunday, after
+// Saturday night's snapshot, the addresses in Settings receive the week's
+// absences, weekend updates, removals and room updates as plain text. The
+// rows come from weekly_register_rows_unchecked(), the owner's copy: the
+// checked one asks is_supervisor(), which a job is not.
+const weekly = require('./lib/weeklyReport');
+async function weeklyRegister(schema, label, { force = false } = {}) {
+  const name = 'weekly-register-email';
+  const started = Date.now();
+  try {
+    const summary = await withOwnerIn(schema, async (client) => {
+      const { rows: [s] } = await client.query(
+        `select weekly_report_email as on, weekly_report_recipients as recipients, site_name,
+                to_char(site_today(), 'YYYY-MM-DD') as today, extract(isodow from site_today())::int as dow
+           from app_settings where id`);
+      if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
+      if (!s.recipients) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
+      if (s.dow !== 7 && !force) { await record(client, name, true, 'not Sunday'); return 'not Sunday'; }
+      const { from, to } = weekly.lastWeek(s.today);
+      const { rows } = await client.query('select * from weekly_register_rows_unchecked($1, $2)', [from, to]);
+      const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows });
+      const recipients = s.recipients.split(',');
+      let delivered = 0;
+      for (const to_ of recipients) {
+        const out = await mail.send({ to: to_, subject, text });
+        if (out.delivered) delivered += 1;
+      }
+      const result = `${rows.length} rows, ${delivered}/${recipients.length} emailed`;
+      await record(client, name, true, result);
+      return result;
+    });
+    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
+    return true;
+  } catch (err) {
+    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
+    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
+    return false;
+  }
+}
+
 async function main() {
   let failed = 0;
 
@@ -197,6 +237,7 @@ async function main() {
       if (liveOnly && !live) continue;
       if (!(await runJob(schema, label, name, sql))) failed += 1;
       if (name === 'close-out-compliance-days' && !(await notifyThresholds(schema, label))) failed += 1;
+      if (name === 'snapshot-overnight-absences' && !(await weeklyRegister(schema, label))) failed += 1;
     }
   }
 
@@ -211,7 +252,7 @@ async function main() {
   }
 }
 
-module.exports = { notifyThresholds };
+module.exports = { notifyThresholds, weeklyRegister };
 if (require.main === module) main().catch((err) => {
   console.error("[jobs] fatal:", err);
   process.exit(1);

@@ -37,6 +37,9 @@ const COLUMNS = {
   mfa_email:                     { kind: 'bool' },
   // The nightly House Rules reminder by email (032).
   notify_thresholds_email:       { kind: 'bool' },
+  // The Sunday Weekly register update by email (035).
+  weekly_report_email:           { kind: 'bool' },
+  weekly_report_recipients:      { kind: 'emails' },
   // Where logins are expected from (022): ISO codes, comma-separated.
   home_countries:                { kind: 'countries' },
 };
@@ -62,6 +65,14 @@ router.patch('/', wrap(async (req, res) => {
     } else if (rule.kind === 'countries') {
       v = String(v || '').toUpperCase().replace(/\s+/g, '');
       if (!/^[A-Z]{2}(,[A-Z]{2})*$/.test(v)) throw new HttpError(400, 'home countries must be two-letter codes separated by commas, e.g. IE or IE,GB');
+    } else if (rule.kind === 'emails') {
+      // Comma-separated addresses; empty clears. Same shape as a staff invite.
+      const parts = String(v || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+      if (parts.length > 10) throw new HttpError(400, 'At most ten addresses');
+      for (const p of parts) {
+        if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(p) || p.length > 120) throw new HttpError(400, `${p} is not an email address`);
+      }
+      v = parts.length ? parts.join(',') : null;
     } else if (rule.kind === 'bool') {
       if (v === true || v === 'true' || v === 1 || v === '1' || v === 'on') v = true;
       else if (v === false || v === 'false' || v === 0 || v === '0' || v === '' || v === null || v === 'off') v = false;
@@ -135,6 +146,35 @@ router.delete('/demo-data', wrap(async (req, res) => {
   const t = await demoContext(req);
   const out = await db.withOwner((client) =>
     clearDemoCentre(client, { schema: t.schema, tenantId: t.tenantId }));
+  res.json(out);
+}));
+
+// ---------------------------------------------------------------------------
+// POST /api/settings/weekly-report/send — last week's Weekly register update
+// to the saved recipients, now. Administrators; on the audit record like an
+// export, so a manual send has a trail.
+// ---------------------------------------------------------------------------
+const mail = require('../lib/mail');
+const weekly = require('../lib/weeklyReport');
+
+router.post('/weekly-report/send', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can send the weekly report');
+  const out = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows: [s] } = await client.query(
+      `select site_name, weekly_report_recipients as recipients, to_char(site_today(), 'YYYY-MM-DD') as today from app_settings where id`);
+    if (!s || !s.recipients) throw new HttpError(400, 'Add at least one recipient under Settings first');
+    const { from, to } = weekly.lastWeek(s.today);
+    await client.query('select note_report($1, $2, $3, $4)', ['weekly', 'sent by hand', from, to]);
+    const { rows } = await client.query('select * from weekly_register_rows($1, $2)', [from, to]);
+    const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows });
+    const recipients = s.recipients.split(',');
+    let sent = 0;
+    for (const to_ of recipients) {
+      const r = await mail.send({ to: to_, subject, text });
+      if (r.delivered) sent += 1;
+    }
+    return { sent, recipients: recipients.length, from, to };
+  });
   res.json(out);
 }));
 

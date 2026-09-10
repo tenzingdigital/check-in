@@ -443,6 +443,11 @@
         <label class="check"><input id="stNotify" type="checkbox"> <span><b>Nightly House Rules reminder by email.</b> After close-out, supervisors and administrators are emailed the residents at or over the consecutive-nights or rolling-window figure, on the nights there is anyone to list. Authorised absences are left out. Needs email configured on the service.</span></label>
         <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login. Needs email configured on the service.</span></label>
 
+        <h2 class="mt6">Weekly register update</h2>
+        <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> Early Sunday morning, after Saturday night's snapshot, the addresses below receive the week's absences, weekend updates, removals and room updates as plain text. Needs email configured on the service.</span></label>
+        <div><label class="lbl" for="stWeeklyTo">Recipients</label><input id="stWeeklyTo" class="field" type="text" maxlength="400" placeholder="mick@example.ie, niamh@example.ie">
+          <p class="hint under">Comma-separated, up to ten. <button class="linkish" type="button" id="stWeeklySend">Send last week's now</button> to check what arrives. A manual send is on the audit record.</p></div>
+
         <h2 class="mt6">Features for this site <button class="tip" type="button" data-tip="Each switch is off until you turn it on here, so a centre sees only what it uses. Turning one off hides the screens; nothing already recorded is deleted." aria-label="About feature switches">?</button></h2>
         <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
         <label class="check"><input id="stFeatHouseholds" type="checkbox"> <span><b>Households.</b> Link family members so a child appears with a parent on the roll call and a room's occupants read as a family. Holds only which residents share a household.</span></label>
@@ -1648,10 +1653,10 @@ const SETTINGS_FIELDS = {
   site_name: "stSite", local_timezone: "stTz", adult_age_years: "stAdult", due_soon_after_hour: "stDue",
   warn_after_consecutive_nights: "stWarn", absence_window_limit: "stWinLimit", absence_window_days: "stWinDays", holiday_max_days: "stHoliday",
   event_retention_days: "stEventDays", compliance_retention_days: "stCompDays", late_entry_window_hours: "stLate",
-  idle_lock_minutes: "stIdle", home_countries: "stHome",
+  idle_lock_minutes: "stIdle", home_countries: "stHome", weekly_report_recipients: "stWeeklyTo",
 };
 
-const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify" };
+const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify", weekly_report_email: "stWeekly" };
 
 async function loadSettings() {
   const s = await guarded(() => apiGet("/api/settings"), (err) => showError("Could not load settings: " + err.message));
@@ -1686,6 +1691,13 @@ $("settingsForm").addEventListener("submit", async (e) => {
   loadSettings();
 });
 $("stReload").addEventListener("click", loadSettings);
+$("stWeeklySend").addEventListener("click", async () => {
+  $("stWeeklySend").disabled = true;
+  const out = await guarded(() => apiPost("/api/settings/weekly-report/send", {}), (err) => toast("Not sent: " + err.message, "err"));
+  $("stWeeklySend").disabled = false;
+  if (!out) return;
+  toast(`Sent for ${out.from} to ${out.to} to ${out.recipients} address${out.recipients === 1 ? "" : "es"}`, "ok");
+});
 
 /* ========================================================================
    Tabs, session, wiring

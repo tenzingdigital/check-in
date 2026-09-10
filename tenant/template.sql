@@ -227,6 +227,8 @@ CREATE TABLE __TENANT__.app_settings (
     feature_door_checkin boolean DEFAULT false NOT NULL,
     holiday_max_days integer DEFAULT 14 NOT NULL,
     notify_thresholds_email boolean DEFAULT false NOT NULL,
+    weekly_report_email boolean DEFAULT false NOT NULL,
+    weekly_report_recipients text,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -238,7 +240,8 @@ CREATE TABLE __TENANT__.app_settings (
     CONSTRAINT app_settings_id_check CHECK (id),
     CONSTRAINT app_settings_idle_lock_minutes_check CHECK (((idle_lock_minutes >= 1) AND (idle_lock_minutes <= 720))),
     CONSTRAINT app_settings_late_entry_window_hours_check CHECK (((late_entry_window_hours >= 1) AND (late_entry_window_hours <= 168))),
-    CONSTRAINT app_settings_warn_after_consecutive_nights_check CHECK (((warn_after_consecutive_nights >= 1) AND (warn_after_consecutive_nights <= 90)))
+    CONSTRAINT app_settings_warn_after_consecutive_nights_check CHECK (((warn_after_consecutive_nights >= 1) AND (warn_after_consecutive_nights <= 90))),
+    CONSTRAINT app_settings_weekly_report_recipients_check CHECK (((weekly_report_recipients IS NULL) OR (length(weekly_report_recipients) <= 400)))
 );
 
 

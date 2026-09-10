@@ -2125,6 +2125,79 @@ async function main() {
     assert.match(csv.text, /^﻿?section,building,room,resident,child,from_date,to_date,nights,back_on,status,line\r\n/);
   });
 
+  console.log("\n== the Sunday email: recipients, send now, the nightly job (migration 035) ==");
+
+  const wkAdmin = client(base);
+  assert.equal((await wkAdmin.fetch("/api/session", { method: "POST", body: { email: "dooradmin@hut.example", password: PASSWORD } })).status, 200);
+
+  await test("recipients are validated, lower-cased and cleared; the switch is a setting", async () => {
+    const bad = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: "not-an-address" } });
+    assert.equal(bad.status, 400);
+    const many = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: Array.from({ length: 11 }, (_, i) => `m${i}@example.ie`).join(",") } });
+    assert.equal(many.status, 400, "more than ten addresses");
+    const ok = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: " Mick@Example.ie, niamh@example.ie ", weekly_report_email: true } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.equal(ok.json.weekly_report_recipients, "mick@example.ie,niamh@example.ie");
+    assert.equal(ok.json.weekly_report_email, true);
+    const asSup = await supC.fetch("/api/settings", { method: "PATCH", body: { weekly_report_email: false } });
+    assert.equal(asSup.status, 403);
+  });
+
+  await test("lastWeek and compose are pure", async () => {
+    const { lastWeek, compose } = require("../lib/weeklyReport");
+    assert.deepEqual(lastWeek("2026-09-13"), { from: "2026-09-06", to: "2026-09-12" });
+    const out = compose({ siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows: [
+      { section: "Resident absences", line: "A was absent." }, { section: "Room updates", line: "B1 is under maintenance." }] });
+    assert.equal(out.subject, "Slaney: Weekly register update, 6 September to 12 September 2026");
+    assert.match(out.text, /^Slaney: Weekly register update, 6 September to 12 September 2026\n\nResident absences\n- A was absent\.\n\nUpdates from the weekend\n\(none\)\n\nResident removals\n\(none\)\n\nRoom updates\n- B1 is under maintenance\.\n\nNights are counted at midnight/);
+  });
+
+  await test("send now emails every recipient last week's report and is on the audit record; refused without recipients or to a supervisor", async () => {
+    const asSup = await supC.fetch("/api/settings/weekly-report/send", { method: "POST" });
+    assert.equal(asSup.status, 403);
+    const before = (global.__mailSink || []).length;
+    const sent = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
+    assert.equal(sent.status, 200, sent.text);
+    assert.equal(sent.json.recipients, 2);
+    const { lastWeek } = require("../lib/weeklyReport");
+    assert.deepEqual({ from: sent.json.from, to: sent.json.to }, lastWeek(siteToday()));
+    const mails = (global.__mailSink || []).slice(before);
+    assert.equal(mails.length, 2);
+    assert.ok(mails.some((m) => m.to === "mick@example.ie") && mails.some((m) => m.to === "niamh@example.ie"));
+    assert.ok(mails.every((m) => /Weekly register update/.test(m.subject) && /Resident absences/.test(m.text)), "subject and sections");
+    const logged = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'weekly' order by at desc limit 1`));
+    assert.match(logged.rows[0].note, /sent by hand/);
+    await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: "" } });
+    const none = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
+    assert.equal(none.status, 400);
+    const cleared = await wkAdmin.fetch("/api/settings");
+    assert.equal(cleared.json.weekly_report_recipients, null, "an empty string stores null");
+  });
+
+  await test("the nightly step sends on a Sunday when on, and records why it did not otherwise", async () => {
+    const { weeklyRegister } = require("../jobs");
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false, weekly_report_recipients = 'mick@example.ie'`));
+    const before = (global.__mailSink || []).length;
+    assert.equal(await weeklyRegister("public", "", { force: true }), true);
+    assert.equal((global.__mailSink || []).length, before, "nothing goes while the switch is off");
+    let run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
+    assert.equal(run.rows[0].result, "off");
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = true`));
+    assert.equal(await weeklyRegister("public", "", { force: true }), true);
+    const mails = (global.__mailSink || []).slice(before);
+    assert.equal(mails.length, 1); assert.equal(mails[0].to, "mick@example.ie");
+    assert.match(mails[0].text, /Weekly register update/);
+    run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
+    assert.equal(run.rows[0].ok, true); assert.match(run.rows[0].result, /rows, \d\/1 emailed/, "the sink answers not delivered, so 0/1 is right here");
+    const dow = (await withOwner((c) => c.query(`select extract(isodow from public.site_today())::int as d`))).rows[0].d;
+    if (dow !== 7) {
+      assert.equal(await weeklyRegister("public", ""), true);
+      run = await withOwner((c) => c.query(`select result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
+      assert.equal(run.rows[0].result, "not Sunday");
+    }
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false, weekly_report_recipients = null`));
+  });
+
   console.log("\n== the nightly House Rules reminder by email (migration 032) ==");
 
   await test("with the switch on, supervisors and admins are emailed the residents at a figure; off, nothing goes", async () => {
