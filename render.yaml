@@ -91,14 +91,14 @@ services:
       # origin taken from a header is one an attacker can choose. Set it
       # once, explicitly.
       #
-      # This is the Render-assigned origin. https://app.checksteady.com is
-      # now live (see the domains: block below) — PUBLIC_URL is left
-      # pointing at the Render origin for this pass; switching outgoing
-      # email links over to the custom domain is a separate, deliberate
-      # change, not a side effect of the domain clean-up that touched this
-      # file.
+      # The custom domain, not the Render-assigned one (verified live: `curl
+      # https://app.checksteady.com/healthz` returns 200 — see the domains:
+      # block below). A password reset, a staff invitation or a trial
+      # verification link pointing at a bare .onrender.com address looks like
+      # phishing, and these go to people at accommodation centres who have
+      # been told to be wary of exactly that.
       - key: PUBLIC_URL
-        value: https://hut-check-in.onrender.com
+        value: https://app.checksteady.com
       # 12 hours: a shift, not a fortnight. A hut terminal is a shared physical
       # device, and a session that outlives the shift is one the next person
       # inherits.
@@ -162,10 +162,10 @@ services:
       # The nightly job has no request to build a link from (jobs.js
       # reportLink()), so the Sunday weekly report link comes from here or
       # not at all — unset, the email still sends with the link left out.
-      # Same Render-assigned origin as hut-check-in above; see the note
-      # there about the now-live https://app.checksteady.com custom domain.
+      # Same custom domain as hut-check-in above, and the same reason: a
+      # report link should not read as phishing.
       - key: PUBLIC_URL
-        value: https://hut-check-in.onrender.com
+        value: https://app.checksteady.com
 
   # -------------------------------------------------------------------------
   # The brochure site (checksteady.com) — static, no build step, published
