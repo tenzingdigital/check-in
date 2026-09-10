@@ -98,7 +98,7 @@ def main():
     # Every page must be in the sitemap, and the sitemap must not promise a
     # page that does not exist.
     if os.path.exists(f"{SITE}/sitemap.xml"):
-        listed = set(re.findall(r"<loc>https://checksteady\.ie([^<]*)</loc>", open(f"{SITE}/sitemap.xml").read()))
+        listed = set(re.findall(r"<loc>https://checksteady\.com([^<]*)</loc>", open(f"{SITE}/sitemap.xml").read()))
         listed = {u.rstrip("/") or "/" for u in listed}
         have = {(s.rstrip("/") or "/") for s in seen}
         for missing in sorted(have - listed):

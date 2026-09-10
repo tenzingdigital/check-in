@@ -67,12 +67,13 @@ services:
     # instead of serving errors to guards.
     healthCheckPath: /healthz
 
-    # The app answers on app.checksteady.ie; the brochure site takes the apex
-    # and www (see checksteady-site below). Add the CNAME Render shows you for
-    # each name in its dashboard — until DNS points here these entries are
-    # inert, so committing them early is safe.
+    # The app answers on app.checksteady.com; the brochure site takes the
+    # apex and www (see checksteady-site below). DNS is wired and Render is
+    # already serving this domain (checked 10 Sep 2026) — this block
+    # documents that, it did not create it. hut-check-in.onrender.com is
+    # still the origin behind it.
     domains:
-      - app.checksteady.ie
+      - app.checksteady.com
 
     envVars:
       - key: DATABASE_URL
@@ -90,10 +91,12 @@ services:
       # origin taken from a header is one an attacker can choose. Set it
       # once, explicitly.
       #
-      # This is the Render-assigned domain: the app runs here for now. It
-      # becomes https://app.checksteady.com once the custom domain is wired
-      # up (checksteady.com is bought; DNS and the domains: block below are
-      # not done yet).
+      # This is the Render-assigned origin. https://app.checksteady.com is
+      # now live (see the domains: block below) — PUBLIC_URL is left
+      # pointing at the Render origin for this pass; switching outgoing
+      # email links over to the custom domain is a separate, deliberate
+      # change, not a side effect of the domain clean-up that touched this
+      # file.
       - key: PUBLIC_URL
         value: https://hut-check-in.onrender.com
       # 12 hours: a shift, not a fortnight. A hut terminal is a shared physical
@@ -159,13 +162,13 @@ services:
       # The nightly job has no request to build a link from (jobs.js
       # reportLink()), so the Sunday weekly report link comes from here or
       # not at all — unset, the email still sends with the link left out.
-      # Same Render-assigned domain as hut-check-in above; becomes
-      # https://app.checksteady.com once the custom domain is wired up.
+      # Same Render-assigned origin as hut-check-in above; see the note
+      # there about the now-live https://app.checksteady.com custom domain.
       - key: PUBLIC_URL
         value: https://hut-check-in.onrender.com
 
   # -------------------------------------------------------------------------
-  # The brochure site (checksteady.ie) — static, no build step, published
+  # The brochure site (checksteady.com) — static, no build step, published
   # straight from ./site. Same pattern as the scheduler repo's
   # staffsorted-site.
   # NOTE: current Render Blueprint spec (https://render.com/docs/blueprint-spec)
@@ -175,11 +178,13 @@ services:
     name: checksteady-site
     runtime: static
     staticPublishPath: ./site
-    # The apex and www. Render serves both; point the apex A/ALIAS record and
-    # a www CNAME at the values its dashboard shows for this service.
+    # The apex and www. Both are live and served by Render already (checked
+    # 10 Sep 2026: checksteady.com and www.checksteady.com both resolve,
+    # through Cloudflare, to this service) — this block documents that, it
+    # did not create it.
     domains:
-      - checksteady.ie
-      - www.checksteady.ie
+      - checksteady.com
+      - www.checksteady.com
     # The same header set the app sends (lib/security.js), for the same brand.
     # The site is static HTML with its own stylesheet and fonts and nothing
     # else, so the policy can refuse everything but those.
@@ -191,7 +196,7 @@ services:
     headers:
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self' https://app.checksteady.ie; frame-ancestors 'none'"
+        value: "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self' https://app.checksteady.com; frame-ancestors 'none'"
       - path: /*
         name: X-Content-Type-Options
         value: nosniff

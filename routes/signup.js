@@ -118,7 +118,7 @@ async function freeSlug(client, wanted) {
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function pageHtml({ title, heading, body, backHref = 'https://checksteady.ie/', backLabel = 'Back to checksteady.ie' }) {
+function pageHtml({ title, heading, body, backHref = 'https://checksteady.com/', backLabel = 'Back to checksteady.com' }) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -158,7 +158,7 @@ const problem = (heading, message) => pageHtml({
   body: `<div class="alert">${esc(message)}</div>
          <p class="hint">If this keeps happening, email
          <a class="linkish" href="mailto:aimee@tenzing.ie">aimee@tenzing.ie</a> and we will sort it out.</p>`,
-  backHref: 'https://checksteady.ie/trial/',
+  backHref: 'https://checksteady.com/trial/',
   backLabel: 'Back to the trial page',
 });
 

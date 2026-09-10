@@ -93,7 +93,7 @@ app.get('/healthz', (req, res, next) => {
 // has an account yet, so none of the session middleware below applies.
 //
 // The /api CSRF check is deliberately NOT extended here. The sign-up form
-// lives on checksteady.ie and posts to app.checksteady.ie, so it is
+// lives on checksteady.com and posts to app.checksteady.com, so it is
 // cross-origin by design; an Origin check would refuse the only request this
 // endpoint exists to serve. What protects it instead is that a POST writes a
 // pending row and sends an email and provisions nothing — the expensive act

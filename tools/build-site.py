@@ -28,8 +28,18 @@ edited directly; only the pages listed at the bottom of this file are written.
 # committed. Re-run it after editing the shared nav, footer or head.
 import os, html, json
 
-SITE = "https://checksteady.ie"
-APP  = "https://app.checksteady.ie"
+# The site's own public domain and the app's. DNS is wired and Render is
+# serving both live (checked 10 Sep 2026: checksteady.com and
+# app.checksteady.com both resolve, through Cloudflare, to the Render
+# services below them). The Render addresses (checksteady-site.onrender.com,
+# hut-check-in.onrender.com) still exist as the origin behind each one, but
+# nothing generated here should reference them — the public, canonical URL
+# is the .com one. Changing these two constants plus a regeneration
+# (`python3 tools/build-site.py`) is the whole job when a hostname changes.
+SITE = "https://checksteady.com"
+APP  = "https://app.checksteady.com"
+# Display-only form of SITE for the footer ("checksteady.com", no scheme).
+SITE_HOST = SITE.split("://", 1)[1]
 OUT  = "site"
 WRITTEN = []
 
@@ -126,7 +136,7 @@ def foot():
     <div class="footcol footcol-brand">
       <span class="footmark">CheckSteady</span>
       <p>The daily welfare register and door log for residential sites — hostels, supported accommodation, care settings. One site or a group.</p>
-      <p class="footdomain">checksteady.ie</p>
+      <p class="footdomain">{SITE_HOST}</p>
     </div>
     <nav class="footcol" aria-label="Product">
       <h2>Product</h2>

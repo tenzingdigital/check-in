@@ -12,8 +12,8 @@ and it is deliberately the first thing in the file.
 | **Database** | `hut-db` — Render Postgres 16 |
 | **Nightly cron** | `hut-nightly` — the maintenance `pg_cron` used to run |
 | **Brochure site** | `checksteady-site` — static, published from `site/` |
-| **App URL** | `app.checksteady.ie` |
-| **Site URL** | `checksteady.ie` (and `www.`) |
+| **App URL** | `app.checksteady.com` |
+| **Site URL** | `checksteady.com` (and `www.`) |
 
 One vendor, one region, one bill. The same Express service that serves the two
 HTML files also serves the API they call, which is why the session cookie is a
@@ -21,9 +21,10 @@ first-party cookie and why there is no CORS configuration anywhere in this
 repo. The brochure site is the one exception and is a separate static service:
 an edit to marketing copy must not restart the app mid-shift.
 
-**Both hostnames are declared in `render.yaml` but are inert until DNS points
-at Render.** Add the records Render's dashboard shows for each service: a CNAME
-for `app.` and `www.`, and an A or ALIAS record for the apex.
+**Both hostnames are live.** DNS is wired and Render is serving all three
+(`checksteady.com`, `www.checksteady.com`, `app.checksteady.com`) — checked
+10 September 2026. `render.yaml`'s `domains:` blocks document that, they did
+not create it.
 
 The stack and the file layout mirror `tenzingdigital/scheduler` — Express on
 Node 22, `pg`, numbered SQL migrations applied at boot, vanilla front end with
@@ -226,7 +227,7 @@ birth. The acceptance suite asserts this.
 
 ## Self-serve trials
 
-A centre can start its own trial from `checksteady.ie/trial/` without anyone at
+A centre can start its own trial from `checksteady.com/trial/` without anyone at
 Tenzing doing anything. Migration 009 already built the whole trial
 *lifecycle* — `status = 'trial'`, `trial_ends_at`, `tenant_may_write()` going
 false when it lapses, `expire_lapsed_trials()` in the nightly job. Migration
@@ -254,7 +255,7 @@ What else guards it, in order of how much work it does:
   the tenant, the schema and the login before returning.
 
 The `/api` cross-origin check is deliberately **not** extended to `/signup`:
-the form lives on `checksteady.ie` and posts to `app.checksteady.ie`, so it is
+the form lives on `checksteady.com` and posts to `app.checksteady.com`, so it is
 cross-origin by design. The site's own CSP names that origin in `form-action`
 — with `form-action 'none'` the browser blocks the submit *silently*.
 

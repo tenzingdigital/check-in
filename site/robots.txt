@@ -1,9 +1,9 @@
-# checksteady.ie — the brochure site.
+# checksteady.com — the brochure site.
 #
-# The application itself (app.checksteady.ie) sends X-Robots-Tag: noindex from
+# The application itself (app.checksteady.com) sends X-Robots-Tag: noindex from
 # lib/security.js and is deliberately not listed here: a resident register has
 # no business in a search index.
 User-agent: *
 Allow: /
 
-Sitemap: https://checksteady.ie/sitemap.xml
+Sitemap: https://checksteady.com/sitemap.xml
