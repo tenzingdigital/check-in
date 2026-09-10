@@ -122,6 +122,38 @@ refuse to serve if any tenant schema is behind — a half-migrated tenant is
 exactly the "half-known schema" that Tao 17 says to be loudly down for. The
 existing advisory lock keeps two instances from racing.
 
+**This second ledger does not exist yet.** `database.js`'s `migrate()` applies
+every file in `migrations/` to `public` only; a tenant schema (`t_*`) gets
+`tenant/template.sql`, once, at provisioning (`provision_tenant`), and
+nothing since revisits it. Every migration from 030 onward assumes a
+per-tenant object lives in `public.` — 035 and 036 are the two newest,
+`weekly_absence_spans()`, `weekly_register_rows_unchecked()`,
+`app_settings.weekly_report_email` / `weekly_report_recipients` (035) and
+`absence_windows` (036) among them — so any `t_*` schema that was already
+provisioned before those migrations landed does not have these objects, and
+would 500 on `GET /api/settings`, `GET /api/buildings` and on authorising a
+holiday against permitted periods, the moment a request resolves into that
+schema.
+
+**Pre-deploy check, until the ledger is built:** run this against the
+production database before deploying a migration numbered 030 or higher for
+the first time —
+
+```sql
+select nspname from pg_namespace where nspname like 't\_%';
+```
+
+Empty result: `public` (the `default` tenant) is the only schema, nothing is
+missing, deploy as normal. Any row: at least one tenant schema is behind by
+however many per-tenant migrations have shipped since it was provisioned,
+and it will start 500ing on the routes above the moment the new code
+deploys. Do not deploy until the owner has confirmed whether production
+holds a non-`public` tenant and, if so, the schema has been brought current
+— either by hand-applying the missed per-tenant migrations to it, or by
+building the second migration ledger this section describes. Building that
+back-fill is a platform change and is out of scope for any single feature
+branch; see `docs/KNOWN-ISSUES.md`.
+
 ## Provisioning
 
 `provision_tenant(name, slug)`:

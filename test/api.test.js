@@ -2193,6 +2193,13 @@ async function main() {
     assert.match(mails[0].text, /Weekly register update/);
     run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
     assert.equal(run.rows[0].ok, true); assert.match(run.rows[0].result, /rows, \d\/1 emailed/, "the sink answers not delivered, so 0/1 is right here");
+    // A second run today — force bypasses only the Sunday gate, not this —
+    // must not email head office again. This is exactly the case of an
+    // operator re-running `node jobs.js` after some other step failed.
+    assert.equal(await weeklyRegister("public", "", { force: true }), true);
+    assert.equal((global.__mailSink || []).length, before + 1, "no duplicate email on a second run the same day");
+    run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
+    assert.equal(run.rows[0].ok, true); assert.equal(run.rows[0].result, "already sent today");
     const dow = (await withOwner((c) => c.query(`select extract(isodow from public.site_today())::int as d`))).rows[0].d;
     if (dow !== 7) {
       assert.equal(await weeklyRegister("public", ""), true);
@@ -2903,19 +2910,26 @@ async function main() {
     assert.equal(res.json.ok, true);
   });
 
-  await test("the app is installable: a manifest in standalone mode, linked from every page, allowed by the CSP", async () => {
+  await test("the app is installable: a manifest in standalone mode, linked from every staff-facing page but not org.html, allowed by the CSP", async () => {
     const m = await api.fetch("/manifest.webmanifest");
     assert.equal(m.status, 200);
     assert.match(m.headers.get("content-type"), /application\/manifest\+json/);
     const manifest = JSON.parse(m.text);
     assert.equal(manifest.display, "standalone"); assert.equal(manifest.start_url, "/");
     assert.ok(manifest.icons.some((i) => i.sizes === "512x512"), "a 512 icon");
-    for (const page of ["/index.html", "/checkin.html", "/admin.html", "/org.html"]) {
+    for (const page of ["/index.html", "/checkin.html", "/admin.html"]) {
       const res = await api.fetch(page);
       assert.match(res.text, /<link rel="manifest" href="\/manifest.webmanifest">/, `${page} lacks the manifest link`);
       assert.match(res.text, /<meta name="apple-mobile-web-app-capable" content="yes">/, `${page} lacks the Apple meta`);
       assert.match(res.headers.get("content-security-policy"), /manifest-src 'self'/);
     }
+    // org.html is the platform-admin page: installing it would use the
+    // manifest's start_url ("/", the gate app), which is not where a
+    // platform administrator belongs, so it deliberately carries no
+    // manifest link. It keeps its own favicon and theme colour.
+    const org = await api.fetch("/org.html");
+    assert.ok(!/<link rel="manifest"/.test(org.text), "org.html should not offer to install the gate app's manifest");
+    assert.match(org.text, /<meta name="theme-color" content="#1d4ed8">/, "org.html keeps its theme colour");
     const icon = await api.fetch("/apple-touch-icon.png");
     assert.equal(icon.status, 200); assert.match(icon.headers.get("content-type"), /image\/png/);
   });

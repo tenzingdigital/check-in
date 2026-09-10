@@ -71,7 +71,7 @@ returns table (
   authorised_nights integer, approval text, weekend boolean,
   last_name text, first_name text
 )
-language sql stable security definer set search_path = public
+language sql stable security definer set search_path = public set lc_time = 'C'
 as $$
   with nights as (
     select o.resident_id, o.night,
@@ -109,13 +109,16 @@ revoke all on function public.weekly_absence_spans(date, date) from public, anon
 -- 3. The report rows, sentences included
 -- ---------------------------------------------------------------------------
 -- Four sections in a fixed order. The sentence is built here so the CSV,
--- the printable page and the Sunday email can never disagree.
+-- the printable page and the Sunday email can never disagree. `set lc_time =
+-- 'C'` pins to_char's day and month names to English regardless of the
+-- cluster's lc_time, so a database provisioned with a different locale does
+-- not translate the head-office prose.
 create or replace function public.weekly_register_rows_unchecked(p_from date, p_to date)
 returns table (
   section text, building text, room text, resident text, child text,
   from_date date, to_date date, nights integer, back_on date, status text, line text
 )
-language sql stable security definer set search_path = public
+language sql stable security definer set search_path = public set lc_time = 'C'
 as $$
   select q.section, q.building, q.room, q.resident, q.child, q.from_date, q.to_date, q.nights, q.back_on, q.status, q.line
     from (

@@ -2050,6 +2050,7 @@ $$;
 CREATE FUNCTION __TENANT__.weekly_absence_spans(p_from date, p_to date) RETURNS TABLE(resident_id uuid, resident text, building text, room text, child boolean, first_night date, last_night date, nights integer, back_on date, authorised_nights integer, approval text, weekend boolean, last_name text, first_name text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
+    SET lc_time TO 'C'
     AS $$
   with nights as (
     select o.resident_id, o.night,
@@ -2109,6 +2110,7 @@ $$;
 CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date) RETURNS TABLE(section text, building text, room text, resident text, child text, from_date date, to_date date, nights integer, back_on date, status text, line text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
+    SET lc_time TO 'C'
     AS $$
   select q.section, q.building, q.room, q.resident, q.child, q.from_date, q.to_date, q.nights, q.back_on, q.status, q.line
     from (

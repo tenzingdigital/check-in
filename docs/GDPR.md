@@ -11,6 +11,13 @@ Rewritten 4 September 2026 against migrations 001–014. The previous version
 described columns that migration 006 removed, a retention period that
 migration 008 changed, and a scheduler that no longer exists.
 
+Updated 10 September 2026 against migration 035. The Weekly register update
+turned an internal staff notification (the House Rules reminder, migration
+032) into a second, different kind of processing: a weekly outbound
+disclosure of resident data by email to addresses that need not belong to
+the centre. The Resend section below and the processor table were wrong
+about this and are corrected.
+
 **This is not legal advice.** A system that records the daily presence of
 residents in accommodation, some of whom are in the international protection
 process, is systematic monitoring of people who are frequently vulnerable.
@@ -208,9 +215,27 @@ image from anyone else, and the content-security policy (`default-src
 enforces it. A resident's browser never exists here; a staff browser
 contacts exactly one host.
 
-**Email carries no resident data.** Resend receives a staff member's address,
-name and a single-use link (invitation or password reset). Nothing about a
-resident is ever emailed.
+**What leaves by email.** Invitations and password resets carry no resident
+data: a staff member's own address, name and a single-use link. Two other
+messages do carry resident data.
+
+The nightly House Rules reminder (migration 032), where the centre has
+turned it on, goes to the centre's own active supervisors and
+administrators: each resident at or over a figure, their name and room
+label, and the count of nights against the site's House Rules settings.
+
+The Sunday Weekly register update (migration 035), where the centre has
+turned it on, goes to the addresses an administrator configures under
+Settings — which may be outside the centre, since nothing ties them to a
+staff account. It carries residents' names, their building and room, the
+span of nights each was away and whether every night falls inside an
+authorised absence, who departed and when, and the one-line note a
+supervisor wrote about a room for the vacancy line.
+
+Neither message carries a date of birth, an identity-document number, an
+evacuation need, or any free text about a person. The room note is the only
+free text involved, and the schema and the admin screen both say it is
+about the room, never the resident.
 
 ---
 
@@ -242,7 +267,7 @@ may be in dispute with staff, that matters.
 | Processor | Purpose | Where |
 |---|---|---|
 | Render Services, Inc. | Hosting, the managed database, backups, the nightly scheduler | Frankfurt (EU); fixed at creation in `render.yaml` |
-| Resend, Inc. | Invitation and password-reset email to staff | EU/US; see DPA section 6 |
+| Resend, Inc. | Invitation and password-reset email to staff; the nightly House Rules reminder to the centre's own supervisors and administrators; the Sunday Weekly register update to the addresses Settings configures, which may be outside the centre | EU/US; see DPA section 6 |
 
 Both are US companies with EU data residency, so the transfer basis (Standard
 Contractual Clauses plus the EU–US Data Privacy Framework, as each provider
@@ -282,6 +307,7 @@ list of people holding either is kept in
 - [ ] Render's and Resend's DPAs and SCCs on file; transfer impact assessment written
 - [ ] Database confirmed in Frankfurt on a paid plan with point-in-time recovery, and not the smallest plan (`docs/KNOWN-ISSUES.md` 19c)
 - [ ] Email configured (`RESEND_API_KEY`), so invitation links go to their owner and not to an administrator's screen
+- [ ] If the Weekly register update is turned on, its recipients (Settings → Weekly register update) are checked: only people who should receive resident names, rooms, absence and departure detail by email outside the centre
 - [ ] A named person at the centre who actions access and erasure requests, and a named person at Tenzing who receives breach reports
 - [ ] The list of people holding the external connection string is written down and short
 - [ ] The paper fallback sheet is printed and in the hut

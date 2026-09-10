@@ -183,12 +183,29 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
   try {
     const summary = await withOwnerIn(schema, async (client) => {
       const { rows: [s] } = await client.query(
-        `select weekly_report_email as on, weekly_report_recipients as recipients, site_name,
+        `select weekly_report_email as on, weekly_report_recipients as recipients, site_name, local_timezone,
                 to_char(site_today(), 'YYYY-MM-DD') as today, extract(isodow from site_today())::int as dow
            from app_settings where id`);
       if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
       if (!s.recipients) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
       if (s.dow !== 7 && !force) { await record(client, name, true, 'not Sunday'); return 'not Sunday'; }
+      // Idempotence: a second run today (an operator re-running `node
+      // jobs.js` after some other step failed) must not email head office
+      // twice. A successful send's result always ends "emailed" (see below);
+      // 'off', 'no recipients' and 'not Sunday' do not match, so they never
+      // block a later run once the condition that produced them changes.
+      // `force` bypasses only the Sunday gate above (its documented job, for
+      // manual and test runs) — it does NOT bypass this. A forced run is
+      // still a real send with a real duplicate-email risk if run twice, and
+      // the guard being real under force is also what makes it possible to
+      // test without waiting for an actual Sunday.
+      const { rows: already } = await client.query(
+        `select 1 from job_runs
+           where job = $1 and ok and result ~ 'emailed$'
+             and (ran_at at time zone $2)::date = $3::date
+           limit 1`,
+        [name, s.local_timezone, s.today]);
+      if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
       const { from, to } = weekly.lastWeek(s.today);
       const { rows } = await client.query('select * from weekly_register_rows_unchecked($1, $2)', [from, to]);
       const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows });
@@ -235,9 +252,21 @@ async function main() {
 
     for (const [name, sql, liveOnly] of TENANT_JOBS) {
       if (liveOnly && !live) continue;
-      if (!(await runJob(schema, label, name, sql))) failed += 1;
+      const ok = await runJob(schema, label, name, sql);
+      if (!ok) failed += 1;
       if (name === 'close-out-compliance-days' && !(await notifyThresholds(schema, label))) failed += 1;
-      if (name === 'snapshot-overnight-absences' && !(await weeklyRegister(schema, label))) failed += 1;
+      if (name === 'snapshot-overnight-absences') {
+        // A failed snapshot already counted above; a Sunday email built on a
+        // week missing Saturday night would quietly omit it, so the weekly
+        // report is skipped rather than sent, and that is not a second
+        // failure — only recorded, so the skip is visible in job_runs.
+        if (ok) {
+          if (!(await weeklyRegister(schema, label))) failed += 1;
+        } else {
+          console.log(`[jobs] ${label}weekly-register-email: skipped — snapshot-overnight-absences failed`);
+          await withOwnerIn(schema, (client) => record(client, 'weekly-register-email', true, 'skipped: snapshot failed')).catch(() => {});
+        }
+      }
     }
   }
 

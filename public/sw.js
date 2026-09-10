@@ -19,7 +19,7 @@
    'self', so nothing about lib/security.js changes.
    ========================================================================= */
 
-const VERSION = "hut-shell-v1";
+const VERSION = "hut-shell-v2";
 const SHELL = [
   "/",
   "/index.html",
@@ -30,6 +30,9 @@ const SHELL = [
   "/app-common.css",
   "/app-common.js",
   "/offline.js",
+  "/manifest.webmanifest",
+  "/icon.svg",
+  "/apple-touch-icon.png",
 ];
 
 self.addEventListener("install", (event) => {

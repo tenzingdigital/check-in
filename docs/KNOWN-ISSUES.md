@@ -48,6 +48,37 @@ it is defensible — but it is a judgement about what a guard should look at fir
 and it is yours to overrule. Breach rows are exempt from the result cap either
 way, so no explained breach can be pushed off the list.
 
+### 4. Tenant schemas have no migration ledger of their own
+
+`database.js` migrates `public` only. A `t_*` tenant schema gets
+`tenant/template.sql` once, at provisioning, and nothing revisits it after
+that. Every per-tenant migration numbered 030 or higher — most recently 035
+(the Weekly register update) and 036 (permitted absence periods) — assumes
+its objects already exist in every schema that answers a request; a tenant
+schema provisioned before one of those migrations landed does not have it,
+and would 500 on the routes that need it (`GET /api/settings`,
+`GET /api/buildings`, authorising a holiday). `docs/MULTI-TENANCY.md`
+("Migration ordering") already says boot must refuse to serve a schema that
+is behind; nothing implements that check, and nothing back-fills a schema
+that falls behind.
+
+**Before deploying any migration numbered 030 or higher for the first time,
+run this against production:**
+
+```sql
+select nspname from pg_namespace where nspname like 't\_%';
+```
+
+Empty: only the `default` tenant exists in `public`, nothing to do. Any row:
+stop and confirm with the owner whether that tenant is missing the new
+migration's objects, and bring it current, before deploying. See
+`docs/MULTI-TENANCY.md` for the full note. **The decision:** whether to
+build the second migration ledger (apply pending per-tenant migrations to
+every `t_*` schema at boot, refusing to serve a schema still behind) or to
+keep doing the pre-deploy check by hand for as long as production has no
+non-`public` tenant. Out of scope for any single feature branch; it is a
+platform change.
+
 ---
 
 ## Carried technical items
@@ -297,6 +328,38 @@ different test re-applied 009's backfill on every run. 011 adds a trigger that
 fills a null `tenant_id` with the default tenant at insert. The signup path,
 when it exists, must set `tenant_id` explicitly; the trigger fills only a
 null.
+
+### 19f. `tools/tenant-template.js` leaked two shared tables into every new tenant — *found and fixed 10 September, afternoon*
+
+Migration 034 (self-serve trials, built 8 September) added `signup_requests`,
+`tenant_demo_rows` and `sweep_signup_requests()` to `public` and documented
+them as shared across every tenant, but never updated
+`tools/tenant-template.js`'s `SHARED` and `SHARED_TABLES` lists to say so.
+From 034 until this was caught, `./tools/gen-tenant-template.sh` would have
+written those two tables — and everything `isShared()` matches by table name
+(indexes, constraints, the sweep function) — into `tenant/template.sql`, so
+every tenant provisioned after 034 (`POST /api/tenants` or a self-serve
+sign-up) would have received its own private, empty copy of
+`signup_requests` and `tenant_demo_rows` inside its schema, alongside the
+real shared ones in `public`. Nothing would have read or written the phantom
+copies — the signup and demo-seed code always names `public.` explicitly —
+so the symptom would have been silent: dead tables in every new tenant
+schema, not a functional bug.
+
+Caught only because regenerating `tenant/template.sql` for migration 035
+(this task) requires diffing the template against a live schema, and the two
+extra tables showed up in that diff. Fixed in commit `3aa5dd3` by adding all
+three names to `SHARED`; `tenant/template.sql` was regenerated and no longer
+carries them. `docs/MULTI-TENANCY.md`'s shared/per-tenant split was already
+correct — it was only the generator that had drifted.
+
+The lesson: `test/api.test.js` provisions a schema from the template and
+diffs it against `public` (see the header comment in
+`tools/tenant-template.js`), but that test only catches a tenant object
+*missing* from the template, not a shared one wrongly *included* — the extra
+tables were never a schema mismatch, just wasted objects. Worth a follow-up
+assertion that a provisioned tenant schema contains nothing outside the
+per-tenant list in `docs/MULTI-TENANCY.md`.
 
 ### 19. `lib/` and `routes/` have no linter and no type checking
 

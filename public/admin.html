@@ -1519,7 +1519,8 @@ async function loadBuildings({ quiet = false } = {}) {
             </div>
             <div class="grid2">
               <div><label class="lbl">Status</label><select class="field reStatus" aria-label="Room status"><option value="open" ${r.status !== "maintenance" ? "selected" : ""}>Open</option><option value="maintenance" ${r.status === "maintenance" ? "selected" : ""}>Under maintenance</option></select></div>
-              <div><label class="lbl">Note for the weekly return</label><input class="field reNote" type="text" maxlength="120" value="${esc(r.note || "")}" placeholder="e.g. 1 bed free for a single woman" aria-label="Room note"></div>
+              <div><label class="lbl">Note for the weekly return</label><input class="field reNote" type="text" maxlength="120" value="${esc(r.note || "")}" placeholder="e.g. 1 bed free for a single woman" aria-label="Room note">
+              <p class="hint under">About the room, not a resident: this goes to head office in the Sunday report. Do not name anyone.</p></div>
             </div>
             <div class="actions"><button class="btn sm" type="submit">Save</button><button class="btn ghost sm" type="button" data-cancel-edit="${esc(r.id)}">Cancel</button></div>
           </form>

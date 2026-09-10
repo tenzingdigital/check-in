@@ -73,6 +73,10 @@ router.patch('/', wrap(async (req, res) => {
         if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(p) || p.length > 120) throw new HttpError(400, `${p} is not an email address`);
       }
       v = parts.length ? parts.join(',') : null;
+      // The column itself caps at 400 characters; ten valid 120-character
+      // addresses would pass every check above and still violate it, which
+      // would otherwise surface as a raw constraint-violation message.
+      if (v && v.length > 400) throw new HttpError(400, 'Recipients are too long altogether (400 characters, addresses included) — use fewer or shorter addresses');
     } else if (rule.kind === 'bool') {
       if (v === true || v === 'true' || v === 1 || v === '1' || v === 'on') v = true;
       else if (v === false || v === 'false' || v === 0 || v === '0' || v === '' || v === null || v === 'off') v = false;
