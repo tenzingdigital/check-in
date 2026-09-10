@@ -2202,6 +2202,40 @@ async function main() {
     await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false, weekly_report_recipients = null`));
   });
 
+  console.log("\n== permitted absence periods (migration 036) ==");
+
+  await test("an administrator keeps the IPAS windows; a holiday outside them carries a warning, other reasons never do", async () => {
+    const who = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Window", last_name: "Weekly", date_of_birth: "1985-03-03" } });
+    assert.equal(who.status, 201, who.text);
+    const y = new Date().getUTCFullYear() + 1;
+    // No windows yet: no warning.
+    const early = await supC.fetch(`/api/residents/${who.json.id}/absences`, { method: "POST", body: { from_date: `${y}-03-01`, to_date: `${y}-03-03`, reason: "holiday" } });
+    assert.equal(early.status, 201, early.text); assert.equal(early.json.warning, undefined);
+    const asSup = await supC.fetch("/api/settings/absence-windows", { method: "POST", body: { name: "Summer", from_date: `${y}-07-01`, to_date: `${y}-08-31` } });
+    assert.equal(asSup.status, 403);
+    const bad = await wkAdmin.fetch("/api/settings/absence-windows", { method: "POST", body: { name: "", from_date: `${y}-07-01`, to_date: `${y}-06-30` } });
+    assert.equal(bad.status, 400);
+    const made = await wkAdmin.fetch("/api/settings/absence-windows", { method: "POST", body: { name: "Summer school holiday", from_date: `${y}-07-01`, to_date: `${y}-08-31` } });
+    assert.equal(made.status, 201, made.text);
+    const list = await api.fetch("/api/settings/absence-windows");
+    assert.equal(list.status, 200); assert.ok(list.json.some((w) => w.id === made.json.id && w.name === "Summer school holiday"));
+    const inside = await supC.fetch(`/api/residents/${who.json.id}/absences`, { method: "POST", body: { from_date: `${y}-07-10`, to_date: `${y}-07-20`, reason: "holiday" } });
+    assert.equal(inside.status, 201, inside.text); assert.equal(inside.json.warning, undefined);
+    const outside = await supC.fetch(`/api/residents/${who.json.id}/absences`, { method: "POST", body: { from_date: `${y}-10-01`, to_date: `${y}-10-05`, reason: "holiday" } });
+    assert.equal(outside.status, 201, outside.text);
+    assert.equal(outside.json.warning, "Outside the permitted absence periods in Settings");
+    const family = await supC.fetch(`/api/residents/${who.json.id}/absences`, { method: "POST", body: { from_date: `${y}-11-01`, to_date: `${y}-11-02`, reason: "family" } });
+    assert.equal(family.status, 201); assert.equal(family.json.warning, undefined, "only holidays are checked");
+    const delSup = await supC.fetch(`/api/settings/absence-windows/${made.json.id}`, { method: "DELETE" });
+    assert.equal(delSup.status, 403);
+    const del = await wkAdmin.fetch(`/api/settings/absence-windows/${made.json.id}`, { method: "DELETE" });
+    assert.equal(del.status, 200);
+    const gone = await wkAdmin.fetch(`/api/settings/absence-windows/${made.json.id}`, { method: "DELETE" });
+    assert.equal(gone.status, 404);
+    const audited = await withOwner((c) => c.query(`select count(*)::int as n from public.admin_audit where table_name = 'absence_windows'`));
+    assert.ok(audited.rows[0].n >= 2, "adding and removing a window should be audited");
+  });
+
   console.log("\n== the nightly House Rules reminder by email (migration 032) ==");
 
   await test("with the switch on, supervisors and admins are emailed the residents at a figure; off, nothing goes", async () => {

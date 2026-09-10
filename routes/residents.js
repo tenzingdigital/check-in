@@ -339,11 +339,19 @@ router.post('/:id/absences', wrap(async (req, res) => {
   const reason = String(body.reason || '');
   if (!ABSENCE_REASONS.includes(reason)) throw new HttpError(400, `reason must be one of ${ABSENCE_REASONS.join(', ')}`);
   const guardian = body.guardian_agreed === true;
-  const row = await db.withIdentity(req.session.userId, async (client) => {
+  const out = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query('select * from authorise_absence($1, $2, $3, $4, $5)', [id, from, to, reason, guardian]);
     const { rows: named } = await client.query(
       `select a.*, p.full_name as approved_by_name from authorised_absences a left join profiles p on p.id = a.approved_by where a.id = $1`, [rows[0].id]);
-    return named[0] || rows[0];
+    // Permitted absence periods (migration 036): a holiday outside every
+    // window is still recorded; the answer says so.
+    let warning;
+    if (reason === 'holiday') {
+      const { rows: [w] } = await client.query(
+        `select (select count(*)::int from absence_windows) as n, inside_absence_window($1, $2) as inside`, [from, to]);
+      if (w.n > 0 && !w.inside) warning = 'Outside the permitted absence periods in Settings';
+    }
+    return { row: named[0] || rows[0], warning };
   }).catch((err) => {
     if (err && err.code === '23505') throw new HttpError(409, err.message);
     if (err && err.code === '23514') throw new HttpError(400, err.message);
@@ -351,7 +359,7 @@ router.post('/:id/absences', wrap(async (req, res) => {
     if (err && err.code === 'P0002') throw new HttpError(404, 'No such resident');
     throw err;
   });
-  res.status(201).json(absenceRow(row));
+  res.status(201).json(out.warning ? { ...absenceRow(out.row), warning: out.warning } : absenceRow(out.row));
 }));
 // POST …/absences/:aid/end { last_day? } — cut it short; a last day before
 // the first day removes it (it never happened).

@@ -914,6 +914,20 @@ $$;
 
 --
 
+-- Name: inside_absence_window(date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.inside_absence_window(p_from date, p_to date) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  select exists (select 1 from __TENANT__.absence_windows w
+                  where daterange(w.from_date, w.to_date, '[]') @> daterange(p_from, p_to, '[]'));
+$$;
+
+
+--
+
 -- Name: is_admin(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2157,6 +2171,44 @@ $$;
 
 --
 
+-- Name: absence_windows; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.absence_windows (
+    id bigint NOT NULL,
+    name text NOT NULL,
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT absence_windows_check CHECK ((to_date >= from_date)),
+    CONSTRAINT absence_windows_name_check CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)))
+);
+
+
+--
+
+-- Name: absence_windows_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE __TENANT__.absence_windows_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+
+-- Name: absence_windows_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE __TENANT__.absence_windows_id_seq OWNED BY __TENANT__.absence_windows.id;
+
+
+--
+
 -- Name: admin_audit; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2647,6 +2699,14 @@ CREATE VIEW __TENANT__.v_system_health AS
 
 --
 
+-- Name: absence_windows id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.absence_windows ALTER COLUMN id SET DEFAULT nextval('__TENANT__.absence_windows_id_seq'::regclass);
+
+
+--
+
 -- Name: authorised_absences id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2667,6 +2727,15 @@ ALTER TABLE ONLY __TENANT__.breach_reports ALTER COLUMN id SET DEFAULT nextval('
 --
 
 ALTER TABLE ONLY __TENANT__.room_assignments ALTER COLUMN id SET DEFAULT nextval('__TENANT__.room_assignments_id_seq'::regclass);
+
+
+--
+
+-- Name: absence_windows absence_windows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.absence_windows
+    ADD CONSTRAINT absence_windows_pkey PRIMARY KEY (id);
 
 
 --
@@ -3153,6 +3222,14 @@ CREATE INDEX visits_roster_open_idx ON __TENANT__.visits USING btree (roster_id)
 
 --
 
+-- Name: absence_windows absence_windows_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER absence_windows_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.absence_windows FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
 -- Name: app_settings app_settings_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3245,6 +3322,15 @@ CREATE TRIGGER rooms_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.rooms 
 --
 
 CREATE TRIGGER staff_roster_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.staff_roster FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: absence_windows absence_windows_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.absence_windows
+    ADD CONSTRAINT absence_windows_created_by_fkey FOREIGN KEY (created_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
 
 
 --
@@ -3551,6 +3637,29 @@ ALTER TABLE ONLY __TENANT__.visits
 
 ALTER TABLE ONLY __TENANT__.visits
     ADD CONSTRAINT visits_roster_id_fkey FOREIGN KEY (roster_id) REFERENCES __TENANT__.staff_roster(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: absence_windows; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.absence_windows ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: absence_windows absence_windows_admin; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY absence_windows_admin ON __TENANT__.absence_windows USING (__TENANT__.is_admin()) WITH CHECK (__TENANT__.is_admin());
+
+
+--
+
+-- Name: absence_windows absence_windows_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY absence_windows_read ON __TENANT__.absence_windows FOR SELECT USING (__TENANT__.is_staff());
 
 
 --
@@ -4179,6 +4288,16 @@ GRANT ALL ON FUNCTION __TENANT__.hut_summary() TO service_role;
 
 --
 
+-- Name: FUNCTION inside_absence_window(p_from date, p_to date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.inside_absence_window(p_from date, p_to date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.inside_absence_window(p_from date, p_to date) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.inside_absence_window(p_from date, p_to date) TO service_role;
+
+
+--
+
 -- Name: FUNCTION is_admin(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -4614,6 +4733,25 @@ GRANT ALL ON FUNCTION __TENANT__.weekly_register_rows(p_from date, p_to date) TO
 
 REVOKE ALL ON FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date) TO service_role;
+
+
+--
+
+-- Name: TABLE absence_windows; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON TABLE __TENANT__.absence_windows TO authenticated;
+GRANT ALL ON TABLE __TENANT__.absence_windows TO service_role;
+
+
+--
+
+-- Name: SEQUENCE absence_windows_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.absence_windows_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.absence_windows_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.absence_windows_id_seq TO service_role;
 
 
 --

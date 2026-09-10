@@ -448,6 +448,15 @@
         <div><label class="lbl" for="stWeeklyTo">Recipients</label><input id="stWeeklyTo" class="field" type="text" maxlength="400" placeholder="mick@example.ie, niamh@example.ie">
           <p class="hint under">Comma-separated, up to ten. <button class="linkish" type="button" id="stWeeklySend">Send last week's now</button> to check what arrives. A manual send is on the audit record.</p></div>
 
+        <h2 class="mt6">Permitted absence periods <button class="tip" type="button" data-tip="The dates IPAS notifies: Christmas, Ramadan, Easter, the summer school holiday. A holiday authorised outside these periods still goes through; the screen says so." aria-label="About permitted absence periods">?</button></h2>
+        <div id="awList" class="list"></div>
+        <div class="grid3">
+          <input id="awName" class="field" type="text" maxlength="60" placeholder="Name, e.g. Summer 2026" aria-label="Period name">
+          <input id="awFrom" class="field" type="date" aria-label="First day">
+          <input id="awTo" class="field" type="date" aria-label="Last day">
+        </div>
+        <div class="actions"><button class="btn sm" type="button" id="awAdd">Add period</button></div>
+
         <h2 class="mt6">Features for this site <button class="tip" type="button" data-tip="Each switch is off until you turn it on here, so a centre sees only what it uses. Turning one off hides the screens; nothing already recorded is deleted." aria-label="About feature switches">?</button></h2>
         <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
         <label class="check"><input id="stFeatHouseholds" type="checkbox"> <span><b>Households.</b> Link family members so a child appears with a parent on the roll call and a room's occupants read as a family. Holds only which residents share a household.</span></label>
@@ -1130,7 +1139,7 @@ function renderDetail(rec, summary) {
       }), (err) => toast("Not recorded: " + err.message, "err"));
       $("abSave").disabled = false;
       if (!out) return;
-      toast("Absence recorded", "ok");
+      toast(out.warning ? `Absence recorded. ${out.warning}` : "Absence recorded", "ok");
       renderAbs(); loadResidents();
     });
   }
@@ -1664,6 +1673,7 @@ async function loadSettings() {
   showError("");
   for (const [col, id] of Object.entries(SETTINGS_FIELDS)) $(id).value = s[col] ?? "";
   for (const [col, id] of Object.entries(FEATURE_FIELDS)) $(id).checked = !!s[col];
+  loadWindows();
 }
 
 const featureOn = (name) => !!(state.settings && state.settings[name]);
@@ -1701,6 +1711,27 @@ $("stWeeklySend").addEventListener("click", async () => {
   } else {
     toast(`Delivered for ${out.from} to ${out.to} to ${out.sent} of ${out.recipients} address${out.recipients === 1 ? "" : "es"}`, "ok");
   }
+});
+async function loadWindows() {
+  const rows = await guarded(() => apiGet("/api/settings/absence-windows"), () => null);
+  if (!rows) return;
+  $("awList").innerHTML = rows.length ? rows.map((w) => `
+    <div class="report"><div><b>${esc(w.name)}</b><span class="hint">${esc(w.from_date)} to ${esc(w.to_date)}</span></div>
+      <button class="linkish" type="button" data-del-window="${w.id}" aria-label="Remove ${esc(w.name)}">remove</button></div>`).join("")
+    : '<p class="hint flush">No periods recorded. Holidays are never warned about until one is.</p>';
+}
+$("awAdd").addEventListener("click", async () => {
+  const body = { name: $("awName").value.trim(), from_date: $("awFrom").value, to_date: $("awTo").value };
+  const out = await guarded(() => apiPost("/api/settings/absence-windows", body), (err) => toast("Not added: " + err.message, "err"));
+  if (!out) return;
+  $("awName").value = ""; $("awFrom").value = ""; $("awTo").value = "";
+  toast("Period added", "ok"); loadWindows();
+});
+$("awList").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-del-window]"); if (!btn) return;
+  const out = await guarded(() => api(`/api/settings/absence-windows/${btn.dataset.delWindow}`, { method: "DELETE" }), (err) => toast("Not removed: " + err.message, "err"));
+  if (!out) return;
+  toast("Period removed", "ok"); loadWindows();
 });
 
 /* ========================================================================

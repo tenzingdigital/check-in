@@ -8,7 +8,7 @@
 const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
-const { HttpError } = require('../lib/api');
+const { HttpError, dateParam } = require('../lib/api');
 const tenancy = require('../lib/tenancy');
 const { clearDemoCentre } = require('../lib/demoSeed');
 
@@ -176,6 +176,50 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
     return { sent, recipients: recipients.length, from, to };
   });
   res.json(out);
+}));
+
+// ---------------------------------------------------------------------------
+// Permitted absence periods (migration 036)
+// ---------------------------------------------------------------------------
+//   GET    /api/settings/absence-windows       any staff member
+//   POST   /api/settings/absence-windows       administrators
+//   DELETE /api/settings/absence-windows/:id   administrators
+router.get('/absence-windows', wrap(async (req, res) => {
+  const rows = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `select id, name, from_date::text as from_date, to_date::text as to_date from absence_windows order by from_date, id`);
+    return rows;
+  });
+  res.json(rows);
+}));
+
+router.post('/absence-windows', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can change the permitted absence periods');
+  const body = req.body || {};
+  const name = String(body.name || '').trim();
+  if (!name || name.length > 60) throw new HttpError(400, 'Give the period a name (up to 60 characters)');
+  const from = dateParam(body.from_date, 'from_date');
+  const to = dateParam(body.to_date, 'to_date');
+  if (to < from) throw new HttpError(400, 'The last day must not be before the first');
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `insert into absence_windows (name, from_date, to_date, created_by) values ($1, $2, $3, $4)
+       returning id, name, from_date::text as from_date, to_date::text as to_date`, [name, from, to, req.session.userId]);
+    return rows[0];
+  }).catch((err) => { if (err && err.code === '42501') throw new HttpError(403, 'Only an administrator can change the permitted absence periods'); throw err; });
+  res.status(201).json(row);
+}));
+
+router.delete('/absence-windows/:id', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can change the permitted absence periods');
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id < 1) throw new HttpError(400, 'Bad id');
+  const n = await db.withIdentity(req.session.userId, async (client) => {
+    const { rowCount } = await client.query('delete from absence_windows where id = $1', [id]);
+    return rowCount;
+  });
+  if (!n) throw new HttpError(404, 'No such period');
+  res.json({ ok: true });
 }));
 
 module.exports = router;
