@@ -2144,15 +2144,19 @@ async function main() {
     assert.deepEqual(lastWeek("2026-09-13"), { from: "2026-09-06", to: "2026-09-12" });
   });
 
-  await test("compose() carries counts and a link, never a resident name — the security property", async () => {
+  await test("compose() carries counts and a link, never a resident name, room, building or child marker — the security property", async () => {
     const { compose } = require("../lib/weeklyReport");
     const secretName = "Zbigniew Notaperson";
+    const secretRoom = "W7";
+    const secretBuilding = "Weekly Wing Seven";
     const rows = [
-      { section: "Resident absences", status: "not approved", resident: secretName, line: `${secretName} was absent from Monday to Wednesday.` },
-      { section: "Resident absences", status: "approved", resident: "Other Resident", line: "Other Resident was absent." },
-      { section: "Updates from the weekend", status: "partly approved", resident: "Weekend Resident", line: "Weekend Resident was absent at the weekend." },
-      { section: "Resident removals", status: "departed", resident: "Departed Resident", line: "Departed Resident departed." },
-      { section: "Room updates", status: "maintenance", resident: null, line: "Weekly Block W1 is under maintenance." },
+      { section: "Resident absences", status: "not approved", resident: secretName, room: secretRoom, building: secretBuilding, child: "child", line: `${secretName} was absent from Monday to Wednesday.` },
+      { section: "Resident absences", status: "approved", resident: "Other Resident", room: "W2", building: "Weekly Block", child: "", line: "Other Resident was absent." },
+      // All approved: exercises the zero-count suppression (fold-in 4) —
+      // the section still gets a count, but no "with nights not approved".
+      { section: "Updates from the weekend", status: "approved", resident: "Weekend Resident", room: "W3", building: "Weekly Block", child: "", line: "Weekend Resident was absent at the weekend." },
+      { section: "Resident removals", status: "departed", resident: "Departed Resident", room: "W4", building: "Weekly Block", child: "", line: "Departed Resident departed." },
+      { section: "Room updates", status: "maintenance", resident: null, room: "W1", building: "Weekly Block", child: null, line: "Weekly Block W1 is under maintenance." },
     ];
     const out = compose({
       siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows,
@@ -2160,17 +2164,27 @@ async function main() {
     });
     assert.equal(out.subject, "Slaney: Weekly register update, 6 September to 12 September 2026");
     assert.match(out.text, /^Slaney: Weekly register update, 6 September to 12 September 2026/);
-    assert.match(out.text, /Resident absences: 2 \(1 not approved by management\)/);
-    assert.match(out.text, /Updates from the weekend: 1 \(1 not approved by management\)/);
+    assert.match(out.text, /Resident absences: 2 \(1 with nights not approved\)/);
+    assert.match(out.text, /Updates from the weekend: 1$/m, "no parenthetical when nothing in the section is unapproved");
+    assert.doesNotMatch(out.text, /Updates from the weekend:.*not approved/);
     assert.match(out.text, /Resident removals: 1/);
     assert.match(out.text, /Room updates: 1/);
+    assert.match(out.text, /A night inside an authorised absence recorded in CheckSteady is approved/, "the closing sentence describes a night, not a span");
     assert.ok(out.text.includes("https://hut-check-in.onrender.com/admin.html"), "the link is in the body");
+    assert.match(out.text, /^Open the app: https:\/\/hut-check-in\.onrender\.com\/admin\.html$/m, "the copy says only that the link opens the app");
     assert.match(out.text, /Admin → Reports/, "names the report's home in the app");
-    // The security property this task exists for: no resident name, and no
-    // per-row sentence (which would carry room, dates and the child marker),
-    // appears anywhere in the composed message.
-    for (const r of rows) if (r.resident) assert.ok(!out.text.includes(r.resident), `${r.resident} must not appear in the email`);
+    // The security property this task exists for: no resident name, room,
+    // building or child marker, and no per-row sentence (which would carry
+    // dates too), appears anywhere in the composed message.
+    for (const r of rows) {
+      if (r.resident) assert.ok(!out.text.includes(r.resident), `${r.resident} must not appear in the email`);
+      if (r.room) assert.ok(!out.text.includes(r.room), `room ${r.room} must not appear in the email`);
+      if (r.building) assert.ok(!out.text.includes(r.building), `building ${r.building} must not appear in the email`);
+    }
     assert.ok(!out.text.includes(secretName), "no resident name anywhere in the composed email");
+    assert.ok(!out.text.includes(secretRoom), "no room anywhere in the composed email");
+    assert.ok(!out.text.includes(secretBuilding), "no building anywhere in the composed email");
+    assert.ok(!/\bchild\b/.test(out.text), "no child marker anywhere in the composed email");
     assert.ok(!/was absent|departed on|under maintenance/.test(out.text), "no per-row sentence in the composed email");
   });
 
