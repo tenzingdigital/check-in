@@ -294,3 +294,40 @@ In `test/api.test.js`, after the reports block:
   and back" already has the hours.
 - Per-bed rows or a resident's sex. The room note carries the "single
   lady" line by hand.
+
+## 8. The iPad as a fixed sign-in terminal
+
+Added 10 September on the owner's question: can the sign-in page take over
+the whole iPad so a resident cannot leave it? The lock is the tablet's, not
+the page's: iOS Guided Access (or Single App Mode under an MDM) pins the
+iPad to one app until a passcode is entered. The app's part is to run as an
+installed web app so Safari's bar and tabs are gone, and to open on the
+right screen. The second half already exists ("Always open this on this
+tablet"); this adds the first.
+
+- `public/manifest.webmanifest`: name "CheckSteady", short_name
+  "CheckSteady", `start_url: "/"`, `display: "standalone"`,
+  `background_color` and `theme_color` in the app blue, icons at 192 and
+  512 from a new `public/icon.svg` (the tick-in-a-square already used as
+  the favicon) plus `public/apple-touch-icon.png` (180 px, since iOS
+  ignores SVG for the home screen). `express.static` already sends
+  `no-cache` for `.webmanifest`.
+- `index.html`, `checkin.html`, `admin.html`, `org.html`: `<link
+  rel="manifest">`, `<link rel="apple-touch-icon">`, `<meta
+  name="apple-mobile-web-app-capable" content="yes">`, `<meta
+  name="apple-mobile-web-app-status-bar-style" content="default">`,
+  `<meta name="theme-color">`. The CSP gains `manifest-src 'self'` if it
+  lists sources per directive.
+- Standalone mode has no back button and no address bar, so every page
+  must be reachable from within the app; it already is (the view pill,
+  Admin link, Log out). `?view=` pins still work because `start_url` is
+  `/` and the choice is in `localStorage`, which the installed app shares
+  with Safari on iOS.
+- `help.html`, "Set up a tablet": three added steps — Share → Add to Home
+  Screen, open from the icon, then Guided Access (Settings → Accessibility
+  → Guided Access → passcode; open the app; triple-click the side button;
+  Start). A line that the same is called Single App Mode when an MDM
+  manages the tablets.
+- Test: `check.sh` layer 1 parses the pages; the HTTP suite asserts
+  `/manifest.webmanifest` is served as `application/manifest+json` with
+  `display: standalone`.
