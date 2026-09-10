@@ -81,11 +81,14 @@ services:
           property: connectionString
       - key: NODE_VERSION
         value: "22"
-      # The origin used to build links in outgoing mail (login links, the
-      # trial's verification link, the Sunday weekly report). Without it the
-      # web tier falls back to the request's Host header, which is right
-      # until something sits in front of the app and it quietly is not. Set
-      # it once, explicitly.
+      # The origin used to build links in outgoing mail. For login links and
+      # the trial's verification link, the web tier falls back to the
+      # request's Host header without it, which is right until something
+      # sits in front of the app and it quietly is not. The Sunday weekly
+      # report does not fall back at all: unset means that email carries no
+      # link, by design, because it goes to several people at once and an
+      # origin taken from a header is one an attacker can choose. Set it
+      # once, explicitly.
       #
       # This is the Render-assigned domain: the app runs here for now. It
       # becomes https://app.checksteady.com once the custom domain is wired
