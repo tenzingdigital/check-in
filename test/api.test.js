@@ -2130,15 +2130,11 @@ async function main() {
   const wkAdmin = client(base);
   assert.equal((await wkAdmin.fetch("/api/session", { method: "POST", body: { email: "dooradmin@hut.example", password: PASSWORD } })).status, 200);
 
-  await test("recipients are validated, lower-cased and cleared; the switch is a setting", async () => {
-    const bad = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: "not-an-address" } });
-    assert.equal(bad.status, 400);
-    const many = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: Array.from({ length: 11 }, (_, i) => `m${i}@example.ie`).join(",") } });
-    assert.equal(many.status, 400, "more than ten addresses");
-    const ok = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: " Mick@Example.ie, niamh@example.ie ", weekly_report_email: true } });
+  await test("the weekly report email switch is a setting; recipients are not (moved to the staff record, migration 037)", async () => {
+    const ok = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_email: true } });
     assert.equal(ok.status, 200, ok.text);
-    assert.equal(ok.json.weekly_report_recipients, "mick@example.ie,niamh@example.ie");
     assert.equal(ok.json.weekly_report_email, true);
+    assert.equal(ok.json.weekly_report_recipients, undefined, "the old recipients setting is gone");
     const asSup = await supC.fetch("/api/settings", { method: "PATCH", body: { weekly_report_email: false } });
     assert.equal(asSup.status, 403);
   });
@@ -2152,7 +2148,14 @@ async function main() {
     assert.match(out.text, /^Slaney: Weekly register update, 6 September to 12 September 2026\n\nResident absences\n- A was absent\.\n\nUpdates from the weekend\n\(none\)\n\nResident removals\n\(none\)\n\nRoom updates\n- B1 is under maintenance\.\n\nNights are counted at midnight/);
   });
 
-  await test("send now emails every recipient last week's report and is on the audit record; refused without recipients or to a supervisor", async () => {
+  await test("send now emails every recipient ticked on the staff record, and is on the audit record; refused without recipients or to a supervisor", async () => {
+    const mick = await wkAdmin.fetch("/api/staff", { method: "POST", body: { email: "mick@example.ie", full_name: "Mick Weekly", role: "supervisor" } });
+    assert.equal(mick.status, 201, mick.text);
+    const niamh = await wkAdmin.fetch("/api/staff", { method: "POST", body: { email: "niamh@example.ie", full_name: "Niamh Weekly", role: "admin" } });
+    assert.equal(niamh.status, 201, niamh.text);
+    assert.equal((await wkAdmin.fetch(`/api/staff/${mick.json.id}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
+    assert.equal((await wkAdmin.fetch(`/api/staff/${niamh.json.id}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
+
     const asSup = await supC.fetch("/api/settings/weekly-report/send", { method: "POST" });
     assert.equal(asSup.status, 403);
     const before = (global.__mailSink || []).length;
@@ -2171,16 +2174,18 @@ async function main() {
     assert.ok(mails.every((m) => /Weekly register update/.test(m.subject) && /Resident absences/.test(m.text)), "subject and sections");
     const logged = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'weekly' order by at desc limit 1`));
     assert.match(logged.rows[0].note, /sent by hand/);
-    await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_recipients: "" } });
+
+    assert.equal((await wkAdmin.fetch(`/api/staff/${mick.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
+    assert.equal((await wkAdmin.fetch(`/api/staff/${niamh.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
     const none = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
     assert.equal(none.status, 400);
-    const cleared = await wkAdmin.fetch("/api/settings");
-    assert.equal(cleared.json.weekly_report_recipients, null, "an empty string stores null");
   });
 
   await test("the nightly step sends on a Sunday when on, and records why it did not otherwise", async () => {
     const { weeklyRegister } = require("../jobs");
-    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false, weekly_report_recipients = 'mick@example.ie'`));
+    const mickId = (await withOwner((c) => c.query(`select id from auth.users where email = 'mick@example.ie'`))).rows[0].id;
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false`));
+    await withOwner((c) => c.query(`update public.profiles set weekly_report = true where id = $1`, [mickId]));
     const before = (global.__mailSink || []).length;
     assert.equal(await weeklyRegister("public", "", { force: true }), true);
     assert.equal((global.__mailSink || []).length, before, "nothing goes while the switch is off");
@@ -2206,7 +2211,8 @@ async function main() {
       run = await withOwner((c) => c.query(`select result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
       assert.equal(run.rows[0].result, "not Sunday");
     }
-    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false, weekly_report_recipients = null`));
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false`));
+    await withOwner((c) => c.query(`update public.profiles set weekly_report = false where id = $1`, [mickId]));
   });
 
   console.log("\n== permitted absence periods (migration 036) ==");
@@ -2241,6 +2247,54 @@ async function main() {
     assert.equal(gone.status, 404);
     const audited = await withOwner((c) => c.query(`select count(*)::int as n from public.admin_audit where table_name = 'absence_windows'`));
     assert.ok(audited.rows[0].n >= 2, "adding and removing a window should be audited");
+  });
+
+  console.log("\n== the weekly report flag on the staff record (migration 037) ==");
+
+  await test("weekly_report defaults false, only an admin sets it, only a supervisor or admin may carry it, and demotion clears it", async () => {
+    const created = await wkAdmin.fetch("/api/staff", {
+      method: "POST",
+      body: { email: `wk${Math.floor(Math.random() * 1e9)}@hut.example`, full_name: "Weekly Target", role: "supervisor" },
+    });
+    assert.equal(created.status, 201, created.text);
+    const id = created.json.id;
+
+    const listed = await api.fetch("/api/staff");
+    const row = listed.json.find((s) => s.id === id);
+    assert.ok(row, "the new account is missing from the list");
+    assert.equal(row.weekly_report, false, "a new staff member does not default to receiving the report");
+
+    const asSup = await supC.fetch(`/api/staff/${id}/weekly-report`, { method: "POST", body: { on: true } });
+    assert.equal(asSup.status, 403);
+
+    const on = await wkAdmin.fetch(`/api/staff/${id}/weekly-report`, { method: "POST", body: { on: true } });
+    assert.equal(on.status, 200, on.text);
+    assert.equal(on.json.weekly_report, true);
+    const afterOn = await api.fetch("/api/staff");
+    assert.equal(afterOn.json.find((s) => s.id === id).weekly_report, true, "GET /api/staff does not carry the flag");
+
+    const off = await wkAdmin.fetch(`/api/staff/${id}/weekly-report`, { method: "POST", body: { on: false } });
+    assert.equal(off.status, 200, off.text);
+    assert.equal(off.json.weekly_report, false);
+
+    // Only a supervisor or admin may run the report the Sunday email
+    // summarises, so a guard must never be able to carry the flag.
+    const demoted = await wkAdmin.fetch(`/api/staff/${id}/role`, { method: "POST", body: { role: "guard" } });
+    assert.equal(demoted.status, 200, demoted.text);
+    const guardTry = await wkAdmin.fetch(`/api/staff/${id}/weekly-report`, { method: "POST", body: { on: true } });
+    assert.equal(guardTry.status, 400);
+
+    // Promote back, tick the flag, then demote: the demotion must succeed
+    // and quietly clear the flag rather than fail because of it.
+    const promoted = await wkAdmin.fetch(`/api/staff/${id}/role`, { method: "POST", body: { role: "supervisor" } });
+    assert.equal(promoted.status, 200, promoted.text);
+    const setAgain = await wkAdmin.fetch(`/api/staff/${id}/weekly-report`, { method: "POST", body: { on: true } });
+    assert.equal(setAgain.status, 200, setAgain.text);
+    assert.equal(setAgain.json.weekly_report, true);
+    const demotedAgain = await wkAdmin.fetch(`/api/staff/${id}/role`, { method: "POST", body: { role: "guard" } });
+    assert.equal(demotedAgain.status, 200, demotedAgain.text, "a demotion must never fail because of the weekly report flag");
+    const cleared = await api.fetch("/api/staff");
+    assert.equal(cleared.json.find((s) => s.id === id).weekly_report, false, "demoting to guard did not clear the flag");
   });
 
   console.log("\n== the nightly House Rules reminder by email (migration 032) ==");

@@ -153,6 +153,7 @@
 
   .pill.departed { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
   .notice { padding: 14px 16px; }
+  .card.staff .who .check { margin-top: 6px; font-size: 13px; }
   /* Staff cards on a phone: the actions get a row of their own. */
   @media (max-width: 600px) {
     .card.staff { flex-wrap: wrap; }
@@ -450,9 +451,8 @@
         <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login. Needs email configured on the service.</span></label>
 
         <h2 class="mt6">Weekly register update</h2>
-        <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> Early Sunday morning, after Saturday night's snapshot, the addresses below receive the week's absences, weekend updates, removals and room updates as plain text. Needs email configured on the service.</span></label>
-        <div><label class="lbl" for="stWeeklyTo">Recipients</label><input id="stWeeklyTo" class="field" type="text" maxlength="400" placeholder="mick@example.ie, niamh@example.ie">
-          <p class="hint under">Comma-separated, up to ten. <button class="linkish" type="button" id="stWeeklySend">Send last week's now</button> to check what arrives. A manual send is on the audit record.</p></div>
+        <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> Early Sunday morning, after Saturday night's snapshot, the staff ticked to receive it are emailed the week's absences, weekend updates, removals and room updates as plain text. Needs email configured on the service.</span></label>
+        <p class="hint flush">Recipients are chosen on the staff record: tick "Gets the Sunday report" for a supervisor or admin under Staff. <button class="linkish" type="button" id="stWeeklySend">Send last week's now</button> to check what arrives. A manual send is on the audit record.</p>
 
         <h2 class="mt6">Permitted absence periods <button class="tip" type="button" data-tip="The dates IPAS notifies: Christmas, Ramadan, Easter, the summer school holiday. A holiday authorised outside these periods still goes through; the screen says so." aria-label="About permitted absence periods">?</button></h2>
         <div id="awList" class="list"></div>
@@ -1270,11 +1270,15 @@ function staffCard(s) {
   const roleOptions = ["guard", "supervisor", "admin"]
     .map((r) => `<option value="${r}" ${r === s.role ? "selected" : ""}>${r}</option>`)
     .join("");
+  // Only a supervisor or an admin may run the report the Sunday email
+  // summarises, so the tick is offered only for those roles (migration 037).
+  const weeklyReport = s.role === "guard" ? "" : `
+        <label class="check"><input type="checkbox" class="sWk" data-sid="${esc(s.id)}" ${s.weekly_report ? "checked" : ""}> <span>Gets the Sunday report</span></label>`;
   return `
     <div class="card staff">
       <span class="who">
         <span class="name">${esc(s.full_name)}</span>
-        <span class="meta">${meta}</span>
+        <span class="meta">${meta}</span>${weeklyReport}
       </span>
       <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
       <span class="actions-row">
@@ -1436,16 +1440,31 @@ $("staffList").addEventListener("click", async (e) => {
 
 $("staffList").addEventListener("change", async (e) => {
   const sel = e.target.closest("select[data-sid]");
-  if (!sel) return;
-  const s = staffRows.get(sel.dataset.sid);
-  if (!s) return;
-  const out = await guarded(
-    () => apiPost(`/api/staff/${s.id}/role`, { role: sel.value }),
-    (err) => { toast(err.message, "err"); sel.value = s.role; },
-  );
-  if (out) {
-    toast(`${s.full_name} is now ${out.role}`, "ok");
-    loadStaff();
+  if (sel) {
+    const s = staffRows.get(sel.dataset.sid);
+    if (!s) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/role`, { role: sel.value }),
+      (err) => { toast(err.message, "err"); sel.value = s.role; },
+    );
+    if (out) {
+      toast(`${s.full_name} is now ${out.role}`, "ok");
+      loadStaff();
+    }
+    return;
+  }
+  const chk = e.target.closest("input.sWk[data-sid]");
+  if (chk) {
+    const s = staffRows.get(chk.dataset.sid);
+    if (!s) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/weekly-report`, { on: chk.checked }),
+      (err) => { toast(err.message, "err"); chk.checked = s.weekly_report; },
+    );
+    if (out) {
+      toast(out.weekly_report ? `${s.full_name} will get the Sunday report` : `${s.full_name} will not get the Sunday report`, "ok");
+      loadStaff();
+    }
   }
 });
 
@@ -1669,7 +1688,7 @@ const SETTINGS_FIELDS = {
   site_name: "stSite", local_timezone: "stTz", adult_age_years: "stAdult", due_soon_after_hour: "stDue",
   warn_after_consecutive_nights: "stWarn", absence_window_limit: "stWinLimit", absence_window_days: "stWinDays", holiday_max_days: "stHoliday",
   event_retention_days: "stEventDays", compliance_retention_days: "stCompDays", late_entry_window_hours: "stLate",
-  idle_lock_minutes: "stIdle", home_countries: "stHome", weekly_report_recipients: "stWeeklyTo",
+  idle_lock_minutes: "stIdle", home_countries: "stHome",
 };
 
 const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify", weekly_report_email: "stWeekly" };

@@ -117,6 +117,7 @@ validation.
 | Send a staff member a login link<br><code>POST /api/staff/:id/link</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Disable or re-enable a staff account<br><code>POST /api/staff/:id/active</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Change a staff member's role<br><code>POST /api/staff/:id/role</code> | — | ✗ | ✗ | ✓ | ✓ |
+| Tick or untick whether a staff member receives the weekly report<br><code>POST /api/staff/:id/weekly-report</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Set a staff member's password<br><code>POST /api/staff/:id/password</code> | — | ✗ | ✗ | ✓ | ✓ |
 
 ## Organisation

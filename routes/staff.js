@@ -22,7 +22,7 @@ const router = express.Router();
 router.get('/', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `select p.id, u.email, p.full_name, p.role, p.active,
+      `select p.id, u.email, p.full_name, p.role, p.active, p.weekly_report,
               u.last_sign_in_at, p.created_at
          from profiles p
          join auth.users u on u.id = p.id
@@ -162,6 +162,31 @@ router.post('/:id/role', wrap(async (req, res) => {
   });
 
   if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can change a role.');
+  res.json(row);
+}));
+
+// POST /api/staff/:id/weekly-report — tick or untick whether this account
+// receives the Sunday Weekly register update. Only a supervisor or admin may
+// run the report it summarises, so a guard must never carry the flag: the
+// database refuses it (profiles_weekly_report_not_guard, migration 037),
+// surfacing here as a plain 400 via translateDbError, and a demotion to
+// guard clears the flag by trigger rather than fail because of it. The
+// update itself is the authorisation check (profiles_admin_all), same as
+// /:id/active and /:id/role — a non-admin's update matches no rows before
+// the constraint is ever reached.
+router.post('/:id/weekly-report', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'staff id');
+  const on = req.body?.on === true;
+
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      'update profiles set weekly_report = $2 where id = $1 returning id, weekly_report',
+      [id, on],
+    );
+    return rows[0];
+  }).catch((err) => { throw translateDbError(err); });
+
+  if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can change who receives the weekly report.');
   res.json(row);
 }));
 

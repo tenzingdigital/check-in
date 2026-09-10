@@ -228,7 +228,6 @@ CREATE TABLE __TENANT__.app_settings (
     holiday_max_days integer DEFAULT 14 NOT NULL,
     notify_thresholds_email boolean DEFAULT false NOT NULL,
     weekly_report_email boolean DEFAULT false NOT NULL,
-    weekly_report_recipients text,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -240,8 +239,7 @@ CREATE TABLE __TENANT__.app_settings (
     CONSTRAINT app_settings_id_check CHECK (id),
     CONSTRAINT app_settings_idle_lock_minutes_check CHECK (((idle_lock_minutes >= 1) AND (idle_lock_minutes <= 720))),
     CONSTRAINT app_settings_late_entry_window_hours_check CHECK (((late_entry_window_hours >= 1) AND (late_entry_window_hours <= 168))),
-    CONSTRAINT app_settings_warn_after_consecutive_nights_check CHECK (((warn_after_consecutive_nights >= 1) AND (warn_after_consecutive_nights <= 90))),
-    CONSTRAINT app_settings_weekly_report_recipients_check CHECK (((weekly_report_recipients IS NULL) OR (length(weekly_report_recipients) <= 400)))
+    CONSTRAINT app_settings_warn_after_consecutive_nights_check CHECK (((warn_after_consecutive_nights >= 1) AND (warn_after_consecutive_nights <= 90)))
 );
 
 
@@ -1181,6 +1179,24 @@ begin
   insert into __TENANT__.resident_views (actor_id, resident_id, surface)
   select auth.uid(), p_resident_id, p_surface
    where exists (select 1 from __TENANT__.residents where id = p_resident_id);
+end;
+$$;
+
+
+--
+
+-- Name: profiles_clear_weekly_report_for_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.profiles_clear_weekly_report_for_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if new.role = 'guard' and (tg_op = 'INSERT' or old.role is distinct from new.role) then
+    new.weekly_report := false;
+  end if;
+  return new;
 end;
 $$;
 
@@ -2441,7 +2457,9 @@ CREATE TABLE __TENANT__.profiles (
     role text DEFAULT 'guard'::text NOT NULL,
     active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT profiles_role_check CHECK ((role = ANY (ARRAY['guard'::text, 'supervisor'::text, 'admin'::text])))
+    weekly_report boolean DEFAULT false NOT NULL,
+    CONSTRAINT profiles_role_check CHECK ((role = ANY (ARRAY['guard'::text, 'supervisor'::text, 'admin'::text]))),
+    CONSTRAINT profiles_weekly_report_not_guard CHECK ((NOT (weekly_report AND (role = 'guard'::text))))
 );
 
 
@@ -3268,6 +3286,14 @@ CREATE TRIGGER buildings_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.bu
 --
 
 CREATE TRIGGER profiles_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.profiles FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: profiles profiles_weekly_report_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER profiles_weekly_report_guard BEFORE INSERT OR UPDATE ON __TENANT__.profiles FOR EACH ROW EXECUTE FUNCTION __TENANT__.profiles_clear_weekly_report_for_guard();
 
 
 --
@@ -4423,6 +4449,15 @@ GRANT ALL ON FUNCTION __TENANT__.note_report(p_report text, p_reason text, p_fro
 REVOKE ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION profiles_clear_weekly_report_for_guard(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.profiles_clear_weekly_report_for_guard() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.profiles_clear_weekly_report_for_guard() TO service_role;
 
 
 --

@@ -172,10 +172,10 @@ async function notifyThresholds(schema, label) {
 }
 
 // The Sunday Weekly Register Update (migration 035): on a Sunday, after
-// Saturday night's snapshot, the addresses in Settings receive the week's
-// absences, weekend updates, removals and room updates as plain text. The
-// rows come from weekly_register_rows_unchecked(), the owner's copy: the
-// checked one asks is_supervisor(), which a job is not.
+// Saturday night's snapshot, the staff ticked to receive it (migration 037)
+// are emailed the week's absences, weekend updates, removals and room
+// updates as plain text. The rows come from weekly_register_rows_unchecked(),
+// the owner's copy: the checked one asks is_supervisor(), which a job is not.
 const weekly = require('./lib/weeklyReport');
 async function weeklyRegister(schema, label, { force = false } = {}) {
   const name = 'weekly-register-email';
@@ -183,11 +183,16 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
   try {
     const summary = await withOwnerIn(schema, async (client) => {
       const { rows: [s] } = await client.query(
-        `select weekly_report_email as on, weekly_report_recipients as recipients, site_name, local_timezone,
+        `select weekly_report_email as on, site_name, local_timezone,
                 to_char(site_today(), 'YYYY-MM-DD') as today, extract(isodow from site_today())::int as dow
            from app_settings where id`);
       if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
-      if (!s.recipients) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
+      // Recipients are the staff ticked to receive it (migration 037), not a
+      // setting: every address is a known person with a login.
+      const { rows: staff } = await client.query(
+        `select u.email from profiles p join auth.users u on u.id = p.id
+          where p.active and p.weekly_report and u.email is not null`);
+      if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
       if (s.dow !== 7 && !force) { await record(client, name, true, 'not Sunday'); return 'not Sunday'; }
       // Idempotence: a second run today (an operator re-running `node
       // jobs.js` after some other step failed) must not email head office
@@ -209,13 +214,12 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
       const { from, to } = weekly.lastWeek(s.today);
       const { rows } = await client.query('select * from weekly_register_rows_unchecked($1, $2)', [from, to]);
       const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows });
-      const recipients = s.recipients.split(',');
       let delivered = 0;
-      for (const to_ of recipients) {
-        const out = await mail.send({ to: to_, subject, text });
+      for (const r of staff) {
+        const out = await mail.send({ to: r.email, subject, text });
         if (out.delivered) delivered += 1;
       }
-      const result = `${rows.length} rows, ${delivered}/${recipients.length} emailed`;
+      const result = `${rows.length} rows, ${delivered}/${staff.length} emailed`;
       await record(client, name, true, result);
       return result;
     });
