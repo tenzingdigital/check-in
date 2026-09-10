@@ -20,6 +20,12 @@
 const assert = require('assert/strict');
 process.env.HUT_MAIL_SINK = '1';   // lib/mail.js keeps what it would have sent in global.__mailSink
 process.env.HUT_GEO_OVERRIDE = '1'; // lib/geo.js reads x-hut-test-country instead of the IP
+// A stand-in for what render.yaml sets in every real deployment. Without it,
+// password reset, staff invitations and trial verification now all refuse
+// outright (see lib/mail.js publicUrl()) rather than build a link from the
+// test server's own 127.0.0.1 — which is exactly the behaviour under test
+// further down; those specific tests unset and restore it around themselves.
+process.env.PUBLIC_URL = 'https://hut-check-in.onrender.com';
 const app = require('../server');
 const auth = require('../lib/auth');
 const { closePool, withIdentity, withOwner, migrate } = require('../database');
@@ -1030,6 +1036,30 @@ async function main() {
     assert.equal(real.status, 200);
     assert.equal(fake.status, 200);
     assert.deepEqual(real.json, fake.json, "the two answers differ, which enumerates staff");
+  });
+
+  await test("with PUBLIC_URL unset, a reset request is refused rather than emailing a link built from the request", async () => {
+    const prior = process.env.PUBLIC_URL;
+    try {
+      delete process.env.PUBLIC_URL;
+      const before = (global.__mailSink || []).length;
+
+      const real = await api.fetch("/api/password-reset", { method: "POST", body: { email: EMAIL } });
+      const fake = await api.fetch("/api/password-reset", {
+        method: "POST", body: { email: "nobody-at-all@example.invalid" },
+      });
+
+      // Refused outright — but identically for a real and a made-up address,
+      // so the property above still holds even while misconfigured.
+      assert.notEqual(real.status, 200, "a reset was accepted with no PUBLIC_URL to build its link from");
+      assert.equal(real.status, fake.status);
+      assert.deepEqual(real.json, fake.json, "the refusal itself enumerates staff");
+
+      const mails = (global.__mailSink || []).slice(before);
+      assert.equal(mails.length, 0, "an email went out with no configured origin for its link");
+    } finally {
+      if (prior === undefined) delete process.env.PUBLIC_URL; else process.env.PUBLIC_URL = prior;
+    }
   });
 
   await test("an unknown token is refused", async () => {
@@ -2671,6 +2701,24 @@ async function main() {
     await guardC.fetch("/api/session", { method: "POST", body: { email: EMAIL, password: PASSWORD } });
     const refused = await guardC.fetch(`/api/staff/${nadia.id}/link`, { method: "POST", body: {} });
     assert.equal(refused.status, 403);
+  });
+
+  await test("with PUBLIC_URL unset, inviting a staff member is refused plainly rather than emailing a link built from the request", async () => {
+    const prior = process.env.PUBLIC_URL;
+    try {
+      delete process.env.PUBLIC_URL;
+      const before = (global.__mailSink || []).length;
+
+      const res = await adminC.fetch("/api/staff", {
+        method: "POST",
+        body: { email: "no-link@hut.example", full_name: "No Link", role: "guard" },
+      });
+      assert.equal(res.status, 500, res.text);
+      assert.match(res.json.error, /PUBLIC_URL/, "an administrator was not told what is misconfigured");
+      assert.equal((global.__mailSink || []).length, before, "an email went out with no configured origin for its link");
+    } finally {
+      if (prior === undefined) delete process.env.PUBLIC_URL; else process.env.PUBLIC_URL = prior;
+    }
   });
 
   await test("export downloads with a logged reason; erase needs the name typed back", async () => {

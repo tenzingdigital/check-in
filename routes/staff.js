@@ -82,6 +82,19 @@ router.post('/:id/link', wrap(async (req, res) => {
 // needs to know: whether it was emailed, and — only when mail is not
 // configured — the link itself.
 async function sendLoginLink(req, email, { invite }) {
+  // The link is built from PUBLIC_URL only (lib/mail.js publicUrl()), never
+  // from the request's Host — see mail.js for why. Checked before minting a
+  // token: this deployment cannot hand out a working link either way, and
+  // failing first avoids spending the one-per-minute allowance in
+  // auth.create_password_reset() on a token nobody can be sent. An
+  // administrator is at the keyboard for every caller of this function
+  // (routes/staff.js and, via it, routes/tenants.js), so they can be told
+  // plainly rather than given a broken or dangerous link.
+  const base = mail.publicUrl();
+  if (!base) {
+    throw new HttpError(500, 'Cannot send a login link: PUBLIC_URL is not configured on this deployment.');
+  }
+
   const token = crypto.randomBytes(32).toString('base64url');
   const tokenHash = crypto.createHash('sha256').update(token).digest();
   const TTL_MINUTES = 24 * 60;
@@ -95,8 +108,6 @@ async function sendLoginLink(req, email, { invite }) {
   });
   if (!fullName) throw new HttpError(400, 'A link was sent less than a minute ago, or the account is disabled.');
 
-  const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
-  const base = configured || `${req.get('x-forwarded-proto') || req.protocol || 'https'}://${req.get('host')}`;
   const link = `${base}/?reset=${encodeURIComponent(token)}`;
 
   const siteName = await db.withIdentity(req.session.userId, async (client) => {

@@ -187,6 +187,20 @@ router.post('/signup', wrap(async (req, res) => {
       'Several trials have been started from this connection in the last hour. Try again later, or email us and we will set one up.'));
   }
 
+  // The email this sends is a link, and PUBLIC_URL (lib/mail.js publicUrl())
+  // is the only origin it may be built from — never the request's Host (see
+  // mail.js for why). A trial confirmation with no link is close to useless
+  // to the person waiting for it, so with no PUBLIC_URL the whole request is
+  // refused here, before a pending row is written or a token minted, with a
+  // page the prospective customer can read and a clear error in the log for
+  // whoever operates this.
+  const base = mail.publicUrl();
+  if (!base) {
+    console.error('[signup] refusing a trial request: PUBLIC_URL is not configured on this deployment');
+    return res.status(500).send(problem('Sorry, something went wrong',
+      'We could not start that trial just now. Try again shortly, or email us and we will set it up by hand.'));
+  }
+
   const token = crypto.randomBytes(32).toString('base64url');
   const tokenHash = crypto.createHash('sha256').update(token).digest();
 
@@ -223,8 +237,6 @@ router.post('/signup', wrap(async (req, res) => {
       'This email address is already on CheckSteady. Sign in instead, or use the "forgotten password" link on the sign-in screen.'));
   }
 
-  const base = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '')
-    || `${req.get('x-forwarded-proto') || req.protocol || 'https'}://${req.get('host')}`;
   const link = `${base}/signup/confirm?token=${encodeURIComponent(token)}`;
   await mail.send({
     to: email,

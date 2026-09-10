@@ -23,6 +23,11 @@
 
 const assert = require('assert/strict');
 process.env.HUT_MAIL_SINK = '1';
+// A stand-in for what render.yaml sets in every real deployment. Without it
+// the trial-verification email now refuses outright rather than build a
+// link from the test server's own 127.0.0.1 (see lib/mail.js publicUrl()) —
+// the dedicated test further down unsets and restores it around itself.
+process.env.PUBLIC_URL = 'https://hut-check-in.onrender.com';
 const app = require('../server');
 const { closePool, withOwner, withOwnerIn, migrate } = require('../database');
 const tenancy = require('../lib/tenancy');
@@ -284,6 +289,30 @@ async function main() {
     assert.equal(res.status, 400);
     assert.match(await res.text(), /will not reach you/);
     assert.equal(await tenantBySlug('throwaway'), undefined);
+  });
+
+  await test('with PUBLIC_URL unset, a trial request is refused rather than confirmable with a link built from the request', async () => {
+    const prior = process.env.PUBLIC_URL;
+    try {
+      delete process.env.PUBLIC_URL;
+      const before = await withOwner(async (c) =>
+        (await c.query('select count(*)::int n from public.signup_requests')).rows[0].n);
+      const sinkBefore = (global.__mailSink || []).length;
+
+      const res = await post({ full_name: 'No Link', email: 'no-link@centre.example',
+                               centre_name: 'No Link Centre', seed: 'empty' },
+                             { 'x-forwarded-for': '203.0.113.99' });
+      const text = await res.text();
+      assert.equal(res.status, 500, text);
+      assert.doesNotMatch(text, /"ok"\s*:/, 'a browser must not be answered with JSON');
+
+      const after = await withOwner(async (c) =>
+        (await c.query('select count(*)::int n from public.signup_requests')).rows[0].n);
+      assert.equal(after, before, 'a pending request was written though no link could be built for it');
+      assert.equal((global.__mailSink || []).length, sinkBefore, 'an email went out with no configured origin for its link');
+    } finally {
+      if (prior === undefined) delete process.env.PUBLIC_URL; else process.env.PUBLIC_URL = prior;
+    }
   });
 
   await test('an incomplete form is refused', async () => {

@@ -34,15 +34,6 @@ function tokenHash(token) {
   return crypto.createHash('sha256').update(token).digest();
 }
 
-// The link has to point back at this deployment. Prefer an explicit
-// PUBLIC_URL; fall back to the proxy's forwarded host, which Render sets.
-function baseUrl(req) {
-  const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
-  if (configured) return configured;
-  const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
-  return `${proto}://${req.get('host')}`;
-}
-
 // POST /api/password-reset  { email }
 router.post('/', wrap(async (req, res) => {
   const email = String((req.body || {}).email || '').trim();
@@ -55,6 +46,19 @@ router.post('/', wrap(async (req, res) => {
     return res.status(429).json({ error: 'Too many requests. Wait five minutes and try again.' });
   }
   auth.noteFailure('password-reset', req.ip);
+
+  // The email this endpoint exists to send is a link, and PUBLIC_URL
+  // (lib/mail.js publicUrl()) is the only origin it may be built from —
+  // never the request's Host (see mail.js for why). A reset email with no
+  // link is close to useless to whoever is waiting for it, so with no
+  // PUBLIC_URL the whole operation is refused, loudly, server-side, before
+  // anything below has a chance to depend on whether the address is real.
+  // Checking here, ahead of the address lookup, keeps this route's answer
+  // identical for a real address and a made-up one either way — the
+  // property the comment at the top of this file promises.
+  if (!mail.publicUrl()) {
+    throw new Error('Cannot send a password-reset email: PUBLIC_URL is not configured on this deployment.');
+  }
 
   // Answer before doing anything expensive if the input is obviously not an
   // address. Still a 200: a 400 here would leak that the format check ran.
@@ -72,7 +76,7 @@ router.post('/', wrap(async (req, res) => {
     // null means: no such active account, or a link was issued seconds ago.
     // Either way the browser is told the same thing.
     if (fullName) {
-      const link = `${baseUrl(req)}/?reset=${encodeURIComponent(token)}`;
+      const link = `${mail.publicUrl()}/?reset=${encodeURIComponent(token)}`;
       const { subject, text } = mail.resetEmail({ fullName, link, minutes: TTL_MINUTES });
       await mail.send({ to: email, subject, text });
     }
