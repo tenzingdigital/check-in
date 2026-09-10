@@ -61,6 +61,7 @@ module.exports = [
   { area: 'Gate and register', name: 'The attention list (open breaches, worst first)', method: 'GET', path: () => '/api/attention', expect: STAFF },
   { area: 'Gate and register', name: 'Replay events recorded while offline', method: 'POST', path: () => '/api/sync', body: () => ({ events: [] }), expect: STAFF },
   { area: 'Gate and register', name: "Read the site's settings", method: 'GET', path: () => '/api/settings', expect: STAFF },
+  { area: 'Gate and register', name: 'The permitted absence periods (Christmas, Ramadan, Easter, the summer school holiday)', method: 'GET', path: () => '/api/settings/absence-windows', expect: STAFF },
   { area: 'Gate and register', name: 'Buildings, rooms and who is in them', method: 'GET', path: () => '/api/buildings', expect: STAFF },
 
   // ---- evacuation and roll call (every staff member) -----------------------
@@ -106,6 +107,9 @@ module.exports = [
   { area: 'Administration', name: "Export a resident's whole record (Art. 15); logged", method: 'GET', path: (fx) => `/api/residents/${fx.residentId}/export?reason=matrix`, expect: ADMIN },
   { area: 'Administration', name: 'Erase a resident and their history (Art. 17)', method: 'DELETE', path: (fx) => `/api/residents/${fx.residentId}`, body: (fx) => ({ reason: 'matrix', confirm_name: fx.residentName }), expect: ADMIN, fresh: 'resident' },
   { area: 'Administration', name: "Change the site's settings, retention and feature switches", method: 'PATCH', path: () => '/api/settings', body: () => ({ site_name: 'Matrix Site' }), expect: ADMIN },
+  { area: 'Administration', name: "Send the Weekly register update by email now", method: 'POST', path: () => '/api/settings/weekly-report/send', body: () => ({}), expect: ADMIN },
+  { area: 'Administration', name: 'Add a permitted absence period', method: 'POST', path: () => '/api/settings/absence-windows', body: () => ({ name: `Matrix ${crypto.randomInt(1e6)}`, from_date: '2030-01-01', to_date: '2030-01-02' }), expect: ADMIN },
+  { area: 'Administration', name: 'Remove a permitted absence period', method: 'DELETE', path: (fx) => `/api/settings/absence-windows/${fx.absenceWindowId}`, expect: ADMIN, fresh: 'absenceWindow' },
   { area: 'Administration', name: 'List staff accounts', method: 'GET', path: () => '/api/staff', expect: STAFF, note: 'Names, roles and last sign-in; no more than the header of the app already shows' },
   { area: 'Administration', name: 'Invite a staff member', method: 'POST', path: () => '/api/staff', body: () => ({ email: `m${crypto.randomInt(1e9)}@hut.example`, full_name: 'Matrix Staff', role: 'guard' }), expect: ADMIN },
   { area: 'Administration', name: 'Send a staff member a login link', method: 'POST', path: (fx) => `/api/staff/${fx.staffId}/link`, body: () => ({}), expect: ADMIN },

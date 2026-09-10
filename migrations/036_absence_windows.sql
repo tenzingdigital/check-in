@@ -22,7 +22,7 @@ drop policy if exists absence_windows_read on public.absence_windows;
 create policy absence_windows_read on public.absence_windows for select using (public.is_staff());
 drop policy if exists absence_windows_admin on public.absence_windows;
 create policy absence_windows_admin on public.absence_windows for all using (public.is_admin()) with check (public.is_admin());
-revoke all on public.absence_windows from anon, public;
+revoke all on public.absence_windows from anon, public, authenticated;
 grant select, insert, delete on public.absence_windows to authenticated;
 grant usage on sequence public.absence_windows_id_seq to authenticated;
 

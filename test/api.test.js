@@ -2784,8 +2784,13 @@ async function main() {
         assert.equal(t.status, 201, t.text);
         fx.tenantId = t.json.id; fx.tenantSlug = `centre-${n}`;
       },
+      absenceWindow: async () => {
+        const w = await clients.admin.fetch("/api/settings/absence-windows", { method: "POST", body: { name: `Matrix ${Math.floor(Math.random() * 1e6)}`, from_date: "2030-01-01", to_date: "2030-01-02" } });
+        assert.equal(w.status, 201, w.text);
+        fx.absenceWindowId = w.json.id;
+      },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "absence", "roster", "tenant"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "visit", "absence", "roster", "tenant", "absenceWindow"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 

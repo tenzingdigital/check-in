@@ -48,6 +48,7 @@ validation.
 | The attention list (open breaches, worst first)<br><code>GET /api/attention</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Replay events recorded while offline<br><code>POST /api/sync</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Read the site's settings<br><code>GET /api/settings</code> | — | ✓ | ✓ | ✓ | ✓ |
+| The permitted absence periods (Christmas, Ramadan, Easter, the summer school holiday)<br><code>GET /api/settings/absence-windows</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Buildings, rooms and who is in them<br><code>GET /api/buildings</code> | — | ✓ | ✓ | ✓ | ✓ |
 
 ## Evacuation and roll call
@@ -108,6 +109,9 @@ validation.
 | Export a resident's whole record (Art. 15); logged<br><code>GET /api/residents/:id/export</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Erase a resident and their history (Art. 17)<br><code>DELETE /api/residents/:id</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Change the site's settings, retention and feature switches<br><code>PATCH /api/settings</code> | — | ✗ | ✗ | ✓ | ✓ |
+| Send the Weekly register update by email now<br><code>POST /api/settings/weekly-report/send</code> | — | ✗ | ✗ | ✓ | ✓ |
+| Add a permitted absence period<br><code>POST /api/settings/absence-windows</code> | — | ✗ | ✗ | ✓ | ✓ |
+| Remove a permitted absence period<br><code>DELETE /api/settings/absence-windows/:id</code> | — | ✗ | ✗ | ✓ | ✓ |
 | List staff accounts<br><small>Names, roles and last sign-in; no more than the header of the app already shows</small><br><code>GET /api/staff</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Invite a staff member<br><code>POST /api/staff</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Send a staff member a login link<br><code>POST /api/staff/:id/link</code> | — | ✗ | ✗ | ✓ | ✓ |

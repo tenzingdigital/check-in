@@ -4740,8 +4740,8 @@ GRANT ALL ON FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_t
 -- Name: TABLE absence_windows; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.absence_windows TO authenticated;
 GRANT ALL ON TABLE __TENANT__.absence_windows TO service_role;
+GRANT SELECT,INSERT,DELETE ON TABLE __TENANT__.absence_windows TO authenticated;
 
 
 --
