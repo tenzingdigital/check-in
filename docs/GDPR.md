@@ -225,17 +225,20 @@ administrators: each resident at or over a figure, their name and room
 label, and the count of nights against the site's House Rules settings.
 
 The Sunday Weekly register update (migration 035), where the centre has
-turned it on, goes to the addresses an administrator configures under
-Settings — which may be outside the centre, since nothing ties them to a
-staff account. It carries residents' names, their building and room, the
-span of nights each was away and whether every night falls inside an
-authorised absence, who departed and when, and the one-line note a
-supervisor wrote about a room for the vacancy line.
+turned it on — or at any time an administrator sends it by hand from
+Settings, switch or no switch — goes to the addresses an administrator
+configures under Settings — which may be outside the centre, since nothing
+ties them to a staff account. It carries residents' names, whether a
+resident is marked as a child, their building and room, the span of nights
+each was away and whether every night falls inside an authorised absence,
+who departed and when, and the one-line note a supervisor wrote about a
+room for the vacancy line.
 
-Neither message carries a date of birth, an identity-document number, an
-evacuation need, or any free text about a person. The room note is the only
-free text involved, and the schema and the admin screen both say it is
-about the room, never the resident.
+Neither message carries a date of birth — though the Sunday report marks a
+resident under the site's adult age as a child — an identity-document
+number, an evacuation need, or any free text about a person. The room note
+is the only free text involved, and the schema and the admin screen both
+say it is about the room, never the resident.
 
 ---
 
