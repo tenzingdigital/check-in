@@ -179,6 +179,21 @@ router.post('/:id/weekly-report', wrap(async (req, res) => {
   const on = req.body?.on === true;
 
   const row = await db.withIdentity(req.session.userId, async (client) => {
+    // A guard cannot carry the flag: the check constraint
+    // (profiles_weekly_report_not_guard, migration 037) is the real
+    // guarantee, reached by any writer, but 23514 is in
+    // USER_FACING_SQLSTATES and translateDbError forwards a check
+    // constraint's message verbatim — text Postgres wrote, naming the
+    // constraint, not text written for a manager to read. This pre-check
+    // gives the 400 an actual sentence instead. Scoped to an admin caller
+    // ticking someone on: anyone else's request is already refused below,
+    // by the update matching no rows, the same as every other route here.
+    if (on && req.session.role === 'admin') {
+      const { rows: [target] } = await client.query('select role from profiles where id = $1', [id]);
+      if (target && target.role === 'guard') {
+        throw new HttpError(400, 'A guard cannot receive the weekly report. Promote them to supervisor or admin first.');
+      }
+    }
     const { rows } = await client.query(
       'update profiles set weekly_report = $2 where id = $1 returning id, weekly_report',
       [id, on],

@@ -150,13 +150,17 @@ router.delete('/demo-data', wrap(async (req, res) => {
 const mail = require('../lib/mail');
 const weekly = require('../lib/weeklyReport');
 
-// The web tier has a request to build a link from, unlike the nightly job
-// (jobs.js reportLink()): PUBLIC_URL if it is set, else the origin the
-// browser actually used, same pattern as routes/password-reset.js baseUrl().
-function reportLink(req) {
+// Same rule as the nightly job (jobs.js reportLink()): PUBLIC_URL, or no
+// link at all — never one built from the request. A route has a Host and
+// an X-Forwarded-Proto to fall back on, but this app sets trust proxy with
+// no Host allowlist, and the CSRF check only compares Origin to Host, which
+// a direct request satisfies. Synthesising a link from either would let an
+// authenticated admin cause a genuine, DKIM-signed email to reach every
+// ticked supervisor and administrator carrying an origin nobody chose.
+// compose() already handles link being absent.
+function reportLink() {
   const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
-  const base = configured || `${req.get('x-forwarded-proto') || req.protocol || 'https'}://${req.get('host')}`;
-  return `${base}/admin.html`;
+  return configured ? `${configured}/admin.html` : null;
 }
 
 router.post('/weekly-report/send', wrap(async (req, res) => {
@@ -171,7 +175,7 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
     const { from, to } = weekly.lastWeek(s.today);
     await client.query('select note_report($1, $2, $3, $4)', ['weekly', 'sent by hand', from, to]);
     const { rows } = await client.query('select * from weekly_register_rows($1, $2)', [from, to]);
-    const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows, link: reportLink(req) });
+    const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows, link: reportLink() });
     let sent = 0;
     for (const email of staff) {
       const mailed = await mail.send({ to: email, subject, text });

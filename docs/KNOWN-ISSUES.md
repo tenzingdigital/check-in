@@ -363,6 +363,34 @@ tables were never a schema mismatch, just wasted objects. Worth a follow-up
 assertion that a provisioned tenant schema contains nothing outside the
 per-tenant list in `docs/MULTI-TENANCY.md`.
 
+### 19g. Migration 037 is not code-rollback-safe
+
+Migration 037 (the Sunday report's recipients moving to the staff record)
+drops `app_settings.weekly_report_recipients`. The code deployed before this
+branch selects that column unconditionally in `GET /api/settings`. During
+the overlap window of a rolling deploy — the migration has run, but an
+old-code instance is still serving requests — that instance's `select`
+names a column that no longer exists, and every request to
+`GET /api/settings` from it 500s: the Settings tab breaks until the old
+instance is replaced. The same thing happens, and stays happening, after
+any code-only rollback to the previous release (redeploying old code
+without reversing the migration): the Settings tab 500s until someone
+restores the column by hand or rolls forward again.
+
+Blast radius is small: one route, one admin-only screen, a single Render
+instance (`hut-check-in` runs one, so there is no multi-instance window to
+extend it), and the column was never populated — migration 037's own
+comment records that it shipped on 10 September 2026 and was never
+configured, since production had no mail credentials. Nothing else on the
+register is affected.
+
+**If a rollback is ever needed:** before or instead of redeploying the
+previous release, run `alter table app_settings add column if not exists
+weekly_report_recipients text;` by hand. Nothing needs to read or write it
+back — once `profiles.weekly_report` exists, the old column only has to be
+present, not populated — and the Settings tab recovers immediately. There
+is no down-migration script; migrations here only ever run forward.
+
 ### 19. `lib/` and `routes/` have no linter and no type checking
 
 `check.sh` runs `node --check` on each file, which catches syntax errors and

@@ -2229,6 +2229,39 @@ async function main() {
     assert.equal(none.status, 400);
   });
 
+  await test("the send-now route builds the link from PUBLIC_URL only — never from the request — and omits it cleanly when unset", async () => {
+    const target = await wkAdmin.fetch("/api/staff", {
+      method: "POST",
+      body: { email: `link${Math.floor(Math.random() * 1e9)}@example.ie`, full_name: "Link Weekly", role: "admin" },
+    });
+    assert.equal(target.status, 201, target.text);
+    assert.equal((await wkAdmin.fetch(`/api/staff/${target.json.id}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
+
+    const prior = process.env.PUBLIC_URL;
+    try {
+      process.env.PUBLIC_URL = "https://hut-check-in.onrender.com";
+      const before = (global.__mailSink || []).length;
+      const sent = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
+      assert.equal(sent.status, 200, sent.text);
+      const mails = (global.__mailSink || []).slice(before);
+      assert.ok(mails.length >= 1, "expected at least one email");
+      assert.ok(mails.every((m) => m.text.includes("Open the app: https://hut-check-in.onrender.com/admin.html")), "the link comes from PUBLIC_URL, matching the job path exactly");
+
+      delete process.env.PUBLIC_URL;
+      const before2 = (global.__mailSink || []).length;
+      const sent2 = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
+      assert.equal(sent2.status, 200, sent2.text);
+      const mails2 = (global.__mailSink || []).slice(before2);
+      assert.ok(mails2.length >= 1, "expected at least one email");
+      assert.ok(mails2.every((m) => !/https?:\/\//.test(m.text)), "no link is synthesised from the request when PUBLIC_URL is unset — never a broken or invented link");
+      assert.ok(mails2.every((m) => /Admin → Reports/.test(m.text)), "names where the report lives instead of a link");
+    } finally {
+      if (prior === undefined) delete process.env.PUBLIC_URL; else process.env.PUBLIC_URL = prior;
+    }
+
+    assert.equal((await wkAdmin.fetch(`/api/staff/${target.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
+  });
+
   await test("the nightly step sends on a Sunday when on, and records why it did not otherwise", async () => {
     const { weeklyRegister } = require("../jobs");
     const mickId = (await withOwner((c) => c.query(`select id from auth.users where email = 'mick@example.ie'`))).rows[0].id;
@@ -2331,6 +2364,10 @@ async function main() {
     assert.equal(demoted.status, 200, demoted.text);
     const guardTry = await wkAdmin.fetch(`/api/staff/${id}/weekly-report`, { method: "POST", body: { on: true } });
     assert.equal(guardTry.status, 400);
+    // The message must be one written for a manager to read, not the check
+    // constraint's own text (which names "profiles_weekly_report_not_guard").
+    assert.match(guardTry.json.error || "", /guard/i);
+    assert.doesNotMatch(guardTry.json.error || "", /constraint|relation|profiles_weekly_report_not_guard/i, "raw Postgres text reached the toast");
 
     // Promote back, tick the flag, then demote: the demotion must succeed
     // and quietly clear the flag rather than fail because of it.
