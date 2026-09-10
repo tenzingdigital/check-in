@@ -231,7 +231,8 @@ recurring reports below, one carries resident data and one does not.
 The nightly House Rules reminder (migration 032), where the centre has
 turned it on, goes to the centre's own active supervisors and
 administrators: each resident at or over a figure, their name and room
-label, and the count of nights against the site's House Rules settings.
+label, and two counts against the site's House Rules settings — consecutive
+nights missed, and nights missed within the configured window.
 
 The Sunday Weekly register update (migrations 035 and 037), where the
 centre has turned it on — or at any time an administrator sends it by hand
@@ -246,7 +247,7 @@ they can also be downloaded as a spreadsheet.
 Neither message carries a date of birth, an identity-document number, an
 evacuation need, or any free text about a person. The House Rules reminder
 is the only one of the two that names a resident, and it carries nothing
-beyond a name, a room label and a night count.
+beyond a name, a room label and the two night counts above.
 
 ---
 

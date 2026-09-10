@@ -126,14 +126,15 @@ existing advisory lock keeps two instances from racing.
 every file in `migrations/` to `public` only; a tenant schema (`t_*`) gets
 `tenant/template.sql`, once, at provisioning (`provision_tenant`), and
 nothing since revisits it. Every migration from 030 onward assumes a
-per-tenant object lives in `public.` — 035 and 036 are the two newest,
-`weekly_absence_spans()`, `weekly_register_rows_unchecked()`,
-`app_settings.weekly_report_email` / `weekly_report_recipients` (035) and
-`absence_windows` (036) among them — so any `t_*` schema that was already
-provisioned before those migrations landed does not have these objects, and
-would 500 on `GET /api/settings`, `GET /api/buildings` and on authorising a
-holiday against permitted periods, the moment a request resolves into that
-schema.
+per-tenant object lives in `public.` — 035, 036 and 037 are the three
+newest, `weekly_absence_spans()`, `weekly_register_rows_unchecked()`,
+`app_settings.weekly_report_email` (035), `absence_windows` (036) and
+`profiles.weekly_report` with its guard trigger and check constraint (037)
+among them — so any `t_*` schema that was already provisioned before those
+migrations landed does not have these objects, and would 500 on
+`GET /api/settings`, `GET /api/buildings`, on authorising a holiday against
+permitted periods, or on ticking a supervisor or admin to receive the
+Sunday report, the moment a request resolves into that schema.
 
 **Pre-deploy check, until the ledger is built:** run this against the
 production database before deploying a migration numbered 030 or higher for

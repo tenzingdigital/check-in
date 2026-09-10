@@ -53,11 +53,13 @@ way, so no explained breach can be pushed off the list.
 `database.js` migrates `public` only. A `t_*` tenant schema gets
 `tenant/template.sql` once, at provisioning, and nothing revisits it after
 that. Every per-tenant migration numbered 030 or higher — most recently 035
-(the Weekly register update) and 036 (permitted absence periods) — assumes
-its objects already exist in every schema that answers a request; a tenant
+(the Weekly register update), 036 (permitted absence periods) and 037
+(the Sunday report's recipients moving to the staff record) — assumes its
+objects already exist in every schema that answers a request; a tenant
 schema provisioned before one of those migrations landed does not have it,
 and would 500 on the routes that need it (`GET /api/settings`,
-`GET /api/buildings`, authorising a holiday). `docs/MULTI-TENANCY.md`
+`GET /api/buildings`, authorising a holiday, ticking a supervisor or admin
+to receive the Sunday report). `docs/MULTI-TENANCY.md`
 ("Migration ordering") already says boot must refuse to serve a schema that
 is behind; nothing implements that check, and nothing back-fills a schema
 that falls behind.

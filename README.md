@@ -482,7 +482,7 @@ out of the two working apps:
   summary, the movement log, *Out and back* (one row per absence: building,
   room, date and time out, date and time back, hours away, who signed
   each), the drill record, visitors and *Absent overnight* for a date
-  range, the *Weekly register update* (the Sunday report to head office:
+  range, the *Weekly register update* (the report behind the Sunday email:
   absence spans with approval in words, the weekend's, departures, rooms
   under maintenance or with free beds), and occupancy, the evacuation list and *Absent now* as they stand, each as a CSV download or a printable page.
   A reason is required and every export is on the audit record with the
