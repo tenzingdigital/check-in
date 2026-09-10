@@ -1696,7 +1696,11 @@ $("stWeeklySend").addEventListener("click", async () => {
   const out = await guarded(() => apiPost("/api/settings/weekly-report/send", {}), (err) => toast("Not sent: " + err.message, "err"));
   $("stWeeklySend").disabled = false;
   if (!out) return;
-  toast(`Sent for ${out.from} to ${out.to} to ${out.recipients} address${out.recipients === 1 ? "" : "es"}`, "ok");
+  if (out.sent === 0) {
+    toast(`Nothing delivered for ${out.from} to ${out.to}: configure email (RESEND_API_KEY and MAIL_FROM) on the service`, "err");
+  } else {
+    toast(`Delivered for ${out.from} to ${out.to} to ${out.sent} of ${out.recipients} address${out.recipients === 1 ? "" : "es"}`, "ok");
+  }
 });
 
 /* ========================================================================

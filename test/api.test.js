@@ -2159,6 +2159,10 @@ async function main() {
     const sent = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
     assert.equal(sent.status, 200, sent.text);
     assert.equal(sent.json.recipients, 2);
+    // The sink (HUT_MAIL_SINK=1) always answers not delivered, so `sent` is
+    // pinned at 0 here — this is the exact contract the admin.html toast
+    // relies on to warn rather than confirm when nothing actually went out.
+    assert.equal(sent.json.sent, 0);
     const { lastWeek } = require("../lib/weeklyReport");
     assert.deepEqual({ from: sent.json.from, to: sent.json.to }, lastWeek(siteToday()));
     const mails = (global.__mailSink || []).slice(before);
