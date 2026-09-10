@@ -13,11 +13,21 @@ re-run it, and commit both. Two rules the site's Content-Security-Policy
 imposes and this file must respect:
 
   * no JavaScript on the site at all (default-src 'none', no script-src), so
-    anything interactive is a <details> or a plain form — with ONE deliberate
-    exception: the Cloudflare Web Analytics beacon, gated by CF_BEACON_TOKEN
-    below. It is the only <script> this file ever emits, it is a single
-    external, deferred file with no inline code, and it is inert (nothing is
-    written to the page) while the token is empty;
+    anything interactive is a <details> or a plain form — with now TWO
+    deliberate exceptions:
+      1. the Cloudflare Web Analytics beacon, gated by CF_BEACON_TOKEN below.
+         It is a single external, deferred file with no inline code, and it
+         is inert (nothing is written to the page) while the token is empty;
+      2. site/trial-submit.js, loaded only on /trial/ (via page_script= in
+         page(), not site-wide). The plain-form-no-JS rule made a real trial
+         sign-up look broken on a slow phone connection (10 Sep 2026): tap
+         Email me the link, nothing visibly happens until the page navigates,
+         so people assumed it had failed and tapped again. The script only
+         disables the submit button and relabels it while the POST is in
+         flight — it never calls preventDefault(), so the form still submits
+         normally if the script fails to load or errors. Both exceptions are
+         external, deferred files with no inline code, which is what keeps
+         script-src a plain allowlist instead of needing computed hashes;
   * no style="" attributes (style-src 'self'), so every rule lives in
     site/site.css.
 
@@ -226,7 +236,7 @@ def faq_html(items):
         for q, a in items)
     return f'  <div class="faq">\n{rows}\n  </div>'
 
-def page(path, title, desc, trail, body, faqs=None, breadcrumb_ld=True):
+def page(path, title, desc, trail, body, faqs=None, breadcrumb_ld=True, page_script=None):
     canon = SITE + path
     extra = []
     if faqs:
@@ -241,6 +251,12 @@ def page(path, title, desc, trail, body, faqs=None, breadcrumb_ld=True):
         })
     doc = head(title, desc, canon, extra) + "\n<body>\n" + nav() + "\n<main id=\"main\">\n"
     doc += crumb(trail) + "\n" + body + "\n</main>\n" + foot()
+    if page_script:
+        # Deliberately per-page, not in head()/foot(): see the JavaScript
+        # exceptions noted in this file's module docstring. Deferred, so it
+        # never blocks rendering, and placed at the end of body so the form
+        # it enhances already exists when it runs.
+        doc = doc.replace("</body>\n</html>", f'<script defer src="{page_script}"></script>\n</body>\n</html>')
     full = os.path.join(OUT, path.strip("/"), "index.html") if path != "/" else os.path.join(OUT, "index.html")
     os.makedirs(os.path.dirname(full), exist_ok=True)
     with open(full, "w") as f:
@@ -622,7 +638,7 @@ faqs = [
 form = f"""    <div class="signup">
       <h2>Start your free trial</h2>
       <p class="sub">One site, seven days, no card. We will email you a link to open it.</p>
-      <form method="post" action="{APP}/signup">
+      <form method="post" action="{APP}/signup" id="trial-signup">
         <div class="field-row">
           <label for="su-name">Your name</label>
           <input id="su-name" name="full_name" type="text" required maxlength="120"
@@ -685,7 +701,8 @@ body = (
 page("/trial/",
      "Start a free trial — CheckSteady",
      "Try CheckSteady free on a single site for seven days. No card. Start with sample residents to explore, or empty and ready for your own list.",
-     [HOME, ("/trial/", "Free trial")], body, faqs)
+     [HOME, ("/trial/", "Free trial")], body, faqs,
+     page_script="/trial-submit.js")
 
 
 print("site: wrote", len(WRITTEN), "pages")

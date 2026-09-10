@@ -194,18 +194,29 @@ services:
     # that submit SILENTLY — no console error, the button simply does nothing —
     # so the app origin is named here explicitly and nowhere else is allowed.
     #
-    # script-src and connect-src are the other exception, added unconditionally
-    # for the Cloudflare Web Analytics beacon (tools/build-site.py, CF_BEACON_TOKEN):
-    # the beacon loads from static.cloudflareinsights.com and reports to
-    # cloudflareinsights.com, and it cannot do either without these even before
-    # a token is set. Turning analytics on is then one constant in one file,
-    # not a CSP change and a page change together. No 'unsafe-inline' — the
-    # beacon is external and deferred, never inline — and nothing else here is
-    # loosened.
+    # script-src and connect-src are the other exceptions.
+    #
+    # https://static.cloudflareinsights.com is for the Cloudflare Web
+    # Analytics beacon (tools/build-site.py, CF_BEACON_TOKEN): the beacon
+    # loads from there and reports to cloudflareinsights.com (connect-src),
+    # and it cannot do either without these even before a token is set.
+    # Turning analytics on is then one constant in one file, not a CSP change
+    # and a page change together.
+    #
+    # 'self' is for site/trial-submit.js, the only other <script> the site
+    # ever serves (see tools/build-site.py's docstring): it disables the
+    # trial form's submit button and relabels it while the POST is in
+    # flight, so a slow connection reads as "sending" rather than "nothing
+    # happened" (10 Sep 2026). It is loaded only by /trial/, but this header
+    # applies to every path Render can match here, so the allowance is
+    # site-wide even though the <script> tag itself is not.
+    #
+    # No 'unsafe-inline' anywhere — both exceptions are external, deferred
+    # files with no inline code — and nothing else here is loosened.
     headers:
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; script-src https://static.cloudflareinsights.com; connect-src https://cloudflareinsights.com; base-uri 'none'; form-action 'self' https://app.checksteady.com; frame-ancestors 'none'"
+        value: "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; script-src 'self' https://static.cloudflareinsights.com; connect-src https://cloudflareinsights.com; base-uri 'none'; form-action 'self' https://app.checksteady.com; frame-ancestors 'none'"
       - path: /*
         name: X-Content-Type-Options
         value: nosniff
