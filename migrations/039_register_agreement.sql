@@ -1,4 +1,4 @@
--- 038: three writers that disagreed with each other, and one cap that counted
+-- 039: three writers that disagreed with each other, and one cap that counted
 -- the wrong thing.
 --
 -- 1 and 2 are the same defect from both ends. Migration 028 taught close-out
@@ -308,23 +308,14 @@ $$;
 
 
 -- ---------------------------------------------------------------------------
--- 4. The recipient list decides where residents' names, rooms, child markers
---    and absence history are emailed every Sunday. It had `length <= 400` and
---    nothing else, while home_countries -- added three migrations earlier --
---    gets a real regex. routes/settings.js validates well, but Tao 5 says the
---    database is the thing deciding, and jobs.js splits this column on commas
---    with no re-validation, so any other writer reaches a `to:` header.
---    Empty is allowed: it is how the feature is switched off.
+-- 4. WITHDRAWN. This added a shape constraint to
+--    app_settings.weekly_report_recipients. Migration 037 (upstream, the same
+--    day) removed that column entirely: recipients moved to a flag on the
+--    staff record, so every recipient is now a known person with a login
+--    rather than an arbitrary address typed into Settings. That is a better
+--    answer than validating the string, and the constraint would have failed
+--    at boot against a column that no longer exists.
 -- ---------------------------------------------------------------------------
-alter table public.app_settings
-  drop constraint if exists weekly_report_recipients_shape;
-alter table public.app_settings
-  add constraint weekly_report_recipients_shape
-  check (
-    coalesce(weekly_report_recipients, '') = ''
-    or weekly_report_recipients ~ '^[^[:space:],@]+@[^[:space:],@]+\.[^[:space:],@]+(,[^[:space:],@]+@[^[:space:],@]+\.[^[:space:],@]+)*$'
-  );
-
 
 -- ---------------------------------------------------------------------------
 -- 5. erase_resident() counted two tables and reported the total as the proof

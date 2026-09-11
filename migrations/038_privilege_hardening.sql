@@ -1,4 +1,4 @@
--- 037: close the privileges that row-level security was never able to govern.
+-- 038: close the privileges that row-level security was never able to govern.
 --
 -- 001 reproduces Supabase's default privileges on purpose (001:178-186) so the
 -- policies, not the grants, are what the suite proves. That was the right call
