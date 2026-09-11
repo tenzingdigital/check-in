@@ -137,7 +137,7 @@ $("centreList").addEventListener("click", async (e) => {
   if (!b) return;
   const typed = prompt(`Closing "${b.dataset.slug}" drops its data and ends its logins. This is the end of the deletion timeline in the DPA. Type the slug to confirm:`);
   if (typed === null) return;
-  const out = await guarded(() => api(`/api/tenants/${b.dataset.close}`, { method: "DELETE", body: JSON.stringify({ confirm_slug: typed }), headers: { "content-type": "application/json" } }), (err) => toast("Not closed: " + err.message, "err"));
+  const out = await guarded(() => api(`/api/tenants/${b.dataset.close}`, { method: "DELETE", body: { confirm_slug: typed } }), (err) => toast("Not closed: " + err.message, "err"));
   if (out) { toast("Centre closed", "ok"); loadCentres(); }
 });
 

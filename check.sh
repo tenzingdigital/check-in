@@ -103,12 +103,26 @@ if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/nu
 else
   step "Database, HTTP and trial suites"
   echo "SKIPPED — PostgreSQL server binaries not found (install postgresql-16)"
+  skipped=1
 fi
 
 echo
-if [ "$fail" -eq 0 ]; then
-  echo "All checks passed."
-else
+if [ "$fail" -ne 0 ]; then
   echo "CHECKS FAILED — see above." >&2
+  exit 1
 fi
-exit "$fail"
+
+# A skip is not a pass. README says to run this before every deploy, and
+# package.json maps it to `npm test` — so on any machine without the Postgres
+# binaries (every mac, including the one this is developed on) the deploy gate
+# used to print "All checks passed" and exit 0 having compiled some JavaScript
+# and tested nothing. Exit 2 so a human notices and CI cannot go green on it.
+# ALLOW_SKIP=1 is the deliberate way to say "syntax only, I know".
+if [ "${skipped:-0}" -eq 1 ] && [ "${ALLOW_SKIP:-0}" != "1" ]; then
+  echo "INCOMPLETE — JavaScript parses, but the database, HTTP and trial suites did not run." >&2
+  echo "Install postgresql-16 and re-run, or set ALLOW_SKIP=1 to accept a syntax-only check." >&2
+  exit 2
+fi
+
+echo "All checks passed."
+exit 0

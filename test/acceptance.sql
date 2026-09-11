@@ -4,6 +4,20 @@
 -- Assertion helper. RLS does not raise on SELECT, it silently filters rows to
 -- zero, so reporting on success/failure alone would call a blocked read
 -- "ALLOWED". Report the affected row count too.
+-- Assertion helper, same shape as compliance.sql's. This file had none: every
+-- value in it was PRINTED and compared by eye, including the data-minimisation
+-- check that docs/procedures/RISK-REGISTER.md R3 cites as its evidence. A
+-- regression printed a different number and the suite still exited 0.
+create or replace function pg_temp.expect(label text, actual anyelement, expected anyelement)
+returns void language plpgsql as $$
+begin
+  if actual is distinct from expected then
+    raise exception 'ASSERTION FAILED: % — expected %, got %', label, expected, actual;
+  end if;
+  raise notice '  ok  %', label;
+end;
+$$;
+
 create or replace function pg_temp.try(label text, stmt text) returns text
 language plpgsql as $$
 declare n bigint;
@@ -49,12 +63,18 @@ select full_name, age_years, is_adult, presence
 from public.v_resident_status order by last_name;
 
 \echo '--- A2: data minimisation — rows of residents.date_of_birth each role sees'
-select 'guard' as role, count(*) as dob_rows_visible from public.residents;
+-- Asserted, not printed. This is RISK-REGISTER R3's evidence.
+select pg_temp.expect('a guard reads 0 rows of residents (no date of birth)',
+                      (select count(*) from public.residents), 0::bigint);
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
-select 'supervisor' as role, count(*) as dob_rows_visible from public.residents;
+select count(*) as sup_rows from public.residents \gset
+select pg_temp.expect('a supervisor reads the register', (:sup_rows > 0), true);
 set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
-select 'admin' as role, count(*) as dob_rows_visible from public.residents;
+select pg_temp.expect('an admin reads the same rows as a supervisor',
+                      (select count(*) from public.residents), :sup_rows::bigint);
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('v_resident_status still shows the guard every resident',
+                      (select count(*) from public.v_resident_status), :sup_rows::bigint);
 \echo '    (the guard still sees all 10 residents through v_resident_status —'
 \echo '     just without their dates of birth)'
 
@@ -280,6 +300,8 @@ select pg_temp.try('anon reads the staff list',               'select * from pub
 reset role;
 
 \echo ''
+\echo '
+
 \echo '=========== N. THE WEEKLY REPORT FLAG (migration 037) ==========='
 -- Dedicated accounts, not the shared guard/supervisor/admin above: this
 -- section changes a role directly by SQL, and compliance.sql (run next by
@@ -308,6 +330,45 @@ begin
 end $$;
 \echo '    weekly_report cleared on demotion — ok'
 reset role;
+\echo '=========== O. PRIVILEGES RLS CANNOT GOVERN (migration 038) ==========='
+-- These four are invisible to every policy test: TRUNCATE, referential
+-- cascades and function EXECUTE are decided by the privilege system, not by
+-- row-level security. They are asserted here so they cannot come back.
+reset role;
+set request.jwt.claim.sub = '';
+
+\echo '--- N1: no request role may TRUNCATE a ledger, the register or the audit trail'
+select pg_temp.expect(
+  format('%s cannot truncate %s', r, t),
+  has_table_privilege(r, t, 'TRUNCATE'), false)
+from unnest(array['anon','authenticated','service_role']) as g(r)
+cross join unnest(array['public.gate_events','public.checkin_events','public.daily_compliance',
+                        'public.residents','public.admin_audit','public.erasure_log']) as x(t);
+
+\echo '--- N2: DELETE on residents is admin-only, so cascades cannot bypass erase_resident()'
+select pg_temp.expect('no supervisor-level DELETE policy on residents',
+  (select count(*) from pg_policies
+    where schemaname='public' and tablename='residents' and cmd='DELETE'
+      and qual like '%is_supervisor%'), 0::bigint);
+select pg_temp.expect('exactly one admin DELETE policy on residents',
+  (select count(*) from pg_policies
+    where schemaname='public' and tablename='residents' and cmd='DELETE'
+      and qual like '%is_admin%'), 1::bigint);
+
+\echo '--- N3: erasure_log is append-only — the proof cannot be deleted by whoever wrote it'
+select pg_temp.expect('no UPDATE or DELETE policy on erasure_log',
+  (select count(*) from pg_policies
+    where schemaname='public' and tablename='erasure_log' and cmd in ('UPDATE','DELETE')), 0::bigint);
+
+\echo '--- N4: the maintenance functions are not executable by a request role'
+select pg_temp.expect(
+  format('%s cannot execute %s', r, f),
+  has_function_privilege(r, f, 'EXECUTE'), false)
+from unnest(array['anon','authenticated','service_role']) as g(r)
+cross join unnest(array['public.close_out_compliance_days(date)',
+                        'public.purge_expired_gate_events()',
+                        'public.purge_expired_checkin_events()',
+                        'public.purge_expired_compliance()']) as x(f);
 
 \echo ''
 \echo '=========== DONE ==========='

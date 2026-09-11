@@ -20,6 +20,37 @@ function esc(v) {
 // Successes fade; errors stay until tapped. A guard who looked up at the
 // person and back down again must still be able to read why the tap did
 // not record. Tapping the toast dismisses it either way.
+// A toast that does not go away, for work that takes a while. The bulk
+// actions send one request per resident, sequentially — ten people on a slow
+// hut connection is long enough that a guard reasonably concludes nothing is
+// happening and taps again. Same element as toast(), so it needs no markup of
+// its own and lands where the eye already looks for confirmation; cleared by
+// the next toast(), which every caller ends with.
+function progress(msg, done, total) {
+  const el = $("toast");
+  clearTimeout(toast._t);
+  el.className = "show busy";
+  el.setAttribute("role", "status");
+  el.textContent = "";
+
+  const line = document.createElement("span");
+  line.className = "ps-text";
+  line.textContent = msg;              // textContent, not innerHTML: this
+  el.appendChild(line);                 // carries a resident's name.
+
+  if (total) {
+    const bar = document.createElement("span");
+    bar.className = "ps-bar";
+    const fill = document.createElement("i");
+    // Width through the CSSOM, never a style="" attribute: style-src carries
+    // no 'unsafe-inline', so an inline style attribute would be dropped by the
+    // CSP and the bar would silently never move.
+    fill.style.width = Math.round((done / total) * 100) + "%";
+    bar.appendChild(fill);
+    el.appendChild(bar);
+  }
+}
+
 function toast(msg, kind = "ok") {
   const el = $("toast");
   el.textContent = msg;
@@ -293,6 +324,31 @@ function trackHeaderHeight() {
   else window.addEventListener("resize", set);
 }
 
+// An opaque cover over everything, dismissed by a deliberate tap. Used when
+// the terminal has gone idle while offline, where ending the session is not
+// available. Built here rather than in each page so all three behave alike.
+function coverScreen(onResume) {
+  if (document.getElementById("privacyScreen")) return;
+  const el = document.createElement("div");
+  el.id = "privacyScreen";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-modal", "true");
+  el.setAttribute("aria-label", "Screen covered");
+  el.innerHTML = `
+    <div class="ps-inner">
+      <h2>Screen covered</h2>
+      <p>This terminal was left idle while offline, so the register is hidden.
+         Nothing was lost — anything recorded is still waiting to send.</p>
+      <button type="button" class="btn" id="psResume">Show the register</button>
+    </div>`;
+  document.body.appendChild(el);
+  const resume = () => { el.remove(); document.removeEventListener("keydown", onKey); onResume(); };
+  el.querySelector("#psResume").addEventListener("click", resume);
+  const onKey = (e) => { if (e.key === "Escape") resume(); };
+  document.addEventListener("keydown", onKey);
+  el.querySelector("#psResume").focus();
+}
+
 // Idle lock: a shared tablet at the door stays logged in for a whole shift,
 // so after `minutes` with no touch, key or scroll we end the session and show
 // the login screen. `isActive` lets a page veto the lock (e.g. while offline
@@ -308,8 +364,18 @@ function mountIdleLock({ minutes, isActive, onLock }) {
     document.addEventListener(ev, touch, { passive: true, capture: true });
   }
   const tick = () => {
-    if (isActive && !isActive()) { last = Date.now(); return; }
-    if (Date.now() - last >= ms) { stop(); onLock(); }
+    if (Date.now() - last < ms) return;
+    // Offline, the lock cannot end the session: the guard could not log back
+    // in until the link returned, and logging out would strand the queue.
+    // That veto was sound and it also meant the lock simply never fired —
+    // unplugging the tablet, or airplane mode, left the whole register on
+    // screen indefinitely, defeating the one control that exists for someone
+    // walking up to an unattended terminal. So cover the screen instead: the
+    // session, the queue and its key all stay, and the data stops being
+    // readable. This is a privacy screen, not authentication — offline there
+    // is nothing to authenticate against — and it says so.
+    if (isActive && !isActive()) { stop(); coverScreen(() => start()); return; }
+    stop(); onLock();
   };
   const start = () => {
     stop();
@@ -332,6 +398,28 @@ const VIEW_SLOT = "viewChosen";
 function viewChosen() { try { return sessionStorage.getItem(VIEW_SLOT); } catch (_) { return "1"; } }
 function rememberView(v) { try { sessionStorage.setItem(VIEW_SLOT, v); } catch (_) { /* private mode */ } }
 function clearViewChoice() { try { sessionStorage.removeItem(VIEW_SLOT); } catch (_) { /* nothing */ } }
+
+// Everything this terminal holds about the person who was just using it, in
+// one place. There are three ways a session ends — Log out, the idle lock, and
+// the server refusing the cookie — and each page had its own partial teardown,
+// so a key cleared on one page survived on another and the 401 path cleared
+// nothing at all. A shared hut terminal must not hand the next person the last
+// person's register, so every ending calls this and nothing else decides.
+//
+// The encrypted store is NOT cleared here: Offline.onLogout() is async and
+// deliberately keeps the queue and its key while events are still unsent
+// (Tao 2 — never destroy proof that someone attended). Callers await that
+// separately; this is the plaintext residue.
+const TERMINAL_KEYS = [
+  "rollcall",       // an in-progress roll call: resident ids and timestamps
+  "visitsOnSite",   // names, companies and arrival times of everyone on site
+];
+function clearTerminalState() {
+  clearViewChoice();
+  for (const k of TERMINAL_KEYS) {
+    try { localStorage.removeItem(k); } catch (_) { /* storage blocked */ }
+  }
+}
 
 // A tablet that always does one job: open it with ?view=inout or
 // ?view=register once and the choice is kept on that device (localStorage);

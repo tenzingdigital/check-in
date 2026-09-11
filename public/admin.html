@@ -596,11 +596,15 @@ async function departMany() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) return toast("Give the date as YYYY-MM-DD", "err");
   $("famDepart").disabled = true;
   let done = 0;
-  for (const id of ids) {
-    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { status: "departed", departed_on: on }), (err) => toast(`${state.rows.get(id)?.full_name || "One person"} not changed: ${err.message}`, "err"));
+  const failed = [];
+  for (const [i, id] of ids.entries()) {
+    progress(`Departing ${i + 1} of ${ids.length}${state.rows.get(id)?.full_name ? ` — ${state.rows.get(id).full_name}` : ""}`, i, ids.length);
+    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { status: "departed", departed_on: on }), (err) => failed.push(`${state.rows.get(id)?.full_name || "One person"}: ${err.message}`));
     if (out) done += 1;
   }
-  toast(`${done} marked as departed from ${on}`, done ? "ok" : "err");
+  toast(failed.length
+    ? `${done} marked as departed from ${on}. Not changed: ${failed.join("; ")}`
+    : `${done} marked as departed from ${on}`, failed.length ? "err" : "ok");
   setFamilySelecting(false);
   loadResidents();
 }
@@ -612,12 +616,16 @@ async function makeFamily() {
   const anchor = ids.find((id) => state.rows.get(id)?.household_id) || ids[0];
   $("famMake").disabled = true;
   let done = 0;
-  for (const id of ids) {
+  const failed = [];
+  for (const [i, id] of ids.entries()) {
     if (id === anchor) continue;
-    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { household_with: anchor }), (err) => toast(`${state.rows.get(id)?.full_name || "One person"} not added: ${err.message}`, "err"));
+    progress(`Linking ${i + 1} of ${ids.length}${state.rows.get(id)?.full_name ? ` — ${state.rows.get(id).full_name}` : ""}`, i, ids.length);
+    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { household_with: anchor }), (err) => failed.push(`${state.rows.get(id)?.full_name || "One person"}: ${err.message}`));
     if (out) done += 1;
   }
-  toast(done ? `Family of ${done + 1} made` : "No family made", done ? "ok" : "err");
+  toast(failed.length
+    ? `${done ? `Family of ${done + 1} made. ` : "No family made. "}Not added: ${failed.join("; ")}`
+    : (done ? `Family of ${done + 1} made` : "No family made"), failed.length ? "err" : "ok");
   setFamilySelecting(false);
   loadResidents();
 }
@@ -1843,7 +1851,7 @@ function showLogin(message) {
 const idleLock = mountIdleLock({
   minutes: () => state.settings?.idle_lock_minutes,
   onLock: async () => {
-    clearViewChoice();
+    clearTerminalState();
     await Offline.onLogout();
     await logout();
     showLogin(`Locked after ${state.settings?.idle_lock_minutes || 20} minutes without activity. Log in again.`);
@@ -1853,7 +1861,7 @@ const idleLock = mountIdleLock({
 mountLogin({ onReady: enterApp });
 
 $("logoutBtn").addEventListener("click", async () => {
-  clearViewChoice();
+  clearTerminalState();
   await Offline.onLogout();
   await logout();
   showLogin("");
@@ -1906,7 +1914,18 @@ $("tabReports").addEventListener("click", () => selectTab("reports"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));
 $("tabSettings").addEventListener("click", () => selectTab("settings"));
 
-setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
+// A 401 is the server saying this session is over, so it is an ending like
+// any other and gets the same teardown. It previously cleared nothing: the
+// encrypted register, its key, the remembered profile, the view choice and the
+// roll call all survived on a shared terminal after the server had already
+// refused the cookie — and a reload during a later outage walked back into the
+// revoked guard's app from the cached copy. No logout() round trip: the 401
+// already told us the cookie is dead.
+setUnauthenticatedHandler(async () => {
+  clearTerminalState();
+  try { await Offline.onLogout(); } catch (_) { /* the login screen still shows */ }
+  showLogin("Your session has ended. Log in again.");
+});
 
 Offline.registerWorker();
 Offline.mountUI({ getUserId: () => state.userId });

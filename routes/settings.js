@@ -121,10 +121,25 @@ router.patch('/', wrap(async (req, res) => {
 // explicitly rather than by a row policy.
 async function demoContext(req) {
   const t = await db.withOwner((client) => tenancy.schemaForUser(client, req.session.userId));
+  // schemaForUser has always returned the tenant's status and this discarded
+  // it — so unlike every withIdentity route, the one destructive endpoint here
+  // was not gated on the centre being allowed to write. tenant_may_write()'s
+  // comment is explicit that a lapsed trial keeps reading, exporting and
+  // erasing but loses writing; deleting the register is not an exception.
+  const { rows } = await db.withOwner((client) =>
+    client.query('select public.tenant_may_write($1) as ok', [t.tenantId]));
+  if (!rows[0] || !rows[0].ok) {
+    throw new HttpError(403, 'This centre cannot make changes at the moment.');
+  }
   return t;
 }
 
 router.get('/demo-data', wrap(async (req, res) => {
+  // Reads the sample-resident count on an owner connection with RLS bypassed,
+  // so it needs the same gate as the delete rather than none at all.
+  if (req.session.role !== 'admin') {
+    throw new HttpError(403, 'Only an administrator can see the sample data');
+  }
   const t = await demoContext(req);
   const n = await db.withOwner(async (client) => (await client.query(
     `select count(*)::int as n from public.tenant_demo_rows
