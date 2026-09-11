@@ -2112,6 +2112,7 @@ async function main() {
     assert.equal(span.back_on, wkDay(-2), "back the day after the last absent night");
     assert.equal(span.status, "partly approved");
     assert.match(span.line, /^Jane Weekly from Weekly Block W2 was absent from \w+day \d+ \w+ to \w+day \d+ \w+ \d{4} \(3 nights\), back on \w+day \d+ \w+\. Partly approved \(2 of 3 nights\)\.$/);
+    assert.match(span.ref, /^\d{4}$/, "an absence row carries the resident's reference too (migration 043)");
     assert.equal(fri.section, "Updates from the weekend", "a span starting Friday night is a weekend update");
     assert.equal(fri.nights, 1); assert.equal(fri.status, "not approved");
     assert.match(fri.line, /\(1 night\), back on .*\. Not approved\.$/);
@@ -2147,6 +2148,7 @@ async function main() {
     const removal = rep.json.rows.find((r) => r.section === "Resident removals" && r.resident === "Gone Weekly");
     assert.ok(removal, "the departure is missing"); assert.equal(removal.status, "departed");
     assert.match(removal.line, /^Gone Weekly departed on \w+day \d+ \w+ \d{4}\.$/);
+    assert.match(removal.ref, /^\d{4}$/, "every resident row carries the centre's own reference (migration 040)");
     const maint = rep.json.rows.find((r) => r.section === "Room updates" && r.room === "W1");
     assert.equal(maint.status, "maintenance");
     assert.equal(maint.line, "Weekly Block W1 is under maintenance: Boiler out until Friday.");
@@ -2154,10 +2156,10 @@ async function main() {
     assert.equal(free.status, "2 free", "W2 has 3 beds and one occupant");
     assert.equal(free.line, "Weekly Block W2: 2 of 3 beds free.");
     const csv = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday`);
-    assert.match(csv.text, /^﻿?section,building,room,resident,child,from_date,to_date,nights,back_on,status,line\r\n/);
+    assert.match(csv.text, /^﻿?section,building,room,ref,resident,child,from_date,to_date,nights,back_on,status,line\r\n/);
   });
 
-  await test("a new admission and a mid-stay room move appear under Weekly register change (migration 040)", async () => {
+  await test("a new admission and a mid-stay room move appear under Weekly register change (migration 042)", async () => {
     const bld = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Register Change Block" } });
     assert.equal(bld.status, 201, bld.text);
     const made = await supC.fetch(`/api/buildings/${bld.json.id}/rooms`, { method: "POST", body: { rooms: [{ floor: "", number: "RC1", capacity: 2 }, { floor: "", number: "RC2", capacity: 2 }] } });
@@ -2188,10 +2190,12 @@ async function main() {
     assert.ok(admitted, "the new admission is missing");
     assert.equal(admitted.status, "admitted");
     assert.match(admitted.line, /^New Arrival moved into Register Change Block RC1 on \w+day \d+ \w+ \d{4}\.$/);
+    assert.match(admitted.ref, /^\d{4}$/);
     const moved = change.find((r) => r.resident === "On TheMove");
     assert.ok(moved, "the mid-stay move is missing");
     assert.equal(moved.status, "moved");
     assert.match(moved.line, /^On TheMove moved from Register Change Block RC1 to Register Change Block RC2 on \w+day \d+ \w+ \d{4}\.$/);
+    assert.match(moved.ref, /^\d{4}$/);
     // The mover's original assignment, well before the window, must not
     // also surface here — only the one change inside the window.
     assert.equal(change.filter((r) => r.resident === "On TheMove").length, 1, "the original, out-of-window assignment must not also appear");

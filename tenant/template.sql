@@ -2238,7 +2238,7 @@ $$;
 -- Name: weekly_register_rows(date, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION __TENANT__.weekly_register_rows(p_from date, p_to date) RETURNS TABLE(section text, building text, room text, resident text, child text, from_date date, to_date date, nights integer, back_on date, status text, line text)
+CREATE FUNCTION __TENANT__.weekly_register_rows(p_from date, p_to date) RETURNS TABLE(section text, building text, room text, ref text, resident text, child text, from_date date, to_date date, nights integer, back_on date, status text, line text)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
@@ -2256,16 +2256,16 @@ $$;
 -- Name: weekly_register_rows_unchecked(date, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date) RETURNS TABLE(section text, building text, room text, resident text, child text, from_date date, to_date date, nights integer, back_on date, status text, line text)
+CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date) RETURNS TABLE(section text, building text, room text, ref text, resident text, child text, from_date date, to_date date, nights integer, back_on date, status text, line text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
     SET lc_time TO 'C'
     AS $$
-  select q.section, q.building, q.room, q.resident, q.child, q.from_date, q.to_date, q.nights, q.back_on, q.status, q.line
+  select q.section, q.building, q.room, q.ref, q.resident, q.child, q.from_date, q.to_date, q.nights, q.back_on, q.status, q.line
     from (
       -- Rooms under maintenance or with free contracted beds
       select 1 as seq, lpad(b.sort::text, 6, '0') || b.name as k1, lpad(rm.sort::text, 6, '0') || rm.floor as k2, rm.number as k3,
-             'Room updates' as section, b.name as building, rm.number as room, null::text as resident, ''::text as child,
+             'Room updates' as section, b.name as building, rm.number as room, null::text as ref, null::text as resident, ''::text as child,
              null::date as from_date, null::date as to_date, null::integer as nights, null::date as back_on,
              case when rm.status = 'maintenance' then 'maintenance' else x.free || ' free' end as status,
              case when rm.status = 'maintenance'
@@ -2284,7 +2284,7 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
       -- Absences, then the weekend
       select case when s.weekend then 3 else 2 end, s.first_night::text, s.last_name, s.first_name,
              case when s.weekend then 'Updates from the weekend' else 'Resident absences' end,
-             s.building, s.room, s.resident, case when s.child then 'child' else '' end,
+             s.building, s.room, lpad(r2.ref::text, 4, '0'), s.resident, case when s.child then 'child' else '' end,
              s.first_night, s.last_night, s.nights, s.back_on,
              s.approval,
              s.resident || case when s.child then ' (child)' else '' end
@@ -2298,10 +2298,11 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
                                   when 'not approved' then 'Not approved.'
                                   else 'Partly approved (' || s.authorised_nights || ' of ' || s.nights || ' nights).' end
         from __TENANT__.weekly_absence_spans(p_from, p_to) s
+        join __TENANT__.residents r2 on r2.id = s.resident_id
       union all
       -- Removals
       select 4, r.departed_on::text, r.last_name, r.first_name,
-             'Resident removals', b.name, rm.number,
+             'Resident removals', b.name, rm.number, lpad(r.ref::text, 4, '0'),
              btrim(r.first_name) || ' ' || btrim(r.last_name),
              case when r.date_of_birth > (r.departed_on - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
              r.departed_on, r.departed_on, null::integer, null::date, 'departed',
@@ -2317,7 +2318,7 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
       union all
       -- Weekly register change: new admissions
       select 5, (r.registered_at at time zone st.tz)::date::text, r.last_name, r.first_name,
-             'Weekly register change', b.name, rm.number,
+             'Weekly register change', b.name, rm.number, lpad(r.ref::text, 4, '0'),
              btrim(r.first_name) || ' ' || btrim(r.last_name),
              case when r.date_of_birth > ((r.registered_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
              (r.registered_at at time zone st.tz)::date, (r.registered_at at time zone st.tz)::date, null::integer, null::date, 'admitted',
@@ -2338,7 +2339,7 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
       -- "Building · Number" form, used by the Room history report) is the
       -- fallback for a room since deleted or renumbered.
       select 5, (ra.from_at at time zone st.tz)::date::text, r.last_name, r.first_name,
-             'Weekly register change', b.name, rm.number,
+             'Weekly register change', b.name, rm.number, lpad(r.ref::text, 4, '0'),
              btrim(r.first_name) || ' ' || btrim(r.last_name),
              case when r.date_of_birth > ((ra.from_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
              (ra.from_at at time zone st.tz)::date, (ra.from_at at time zone st.tz)::date, null::integer, null::date, 'moved',
