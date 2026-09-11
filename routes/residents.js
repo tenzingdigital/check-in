@@ -108,7 +108,13 @@ router.get('/', wrap(async (req, res) => {
          from search_residents($1, $2, $3) v`,
       [q, includeDeparted, limit],
     );
-    for (const r of found) { delete r.id_number; delete r.id_type; }
+    // search_key is a generated column: lower(unaccent(names || ' ' ||
+    // coalesce(id_number, ''))). Dropping id_number while leaving search_key
+    // put the whole number back in every row, lower-cased, and into each
+    // terminal's offline copy — past a test that greps the response for the
+    // string "id_number" and so could never fail. Nothing client-side reads
+    // search_key; search happens in SQL, where the column still does its job.
+    for (const r of found) { delete r.id_number; delete r.id_type; delete r.search_key; }
     if (found.length === 0) return found;
     // The room, for every card (Stage 1 of docs/PRODUCT-ROADMAP.md).
     const { rows: rooms } = await client.query(
@@ -129,8 +135,15 @@ router.get('/', wrap(async (req, res) => {
     }
     // Away with the centre's agreement today (migration 028): the card says
     // so, and on the register the person is not "not seen", they are away.
+    // The reason is deliberately NOT selected. All three front ends render
+    // only `until` (index.html, checkin.html and admin.html each print "Away
+    // until ..."), so sending the reason put it on every shared tablet and
+    // into each terminal's offline copy for no display purpose — and one of
+    // the permitted reasons is `medical`, which docs/legal/DPA-2026-09-10
+    // concludes should be treated as data concerning health. The reason is
+    // still available on /:id/absences, which is the detail view that shows it.
     const { rows: away } = await client.query(
-      `select a.resident_id, a.reason, coalesce(a.ended_on, a.to_date) as until
+      `select a.resident_id, coalesce(a.ended_on, a.to_date) as until
          from authorised_absences a
         where a.resident_id = any($1::uuid[])
           and site_today() between a.from_date and coalesce(a.ended_on, a.to_date)`,
@@ -139,7 +152,7 @@ router.get('/', wrap(async (req, res) => {
     const awayById = new Map(away.map(a => [a.resident_id, a]));
     for (const r of found) {
       const a = awayById.get(r.id);
-      r.away = a ? { reason: a.reason, until: String(a.until).slice(0, 10) } : null;
+      r.away = a ? { until: String(a.until).slice(0, 10) } : null;
     }
     if (!wantCompliance) return found;
 
@@ -266,7 +279,7 @@ router.get('/:id/history', wrap(async (req, res) => {
   const reason = String(req.query.reason || '').trim();
   if (asCsv && (!reason || reason.length > 200)) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
 
-  const { rows, resident } = await db.withIdentity(req.session.userId, async (client) => {
+  const { rows, resident, truncated } = await db.withIdentity(req.session.userId, async (client) => {
     if (asCsv) await client.query('select note_report($1, $2, $3, $4)', ['resident_history:' + id, reason, from, to]);
     const { rows } = await client.query(
       `with s as (select local_timezone as tz from app_settings where id),
@@ -283,14 +296,20 @@ router.get('/:id/history', wrap(async (req, res) => {
           and x.occurred_at <  ((b.d1 + 1)::timestamp) at time zone s.tz
           and ($4 = 'all' or ($4 = 'gate' and x.kind in ('in', 'out')) or ($4 = 'checkin' and x.kind = 'checkin'))
         order by x.occurred_at desc
-        limit 2000`,
+        limit 2001`,
       [id, from, to, kind]);
+    // 2001 asked, 2000 kept: the extra row is only how we learn there were
+    // more. The screen already says "Showing the first 2,000" — the CSV said
+    // nothing, so an evidence export for an inspection quietly dropped its
+    // oldest rows. HISTORY_LIMIT rows plus a marker line is the honest file.
+    const truncated = rows.length > 2000;
+    if (truncated) rows.length = 2000;
     let resident = null;
     if (asCsv) {
       const r = await client.query(`select first_name || ' ' || last_name as full_name from residents where id = $1`, [id]);
       resident = r.rows[0] ? r.rows[0].full_name : null;
     }
-    return { rows, resident };
+    return { rows, resident, truncated };
   }).catch((err) => {
     if (err && err.code === '42501') throw new HttpError(403, 'Only a supervisor or admin can export a history');
     throw err;
@@ -302,6 +321,14 @@ router.get('/:id/history', wrap(async (req, res) => {
     resident: resident || '', register: e.kind === 'checkin' ? 'Daily register' : 'In & out', event: label[e.kind] || e.kind,
     occurred_at: e.occurred_at, recorded_at: e.recorded_at, recorded_offline: e.late_entry ? 'yes' : '', recorded_by: e.guard_name,
   }));
+  // A file that silently stops at 2,000 is worse than one that says so: an
+  // inspector cannot tell a complete history from a clipped one.
+  if (truncated) {
+    out.push({
+      resident: resident || '', register: '', event: 'PARTIAL EXPORT — the oldest events are not included. Narrow the dates and export again.',
+      occurred_at: '', recorded_at: '', recorded_offline: '', recorded_by: '',
+    });
+  }
   const slug = String(resident || 'resident').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'resident';
   const range = from || to ? `-${from || 'start'}-to-${to || 'today'}` : '-last-30-days';
   const which = kind === 'all' ? '' : `-${kind === 'gate' ? 'in-and-out' : 'check-ins'}`;

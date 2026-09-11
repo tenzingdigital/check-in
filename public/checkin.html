@@ -889,7 +889,7 @@ trackHeaderHeight();
 // encrypted on this terminal until the same guard logs in again; the copy of
 // the register is cleared either way.
 async function endSession(message) {
-  clearViewChoice();            // the next person on this terminal chooses again
+  clearTerminalState();         // view choice, roll call, visitors-on-site
   await Offline.syncNow();
   const pending = await Offline.onLogout();
   await logout();
@@ -966,7 +966,18 @@ setInterval(() => { if (state.profile && Offline.isOnline()) checkHealth(); }, 3
 // Any request that comes back 401 — an expired session, or a supervisor
 // deactivating the account mid-shift — returns the terminal to the login
 // screen instead of leaving a dead app on display.
-setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
+// A 401 is the server saying this session is over, so it is an ending like
+// any other and gets the same teardown. It previously cleared nothing: the
+// encrypted register, its key, the remembered profile, the view choice and the
+// roll call all survived on a shared terminal after the server had already
+// refused the cookie — and a reload during a later outage walked back into the
+// revoked guard's app from the cached copy. No logout() round trip: the 401
+// already told us the cookie is dead.
+setUnauthenticatedHandler(async () => {
+  clearTerminalState();
+  try { await Offline.onLogout(); } catch (_) { /* the login screen still shows */ }
+  showLogin("Your session has ended. Log in again.");
+});
 
 // Offline support: the service worker keeps this page loadable with no
 // connection, and the header pill, the sync notice and the periodic replay

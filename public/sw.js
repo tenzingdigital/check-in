@@ -61,10 +61,25 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     fetch(req)
-      .then((res) => {
+      .then(async (res) => {
         if (res.ok && SHELL.includes(url.pathname)) {
           const copy = res.clone();
           caches.open(VERSION).then((cache) => cache.put(req, copy)).catch(() => {});
+          return res;
+        }
+        // A 502/503/504 is a RESOLVED response, so it skipped the .catch()
+        // below and was handed to the guard as the host's error page. That is
+        // what happened during the 4 September restart: the one component that
+        // could have kept the terminal working opted out. offline.js already
+        // treats those statuses as an outage, so serve the shell and let it
+        // queue. Only for the shell, and only for 5xx — a 404 is still a 404.
+        if (res.status >= 500) {
+          const cached = await caches.match(req);
+          if (cached) return cached;
+          if (req.mode === "navigate") {
+            const shell = await caches.match("/index.html");
+            if (shell) return shell;
+          }
         }
         return res;
       })

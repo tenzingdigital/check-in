@@ -182,7 +182,7 @@
       <div id="detail" class="detail" hidden></div>
       <div id="multiBar" class="multibar" hidden>
         <b id="multiCount">0 selected</b>
-        <button class="btn ghost sm" type="button" id="multiAll" data-tip="Tick everyone the search shows: type a room, tick all, sign them in or out together.">All</button>
+        <button class="btn ghost sm" type="button" id="multiAll" data-tip="Tick who the search shows, up to ten: type a room, tick all, sign them in or out together.">All</button>
         <button class="btn primary-in sm" type="button" id="multiIn">Sign IN</button>
         <button class="btn primary-out sm" type="button" id="multiOut">Sign OUT</button>
         <button class="btn ghost sm" type="button" id="multiCancel" aria-label="Stop selecting" title="Stop selecting">✕</button>
@@ -387,10 +387,20 @@ function renderDetail(r) {
   renderDetail.historyFor = r.id;
 }
 
+// The server caps the log (routes/gate.js MAX_LOG_ROWS) and orders newest
+// first, so an overflowing day loses its EARLIEST movements — and the count
+// underneath used to read "500 events" as though that were the day's total.
+// For an audit screen that is the wrong failure mode: say it is the latest N
+// and how to see the rest. Asked for explicitly so the two agree.
+const LOG_LIMIT = 500;
+
 function renderLog(rows) {
   const list = $("logList");
+  const capped = rows.length >= LOG_LIMIT;
   $("logCount").textContent = rows.length
-    ? `${rows.length} event${rows.length === 1 ? "" : "s"}`
+    ? (capped
+        ? `latest ${rows.length} events — narrow the dates, or use the Movement log report for the full range`
+        : `${rows.length} event${rows.length === 1 ? "" : "s"}`)
     : "";
   if (!rows.length) {
     list.innerHTML = `<p class="empty">No movements recorded for this date.</p>`;
@@ -598,7 +608,7 @@ async function loadLog() {
   if ($("logTo").value < $("logFrom").value) $("logTo").value = $("logFrom").value;
   const q = $("logQ").value.trim();
   const rows = await guarded(
-    () => apiGet(`/api/gate-events?from=${encodeURIComponent($("logFrom").value)}&to=${encodeURIComponent($("logTo").value)}&q=${encodeURIComponent(q)}`),
+    () => apiGet(`/api/gate-events?from=${encodeURIComponent($("logFrom").value)}&to=${encodeURIComponent($("logTo").value)}&q=${encodeURIComponent(q)}&limit=${LOG_LIMIT}`),
     (err) => showError("Could not load the log: " + err.message),
   );
   if (!rows) return;
@@ -1081,7 +1091,7 @@ trackHeaderHeight();
 // encrypted on this terminal until the same guard logs in again; the copy of
 // the register is cleared either way.
 async function endSession(message) {
-  clearViewChoice();            // the next person on this terminal chooses again
+  clearTerminalState();         // view choice, roll call, visitors-on-site
   await Offline.syncNow();
   const pending = await Offline.onLogout();
   await logout();
@@ -1174,6 +1184,23 @@ document.addEventListener("click", (e) => {
 state.selectedIds = new Set();
 const MULTI_MIN = 2;
 
+// The most that can be ticked at once. "Select all shown" with an empty search
+// box used to mean the whole register, and one more tap wrote a gate event for
+// every one of them — which, with the door switch on, is also today's check-in,
+// a statutory row with no correction path. Ten is a landing, a corridor, a
+// family group: a number a guard can look at and verify against the people in
+// front of them, which is the whole basis of the identity check here.
+//
+// Honest about where this lives: it is a screen-layer cap. There is no bulk
+// endpoint to gate — recordMany() sends one POST per resident, and a single
+// sign-in is a legitimate unlimited act — so unlike the feature switches there
+// is nothing for SQL to refuse. It bounds the gesture, not the API.
+const MULTI_MAX = 10;
+
+function capReached(adding) {
+  return state.selectedIds.size + adding > MULTI_MAX;
+}
+
 // Ticking someone in a family ticks the whole family that is on screen,
 // since a family moves together (Brighton: "bulk actions for families").
 function togglePick(row) {
@@ -1181,6 +1208,13 @@ function togglePick(row) {
   const group = row.household_id
     ? [...state.rows.values()].filter((r) => r.household_id === row.household_id && document.querySelector(`button.card[data-id="${r.id}"]`))
     : [row];
+  // A family is ticked as a unit, so it is refused as a unit rather than
+  // half-ticked — half a family selected is worse than none.
+  const fresh = on ? group.filter((r) => !state.selectedIds.has(r.id)).length : 0;
+  if (on && capReached(fresh)) {
+    toast(`Ten at a time. Sign these ${state.selectedIds.size} in first.`, "err");
+    return;
+  }
   for (const r of group) {
     if (on) state.selectedIds.add(r.id); else state.selectedIds.delete(r.id);
     markPicked(r.id, on);
@@ -1202,9 +1236,20 @@ function markPicked(id, on) {
 function toggleAllShown() {
   const shown = [...document.querySelectorAll("#searchResults button.card[data-id]")];
   const all = shown.length && shown.every((c) => state.selectedIds.has(c.dataset.id));
-  for (const c of shown) {
-    if (all) state.selectedIds.delete(c.dataset.id); else state.selectedIds.add(c.dataset.id);
-    markPicked(c.dataset.id, !all);
+  if (all) {
+    for (const c of shown) { state.selectedIds.delete(c.dataset.id); markPicked(c.dataset.id, false); }
+    syncMultiBar();
+    return;
+  }
+  // Up to the cap, in the order shown. The count in the bar stays truthful,
+  // and the toast says what was left out so nobody assumes the list was taken
+  // whole — narrowing the search is the way to reach the rest.
+  const take = shown.slice(0, MULTI_MAX);
+  state.selectedIds.clear();
+  for (const c of document.querySelectorAll("#searchResults button.card[data-id]")) markPicked(c.dataset.id, false);
+  for (const c of take) { state.selectedIds.add(c.dataset.id); markPicked(c.dataset.id, true); }
+  if (shown.length > MULTI_MAX) {
+    toast(`First ${MULTI_MAX} of ${shown.length} ticked — ten at a time. Narrow the search for the rest.`, "ok");
   }
   syncMultiBar();
 }
@@ -1240,12 +1285,37 @@ document.addEventListener("click", (e) => {
 async function recordMany(direction) {
   const ids = [...state.selectedIds];
   if (!ids.length) { toast("Tap the residents first", "err"); return; }
+  if (ids.length > MULTI_MAX) { toast(`Ten at a time — ${ids.length} are ticked.`, "err"); return; }
   if (state.busy) return;
+
+  // Say out loud what is about to happen. "Select all shown" with an empty
+  // search box ticks the whole register, so two taps could sign in everyone —
+  // and with the door switch on, a sign IN also writes today's check-in, which
+  // is a statutory row with no correction path (docs/KNOWN-ISSUES.md). The
+  // single-resident path already tells the guard that in its toast; a bulk
+  // action that does it a hundred times over must say it BEFORE, not after.
+  const alsoCheckin = direction === "in" && state.settings && state.settings.feature_door_checkin;
+  const what = direction === "in" ? "Sign IN" : "Sign OUT";
+  const lines = [`${what} ${ids.length} ${ids.length === 1 ? "resident" : "residents"}?`];
+  if (alsoCheckin) {
+    lines.push("", `This also records today's check-in for ${ids.length === 1 ? "them" : "all of them"}.`,
+               "A recorded day cannot be undone.");
+  }
+  if (!confirm(lines.join("\n"))) return;
+
   state.busy = true;
+  // Every control that could start a second run, not just the two act buttons.
   $("multiIn").disabled = true; $("multiOut").disabled = true;
+  $("multiAll").disabled = true; $("multiCancel").disabled = true; $("selectAll").disabled = true;
   let done = 0, queued = 0; const failed = [];
-  for (const id of ids) {
+  const verb = direction === "in" ? "Signing in" : "Signing out";
+  for (const [i, id] of ids.entries()) {
     const r = state.rows.get(id);
+    // Named, not just counted: the guard can see which person it is on, so a
+    // slow one is visibly a slow one rather than a hang.
+    // done = i, the number FINISHED; the text names the one in hand. The bar
+    // is therefore never ahead of the register.
+    progress(`${verb} ${i + 1} of ${ids.length}${r ? ` — ${r.full_name}` : ""}`, i, ids.length);
     if (Offline.isOnline()) {
       try {
         const row = await apiPost("/api/gate-events", { resident_id: id, direction });
@@ -1257,6 +1327,11 @@ async function recordMany(direction) {
         if (!Offline.isOutage(err)) { failed.push(`${r ? r.full_name : id}: ${err.message}`); continue; }
       }
     }
+    // Reaching here means the link is down or timed out. Say so rather than
+    // leaving "Signing in" on screen while the work quietly changes to
+    // queueing — a guard watching a stalled request deserves to know it
+    // became a queued one.
+    progress(`Queuing ${i + 1} of ${ids.length}${r ? ` — ${r.full_name}` : ""} · offline`, i, ids.length);
     try {
       await Offline.enqueue({ kind: "gate", resident_id: id, resident_name: r ? r.full_name : "", direction, guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "" });
       queued += 1;
@@ -1264,6 +1339,7 @@ async function recordMany(direction) {
   }
   state.busy = false;
   $("multiIn").disabled = false; $("multiOut").disabled = false;
+  $("multiAll").disabled = false; $("multiCancel").disabled = false; $("selectAll").disabled = false;
   const parts = [];
   if (done) parts.push(`${done} signed ${direction.toUpperCase()}`);
   if (queued) parts.push(`${queued} queued until the connection returns`);
@@ -1329,7 +1405,18 @@ setInterval(() => {
 // Any request that comes back 401 — an expired session, or a supervisor
 // deactivating the account mid-shift — returns the terminal to the login
 // screen instead of leaving a dead app on display.
-setUnauthenticatedHandler(() => showLogin("Your session has ended. Log in again."));
+// A 401 is the server saying this session is over, so it is an ending like
+// any other and gets the same teardown. It previously cleared nothing: the
+// encrypted register, its key, the remembered profile, the view choice and the
+// roll call all survived on a shared terminal after the server had already
+// refused the cookie — and a reload during a later outage walked back into the
+// revoked guard's app from the cached copy. No logout() round trip: the 401
+// already told us the cookie is dead.
+setUnauthenticatedHandler(async () => {
+  clearTerminalState();
+  try { await Offline.onLogout(); } catch (_) { /* the login screen still shows */ }
+  showLogin("Your session has ended. Log in again.");
+});
 
 // Offline support: the service worker keeps this page loadable with no
 // connection, and the header pill, the sync notice and the periodic replay

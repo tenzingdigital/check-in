@@ -44,8 +44,21 @@ const LIVE_ONLY = true;
 
 const TENANT_JOBS = [
   ["close-out-compliance-days", "select close_out_compliance_days()", LIVE_ONLY],
-  // Who was off site at midnight, for the night just ended (migration 027).
-  ["snapshot-overnight-absences", "select snapshot_overnight_absences()", LIVE_ONLY],
+  // Who was off site at midnight (migration 027). The last SEVEN nights, not
+  // just the one that ended: the function only ever did one night and could
+  // not backfill, unlike its sibling close_out_compliance_days(), so a night
+  // the scheduler missed stayed missing forever. That matters because a gap is
+  // indistinguishable from "everyone was present" -- weekly_absence_spans()
+  // groups by consecutive nights, so one hole splits a real absence in two and
+  // the Sunday email then tells head office a resident came back on a day they
+  // were still away. Re-running a night already recorded is free: the insert is
+  // `on conflict do nothing`.
+  ["snapshot-overnight-absences",
+   `select coalesce(sum(public.snapshot_overnight_absences(g.d::date)), 0)::int
+      from generate_series((public.site_today() - 7)::timestamp,
+                           (public.site_today() - 1)::timestamp,
+                           interval '1 day') g(d)`,
+   LIVE_ONLY],
   ["purge-expired-gate-events", "select purge_expired_gate_events()"],
   ["purge-expired-checkin-events", "select purge_expired_checkin_events()"],
   ["purge-expired-compliance", "select purge_expired_compliance()"],
@@ -214,9 +227,15 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
       // still a real send with a real duplicate-email risk if run twice, and
       // the guard being real under force is also what makes it possible to
       // test without waiting for an actual Sunday.
+      // Match a run that actually DELIVERED to somebody. The old pattern was
+      // `result ~ 'emailed$'`, which "12 rows, 0/3 emailed" also matches —
+      // mail.send() never throws, it returns {delivered:false} — so a total
+      // delivery failure recorded ok, blocked every retry that day, and left
+      // system health green while the statutory Sunday return did not go.
+      // `[1-9]\d*/` is "at least one delivered".
       const { rows: already } = await client.query(
         `select 1 from job_runs
-           where job = $1 and ok and result ~ 'emailed$'
+           where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
              and (ran_at at time zone $2)::date = $3::date
            limit 1`,
         [name, s.local_timezone, s.today]);
@@ -229,8 +248,16 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
         const out = await mail.send({ to: email, subject, text });
         if (out.delivered) delivered += 1;
       }
+      // A partial or total delivery failure is not a successful run. Recording
+      // ok=false is what puts it in front of somebody: v_system_health reads
+      // these rows, and a Sunday return that reached nobody is exactly the
+      // quiet failure the health banner exists for.
       const result = `${rows.length} rows, ${delivered}/${staff.length} emailed`;
-      await record(client, name, true, result);
+      const allDelivered = delivered === staff.length;
+      await record(client, name, allDelivered, result);
+      if (!allDelivered) {
+        console.error(`[jobs] ${name}: ${staff.length - delivered} of ${staff.length} recipients did not receive the weekly register`);
+      }
       return result;
     });
     console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);

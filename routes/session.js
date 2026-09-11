@@ -53,12 +53,23 @@ router.post('/', wrap(async (req, res) => {
 router.post('/mfa', wrap(async (req, res) => {
   const { challenge, code, trust_device } = req.body || {};
   const ip = clientIp(req);
-  if (auth.lockedOut(`mfa:${challenge}`, ip)) {
+  // Canonicalise before it becomes a throttle key. Postgres accepts a uuid
+  // braced, unhyphenated, or hyphenated in the wrong places, and treats every
+  // spelling as the SAME row — but each spelling is a DIFFERENT key in the
+  // in-memory attempts map, so rotating the representation walked straight
+  // past the lockout and grew the map one entry per variant. This is the same
+  // shape as the login lockout's trim bug: normalise once, key on the result.
+  const challengeId = String(challenge || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(challengeId)) {
+    return res.status(401).json({ error: 'That code was not recognised. Check the email, or log in again for a new one.' });
+  }
+  const throttle = `mfa:${challengeId}`;
+  if (auth.lockedOut(throttle, ip)) {
     return res.status(429).json({ error: 'Too many attempts. Wait five minutes and log in again.' });
   }
-  const result = await auth.completeMfa({ challengeId: String(challenge || ''), code, trustDevice: trust_device === true, ip, userAgent: req.get('user-agent') });
+  const result = await auth.completeMfa({ challengeId, code, trustDevice: trust_device === true, ip, userAgent: req.get('user-agent') });
   if (!result) {
-    auth.noteFailure(`mfa:${challenge}`, ip);
+    auth.noteFailure(throttle, ip);
     return res.status(401).json({ error: 'That code was not recognised. Check the email, or log in again for a new one.' });
   }
   const cookies = [auth.sessionCookie(result.token, result.expiresAt)];
