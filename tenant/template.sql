@@ -2361,6 +2361,32 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
         left join __TENANT__.rooms prm on prm.id = prev.room_id
         left join __TENANT__.buildings pb on pb.id = prm.building_id
        where (ra.from_at at time zone st.tz)::date between p_from and p_to
+      union all
+      -- Weekly register change: unassigned from a room, with no room to
+      -- replace it. Restricted to a resident still active (a departure's
+      -- closure is the Resident removals line, not this) and excludes a true
+      -- move by requiring that nothing opened at exactly the moment this
+      -- one closed.
+      select 5, (ra.to_at at time zone st.tz)::date::text, r.last_name, r.first_name,
+             'Weekly register change', pb2.name, prm2.number, lpad(r.ref::text, 4, '0'),
+             btrim(r.first_name) || ' ' || btrim(r.last_name),
+             case when r.date_of_birth > ((ra.to_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
+             (ra.to_at at time zone st.tz)::date, (ra.to_at at time zone st.tz)::date, null::integer, null::date, 'unassigned',
+             btrim(r.first_name) || ' ' || btrim(r.last_name)
+               || case when r.date_of_birth > ((ra.to_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then ' (child)' else '' end
+               || ' was unassigned from ' || coalesce(pb2.name || ' ' || prm2.number, ra.room_label)
+               || ' on ' || to_char((ra.to_at at time zone st.tz)::date, 'FMDay FMDD FMMonth YYYY') || '.'
+        from __TENANT__.room_assignments ra
+        join __TENANT__.residents r on r.id = ra.resident_id and r.status = 'active'
+        left join __TENANT__.rooms prm2 on prm2.id = ra.room_id
+        left join __TENANT__.buildings pb2 on pb2.id = prm2.building_id
+        cross join (select adult_age_years, local_timezone as tz from __TENANT__.app_settings where id) st
+       where ra.to_at is not null
+         and (ra.to_at at time zone st.tz)::date between p_from and p_to
+         and not exists (
+           select 1 from __TENANT__.room_assignments ra2
+            where ra2.resident_id = ra.resident_id and ra2.from_at = ra.to_at
+         )
     ) q
    order by q.seq, q.k1, q.k2, q.k3;
 $$;

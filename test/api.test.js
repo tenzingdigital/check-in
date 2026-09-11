@@ -2159,7 +2159,7 @@ async function main() {
     assert.match(csv.text, /^﻿?section,building,room,ref,resident,child,from_date,to_date,nights,back_on,status,line\r\n/);
   });
 
-  await test("a new admission and a mid-stay room move appear under Weekly register change (migration 042)", async () => {
+  await test("a new admission, a mid-stay room move and an unassignment appear under Weekly register change (migrations 042, 044)", async () => {
     const bld = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Register Change Block" } });
     assert.equal(bld.status, 201, bld.text);
     const made = await supC.fetch(`/api/buildings/${bld.json.id}/rooms`, { method: "POST", body: { rooms: [{ floor: "", number: "RC1", capacity: 2 }, { floor: "", number: "RC2", capacity: 2 }] } });
@@ -2183,6 +2183,27 @@ async function main() {
     assert.equal((await supC.fetch(`/api/residents/${mover.json.id}`, { method: "PATCH", body: { room_id: rc2.id } })).status, 200);
     await withOwner((c) => c.query(`update public.room_assignments set from_at = $2::date where resident_id = $1 and to_at is null`, [mover.json.id, wkDay(-1)]));
 
+    // An unassignment: registered and roomed well before the week, cleared
+    // back to no room inside it, with nothing to replace it (migration 044).
+    const cleared = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "No", last_name: "RoomNow", date_of_birth: "1980-01-01" } });
+    assert.equal(cleared.status, 201, cleared.text);
+    assert.equal((await supC.fetch(`/api/residents/${cleared.json.id}`, { method: "PATCH", body: { room_id: rc2.id } })).status, 200);
+    await withOwner((c) => c.query(`update public.residents set registered_at = now() - interval '60 days' where id = $1`, [cleared.json.id]));
+    await withOwner((c) => c.query(`update public.room_assignments set from_at = now() - interval '60 days' where resident_id = $1 and to_at is null`, [cleared.json.id]));
+    assert.equal((await supC.fetch(`/api/residents/${cleared.json.id}`, { method: "PATCH", body: { room_id: null } })).status, 200);
+    await withOwner((c) => c.query(`update public.room_assignments set to_at = $2::date where resident_id = $1 and to_at is not null`, [cleared.json.id, wkDay(-2)]));
+
+    // A departure also closes the resident's open room_assignments row (the
+    // same trigger), which must not also read as an unassignment here — a
+    // departure is the Resident removals line, once.
+    const leaving = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Leaving", last_name: "Roomed", date_of_birth: "1970-01-01" } });
+    assert.equal(leaving.status, 201, leaving.text);
+    assert.equal((await supC.fetch(`/api/residents/${leaving.json.id}`, { method: "PATCH", body: { room_id: rc1.id } })).status, 200);
+    await withOwner((c) => c.query(`update public.residents set registered_at = now() - interval '60 days' where id = $1`, [leaving.json.id]));
+    await withOwner((c) => c.query(`update public.room_assignments set from_at = now() - interval '60 days' where resident_id = $1 and to_at is null`, [leaving.json.id]));
+    assert.equal((await supC.fetch(`/api/residents/${leaving.json.id}`, { method: "PATCH", body: { status: "departed", departed_on: wkDay(-3) } })).status, 200);
+    await withOwner((c) => c.query(`update public.room_assignments set to_at = $2::date where resident_id = $1 and to_at is not null`, [leaving.json.id, wkDay(-3)]));
+
     const rep = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday&format=json`);
     assert.equal(rep.status, 200, rep.text);
     const change = rep.json.rows.filter((r) => r.section === "Weekly register change");
@@ -2199,6 +2220,15 @@ async function main() {
     // The mover's original assignment, well before the window, must not
     // also surface here — only the one change inside the window.
     assert.equal(change.filter((r) => r.resident === "On TheMove").length, 1, "the original, out-of-window assignment must not also appear");
+    const unassigned = change.find((r) => r.resident === "No RoomNow");
+    assert.ok(unassigned, "the unassignment is missing");
+    assert.equal(unassigned.status, "unassigned");
+    assert.match(unassigned.line, /^No RoomNow was unassigned from Register Change Block RC2 on \w+day \d+ \w+ \d{4}\.$/);
+    assert.match(unassigned.ref, /^\d{4}$/);
+    assert.equal(change.filter((r) => r.resident === "No RoomNow").length, 1, "a plain unassignment is not also read as a move");
+    assert.equal(change.filter((r) => r.resident === "Leaving Roomed").length, 0, "a departure's own room closure must not also appear as an unassignment");
+    const leftRoom = rep.json.rows.find((r) => r.section === "Resident removals" && r.resident === "Leaving Roomed");
+    assert.ok(leftRoom, "the departure with a room is missing from Resident removals");
   });
 
   console.log("\n== the Sunday email: recipients, send now, the nightly job (migration 035) ==");
