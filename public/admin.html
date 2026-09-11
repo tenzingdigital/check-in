@@ -115,6 +115,9 @@
   #absTable td.num { font-variant-numeric: tabular-nums; }
   #impTable td.st-error { color: var(--bad); white-space: normal; }
   #impTable td.st-exists { color: var(--muted); }
+  /* Amber, not red: a line that matched more than one person is a question
+     for the importer, not a broken row. */
+  #impTable td.st-ambiguous { color: var(--warn-text, var(--warn)); white-space: normal; }
   #impTable td.st-ready, #impTable td.st-added { color: var(--ok); }
   #importPanel .tablewrap { max-height: 50vh; overflow: auto; margin-top: 10px; }
   @media print {
@@ -893,15 +896,16 @@ function renderImportPreview(results) {
   if (counts.added) parts.push(`${counts.added} added`);
   if (counts.ready) parts.push(`${counts.ready} ready to add`);
   if (counts.exists) parts.push(`${counts.exists} already on the register`);
+  if (counts.ambiguous) parts.push(`${counts.ambiguous} needing a reference to say which resident`);
   if (counts.error) parts.push(`${counts.error} with a problem to fix`);
   $("impSummary").textContent = `${imp.rows.length} line${imp.rows.length === 1 ? "" : "s"}: ${parts.join(", ")}.`;
   const head = ["Line", "Name", "Date of birth", "Room", "Result"];
-  const label = { ready: "Ready", exists: "Already here", error: "Problem", added: "Added" };
+  const label = { ready: "Ready", exists: "Already here", error: "Problem", added: "Added", ambiguous: "Which one?" };
   $("impTable").innerHTML = `<thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${
     imp.rows.map((r) => {
       const res = byLine.get(r.line) || { status: "error", message: "No answer for this line" };
       const room = [r.building, r.floor, r.room].filter(Boolean).join(" · ");
-      return `<tr><td>${r.line}</td><td>${esc(`${r.first_name || ""} ${r.last_name || ""}`.trim())}</td><td>${esc(r.date_of_birth || "")}</td><td>${esc(room)}</td><td class="st-${esc(res.status)}"><b>${label[res.status] || res.status}</b>${res.message && res.status !== "ready" && res.status !== "added" ? ` — ${esc(res.message)}` : ""}</td></tr>`;
+      return `<tr><td>${r.line}</td><td>${esc(`${r.first_name || ""} ${r.last_name || ""}`.trim())}</td><td>${esc(r.date_of_birth || "")}</td><td>${esc(room)}</td><td class="st-${esc(res.status)}"><b>${label[res.status] || res.status}</b>${res.message && res.status !== "ready" ? ` — ${esc(res.message)}` : ""}</td></tr>`;
     }).join("")}</tbody>`;
   $("impPreview").hidden = false;
   imp.last = results;
@@ -967,7 +971,7 @@ function renderDetail(rec, summary) {
   el.innerHTML = `
     ${sheetBar()}
     <h2>${esc(rec.first_name)} ${esc(rec.last_name)}</h2>
-    <div class="sub">${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
+    <div class="sub">${rec.ref ? `<b>${esc(refLabel(rec.ref))}</b> · ` : ""}${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
 
     <form id="editForm" class="formcard mt14" autocomplete="off">
       <div class="grid2">

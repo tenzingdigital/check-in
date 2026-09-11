@@ -149,7 +149,7 @@ REPORTS.overnight = {
   title: 'Absent overnight',
   ranged: true,
   sql: `select o.night::text as night, rm.building, rm.room,
-               btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+               lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
                case when vs.is_adult then '' else 'child' end as child,
                to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
                to_char(o.off_site_since at time zone s.local_timezone, 'HH24:MI') as time_out,
@@ -179,7 +179,7 @@ REPORTS.away = {
                      lead(e.guard_id)    over w as next_guard
                 from gate_events e
               window w as (partition by e.resident_id order by e.occurred_at, e.id))
-       select rm.building, rm.room, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+       select rm.building, rm.room, lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
               case when vs.is_adult then '' else 'child' end as child,
               to_char(ev.occurred_at at time zone s.tz, 'YYYY-MM-DD') as date_out,
               to_char(ev.occurred_at at time zone s.tz, 'HH24:MI') as time_out,
@@ -216,7 +216,7 @@ REPORTS.weekly = {
 REPORTS.absences = {
   title: 'Authorised absences',
   ranged: true,
-  sql: `select btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
+  sql: `select lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
                a.from_date::text as "from", coalesce(a.ended_on, a.to_date)::text as "to",
                case when a.ended_on is not null and a.ended_on < a.to_date then 'cut short (planned to ' || a.to_date || ')' else '' end as note,
                a.reason, a.guardian_agreed, p.full_name as approved_by,
@@ -257,7 +257,7 @@ REPORTS['roll-call-marks'] = {
 REPORTS['room-history'] = {
   title: 'Room history',
   ranged: true,
-  sql: `select btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, ra.room_label as room,
+  sql: `select lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, ra.room_label as room,
                to_char(ra.from_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as "from",
                to_char(ra.to_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as "to",
                p.full_name as moved_by
@@ -274,7 +274,7 @@ REPORTS['room-history'] = {
 REPORTS.breaches = {
   title: 'Breach reports issued',
   ranged: true,
-  sql: `select b.issued_on::text as issued_on, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
+  sql: `select b.issued_on::text as issued_on, lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
                case b.kind when 'house_rules' then 'breach of house rules' else 'misuse of the verification system' end as kind,
                b.reference, p.full_name as issued_by
           from breach_reports b

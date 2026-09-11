@@ -14,6 +14,7 @@
 const express = require('express');
 const { csv } = require('../lib/csv');
 const { xlsx } = require('../lib/xlsx');
+const { formatRef, parseRef } = require('../lib/ref');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const { HttpError, uuidParam, intParam, dateParam } = require('../lib/api');
@@ -548,9 +549,37 @@ router.post('/import', wrap(async (req, res) => {
     const { rows: rooms } = await client.query(
       `select rm.id, lower(b.name) as building, lower(rm.floor) as floor, lower(rm.number) as number
          from rooms rm join buildings b on b.id = rm.building_id`);
+    // Two indexes over the active register: by reference, which is exact, and
+    // by name, which may be ambiguous and is allowed to say so.
+    //
+    // Date of birth is deliberately NOT part of either. It used to be, and it
+    // could not tell two residents of the same name and birthday apart while
+    // resting on dobFromSheet() — which reads every dd/mm/yyyy as day-first
+    // whatever the sheet's origin, and parses successfully when it is wrong.
+    // A date of birth is still imported and still decides whether someone is
+    // an adult; it no longer decides who a row IS.
     const { rows: existing } = await client.query(
-      `select lower(first_name) as f, lower(last_name) as l, date_of_birth::text as dob from residents where status = 'active'`);
-    const seen = new Set(existing.map((e) => `${e.f}|${e.l}|${e.dob}`));
+      `select id, ref, first_name, last_name from residents where status = 'active'`);
+
+    // Both sides folded by the SAME function, here. The register's own
+    // search_key folds with immutable_unaccent, which uses a lookup table;
+    // NFD-stripping only approximates it, and where the two disagree a match
+    // silently becomes a second copy of a person. So neither side is folded
+    // in SQL: the sheet and the register go through this one line.
+    const fold = (first, last) =>
+      `${first} ${last}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ').trim().toLowerCase();
+
+    const byRef = new Map(existing.map((e) => [e.ref, e]));
+    const byName = new Map();
+    for (const e of existing) {
+      const k = fold(e.first_name, e.last_name);
+      if (!byName.has(k)) byName.set(k, []);
+      byName.get(k).push(e);
+    }
+    // A name imported twice in the SAME sheet is a duplicate too, so rows
+    // added by this run join the index as they go.
+    const addedThisRun = new Map();
 
     const out = [];
     for (const [i, raw] of rows.entries()) {
@@ -576,20 +605,62 @@ router.post('/import', wrap(async (req, res) => {
           roomId = hits[0].id;
         }
 
-        const key = `${first.toLowerCase()}|${last.toLowerCase()}|${dob}`;
-        if (seen.has(key)) { out.push({ line, status: 'exists', message: 'Already on the register (same name and date of birth)' }); continue; }
-        seen.add(key);
-        if (dryRun) { out.push({ line, status: 'ready', message: roomId ? 'Ready' : 'Ready (no room)' }); continue; }
+        // Who is this row about?
+        const wantRef = parseRef(r.ref);
+        const key = fold(first, last);
+
+        if (wantRef !== null) {
+          const hit = byRef.get(wantRef);
+          // An unknown reference is an error, never an insert. A typo in a
+          // reference must not quietly create a second copy of a person.
+          if (!hit) throw new HttpError(400, `No resident with reference ${formatRef(wantRef)} on this register`);
+          out.push({
+            line, status: 'exists', ref: formatRef(hit.ref),
+            matched: `${hit.first_name} ${hit.last_name}`,
+            message: `Already on the register as ${formatRef(hit.ref)} ${hit.first_name} ${hit.last_name}`,
+          });
+          continue;
+        }
+
+        const hits = (byName.get(key) || []).concat(addedThisRun.get(key) || []);
+        if (hits.length === 1) {
+          out.push({
+            line, status: 'exists', ref: formatRef(hits[0].ref),
+            matched: `${hits[0].first_name} ${hits[0].last_name}`,
+            message: `Already on the register as ${formatRef(hits[0].ref)}`,
+          });
+          continue;
+        }
+        if (hits.length > 1) {
+          // Guessing here is how the wrong resident gets updated. Say so and
+          // let the person put the reference in.
+          out.push({
+            line, status: 'ambiguous',
+            message: `${hits.length} residents are called ${first} ${last}. Put their reference in the ref column to say which.`,
+          });
+          continue;
+        }
+
+        if (dryRun) {
+          addedThisRun.set(key, [{ ref: null, first_name: first, last_name: last }]);
+          out.push({ line, status: 'ready', message: roomId ? 'Ready' : 'Ready (no room)' });
+          continue;
+        }
 
         await client.query('savepoint row_import');
         try {
           const { rows: ins } = await client.query(
             `insert into residents (first_name, last_name, date_of_birth, id_type, id_number, room_id, evac_need, registered_by)
              values ($1, $2, $3, $4, $5, $6, $7, auth.uid())
-             returning id`,
+             returning id, ref`,
             [first, last, dob, id.idType, id.idNumber, roomId, evac]);
           await client.query('release savepoint row_import');
-          out.push({ line, status: 'added', id: ins[0].id, message: 'Added' });
+          // The new row joins the name index, so the same name twice in one
+          // sheet is caught rather than inserted twice.
+          addedThisRun.set(key, [{ ref: ins[0].ref, first_name: first, last_name: last }]);
+          // The reference comes back in the response: that is how a centre
+          // gets its numbers without anybody typing one.
+          out.push({ line, status: 'added', id: ins[0].id, ref: formatRef(ins[0].ref), message: `Added as ${formatRef(ins[0].ref)}` });
         } catch (err) {
           await client.query('rollback to savepoint row_import');
           if (err.code === '23505') throw new HttpError(400, 'That ID number is already on the register');
@@ -604,7 +675,7 @@ router.post('/import', wrap(async (req, res) => {
   }).catch((err) => { throw roomError(supervisorOnly(err)); });
 
   const count = (st) => results.filter((x) => x.status === st).length;
-  res.json({ dry_run: dryRun, results, added: count('added'), ready: count('ready'), exists: count('exists'), errors: count('error') });
+  res.json({ dry_run: dryRun, results, added: count('added'), ready: count('ready'), exists: count('exists'), ambiguous: count('ambiguous'), errors: count('error') });
 }));
 
 // GET /api/residents/:id/record — the row as a supervisor edits it. This is
@@ -615,7 +686,7 @@ router.get('/:id/record', wrap(async (req, res) => {
   const row = await db.withIdentity(req.session.userId, async (client) => {
     await client.query('select note_view($1, $2)', [uuidParam(req.params.id, 'resident id'), 'admin']);
     const { rows } = await client.query(
-      `select id, first_name, last_name, date_of_birth, id_type, id_number,
+      `select id, ref, first_name, last_name, date_of_birth, id_type, id_number,
               status, departed_on, registered_at, room_id, evac_need, household_id
          from residents where id = $1`,
       [uuidParam(req.params.id, 'resident id')],

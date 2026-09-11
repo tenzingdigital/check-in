@@ -70,6 +70,7 @@ node tools/gen-permissions-doc.js --check || fail=1
 step "Mail provider error logging"
 node test/mail.test.js || fail=1
 node test/xlsx.test.js || fail=1
+node test/ref.test.js || fail=1
 
 if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/null 2>&1; then
   step "Database suite"
