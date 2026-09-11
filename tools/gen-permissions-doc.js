@@ -26,7 +26,17 @@ function table(area) {
   for (const r of rows.filter((x) => x.area === area)) {
     const cells = ROLES.map((role) => SYMBOL[expectFor(r, role)]);
     const name = r.note ? `${r.name}<br><small>${r.note}</small>` : r.name;
-    lines.push(`| ${name}<br><code>${r.method} ${r.path({ residentId: ':id', buildingId: ':id', roomId: ':id', rollCallId: ':id', staffId: ':id', weeklyReportStaffId: ':id', tenantId: ':id', absenceWindowId: ':id', today: 'DATE' }).replace(/\?.*$/, '')}</code> | ${cells.join(' | ')} |`);
+    lines.push(`| ${name}<br><code>${r.method} ${r.path({
+      // Every fixture key a path() in test/permissions.js dereferences. A key
+      // missing here renders "undefined" in the published table — which reads
+      // as a real path and is not one. Kept sorted so the next addition is
+      // obvious; check.sh fails if this file goes stale, but it cannot know
+      // an id it was never told about.
+      absenceId: ':id', absenceWindowId: ':id', buildingId: ':id', residentId: ':id',
+      rollCallId: ':id', roomId: ':id', rosterId: ':id', safeguardingStaffId: ':id',
+      staffId: ':id', tenantId: ':id', visitId: ':id', weeklyReportStaffId: ':id',
+      today: 'DATE',
+    }).replace(/\?.*$/, '')}</code> | ${cells.join(' | ')} |`);
   }
   return lines.join('\n');
 }

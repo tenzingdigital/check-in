@@ -2965,6 +2965,13 @@ async function main() {
         const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [`wr${Math.floor(Math.random() * 1e9)}@hut.example`, PASSWORD, "Weekly Report Target", "supervisor"]));
         fx.weeklyReportStaffId = rows[0].id;
       },
+      // Fresh for the same reason as weeklyReportStaff above: a target already
+      // ticked, or already demoted, would make an "allow" attempt hit the
+      // check constraint instead of genuinely succeeding.
+      safeguardingStaff: async () => {
+        const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [`sg${Math.floor(Math.random() * 1e9)}@hut.example`, PASSWORD, "Safeguarding Alert Target", "supervisor"]));
+        fx.safeguardingStaffId = rows[0].id;
+      },
       visit: async () => {
         const v = await guardC.fetch("/api/visits", { method: "POST", body: { kind: "visitor", name: `Matrix Visitor ${Math.floor(Math.random() * 1e6)}` } });
         assert.equal(v.status, 201, v.text);
@@ -2994,7 +3001,7 @@ async function main() {
         fx.absenceWindowId = w.json.id;
       },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "weeklyReportStaff", "visit", "absence", "roster", "tenant", "absenceWindow"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "weeklyReportStaff", "safeguardingStaff", "visit", "absence", "roster", "tenant", "absenceWindow"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 

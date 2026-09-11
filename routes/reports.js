@@ -151,6 +151,26 @@ REPORTS.overnight = {
   sql: `select o.night::text as night, rm.building, rm.room,
                lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
                case when vs.is_adult then '' else 'child' end as child,
+               -- The report already held both halves of this and never put
+               -- them together: a child was a 'child' cell beside an empty
+               -- 'note' cell, sorted by surname among authorised adults, so a
+               -- manager had to read two columns, combine them, and notice the
+               -- ABSENCE of a word. An under-18 is exempt from the daily rule
+               -- (v_resident_compliance evaluates 'exempt' before everything
+               -- else), so they never reach Not seen or attention_list either
+               -- — this column is the only place the app says it.
+               --
+               -- Children only. An adult away without authorisation is a
+               -- compliance matter with machinery already: the absence window,
+               -- the breach report, the Sunday return. For a child it is a
+               -- safeguarding matter with no rule behind it, and one column
+               -- carrying both would blur two different meanings.
+               case
+                 when vs.is_adult then ''
+                 when absence_authorised(o.resident_id, o.night) then ''
+                 when o.off_site_since is null then 'CHILD — NEVER SIGNED IN'
+                 else 'CHILD AWAY — NOT AUTHORISED'
+               end as concern,
                to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
                to_char(o.off_site_since at time zone s.local_timezone, 'HH24:MI') as time_out,
                concat_ws('; ', case when o.off_site_since is null then 'never signed in' end,
@@ -161,7 +181,12 @@ REPORTS.overnight = {
           left join v_resident_room rm on rm.id = r.id
           cross join (select local_timezone from app_settings where id) s
          where o.night between $1 and $2
-         order by o.night desc, r.last_name, r.first_name`,
+         -- Flagged rows first within each night, so the thing being looked
+         -- for is the first line on the page rather than alphabetical among
+         -- everyone who was properly signed out.
+         order by o.night desc,
+                  (not vs.is_adult and not absence_authorised(o.resident_id, o.night)) desc,
+                  r.last_name, r.first_name`,
 };
 
 // Every sign OUT in the range with the sign IN that followed it, one row

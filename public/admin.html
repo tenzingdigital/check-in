@@ -1299,11 +1299,17 @@ function staffCard(s) {
   // summarises, so the tick is offered only for those roles (migration 037).
   const weeklyReport = s.role === "guard" ? "" : `
         <label class="check"><input type="checkbox" class="sWk" data-sid="${esc(s.id)}" ${s.weekly_report ? "checked" : ""}> <span>Gets the Sunday report</span></label>`;
+  // A separate tick from the Sunday report, deliberately: a designated
+  // safeguarding person may want the nightly alert and not the weekly return
+  // to head office, or the reverse (migration 041). Same role rule — the
+  // alert points at a report a guard cannot run.
+  const safeguarding = s.role === "guard" ? "" : `
+        <label class="check"><input type="checkbox" class="sSg" data-sid="${esc(s.id)}" ${s.safeguarding_alert ? "checked" : ""}> <span>Gets the nightly safeguarding alert</span></label>`;
   return `
     <div class="card staff">
       <span class="who">
         <span class="name">${esc(s.full_name)}</span>
-        <span class="meta">${meta}</span>${weeklyReport}
+        <span class="meta">${meta}</span>${weeklyReport}${safeguarding}
       </span>
       <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
       <span class="actions-row">
@@ -1488,6 +1494,21 @@ $("staffList").addEventListener("change", async (e) => {
     );
     if (out) {
       toast(out.weekly_report ? `${s.full_name} will get the Sunday report` : `${s.full_name} will not get the Sunday report`, "ok");
+      loadStaff();
+    }
+  }
+  const sg = e.target.closest("input.sSg[data-sid]");
+  if (sg) {
+    const s = staffRows.get(sg.dataset.sid);
+    if (!s) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/safeguarding-alert`, { on: sg.checked }),
+      (err) => { toast(err.message, "err"); sg.checked = s.safeguarding_alert; },
+    );
+    if (out) {
+      toast(out.safeguarding_alert
+        ? `${s.full_name} will get the nightly safeguarding alert`
+        : `${s.full_name} will not get the nightly safeguarding alert`, "ok");
       loadStaff();
     }
   }
