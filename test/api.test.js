@@ -2142,7 +2142,7 @@ async function main() {
     assert.equal(dep.status, 200, dep.text);
     const rep = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday&format=json`);
     const sections = rep.json.rows.map((r) => r.section);
-    const order = ["Resident absences", "Updates from the weekend", "Resident removals", "Room updates"];
+    const order = ["Room updates", "Resident absences", "Updates from the weekend", "Resident removals", "Weekly register change"];
     assert.deepEqual([...new Set(sections)], order.filter((s) => sections.includes(s)), "sections out of order");
     const removal = rep.json.rows.find((r) => r.section === "Resident removals" && r.resident === "Gone Weekly");
     assert.ok(removal, "the departure is missing"); assert.equal(removal.status, "departed");
@@ -2155,6 +2155,46 @@ async function main() {
     assert.equal(free.line, "Weekly Block W2: 2 of 3 beds free.");
     const csv = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday`);
     assert.match(csv.text, /^﻿?section,building,room,resident,child,from_date,to_date,nights,back_on,status,line\r\n/);
+  });
+
+  await test("a new admission and a mid-stay room move appear under Weekly register change (migration 040)", async () => {
+    const bld = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Register Change Block" } });
+    assert.equal(bld.status, 201, bld.text);
+    const made = await supC.fetch(`/api/buildings/${bld.json.id}/rooms`, { method: "POST", body: { rooms: [{ floor: "", number: "RC1", capacity: 2 }, { floor: "", number: "RC2", capacity: 2 }] } });
+    assert.equal(made.status, 201, made.text);
+    const rc1 = made.json.find((r) => r.number === "RC1"), rc2 = made.json.find((r) => r.number === "RC2");
+
+    // A new admission: registered and roomed inside the reporting week.
+    const arrival = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "New", last_name: "Arrival", date_of_birth: "1990-01-01" } });
+    assert.equal(arrival.status, 201, arrival.text);
+    assert.equal((await supC.fetch(`/api/residents/${arrival.json.id}`, { method: "PATCH", body: { room_id: rc1.id } })).status, 200);
+    await withOwner((c) => c.query(`update public.residents set registered_at = $2::date where id = $1`, [arrival.json.id, wkDay(-4)]));
+    await withOwner((c) => c.query(`update public.room_assignments set from_at = $2::date where resident_id = $1 and to_at is null`, [arrival.json.id, wkDay(-4)]));
+
+    // A mid-stay move: registered and first roomed well before the week,
+    // moved to a different room inside it.
+    const mover = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "On", last_name: "TheMove", date_of_birth: "1985-05-05" } });
+    assert.equal(mover.status, 201, mover.text);
+    assert.equal((await supC.fetch(`/api/residents/${mover.json.id}`, { method: "PATCH", body: { room_id: rc1.id } })).status, 200);
+    await withOwner((c) => c.query(`update public.residents set registered_at = now() - interval '60 days' where id = $1`, [mover.json.id]));
+    await withOwner((c) => c.query(`update public.room_assignments set from_at = now() - interval '60 days' where resident_id = $1 and to_at is null`, [mover.json.id]));
+    assert.equal((await supC.fetch(`/api/residents/${mover.json.id}`, { method: "PATCH", body: { room_id: rc2.id } })).status, 200);
+    await withOwner((c) => c.query(`update public.room_assignments set from_at = $2::date where resident_id = $1 and to_at is null`, [mover.json.id, wkDay(-1)]));
+
+    const rep = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    const change = rep.json.rows.filter((r) => r.section === "Weekly register change");
+    const admitted = change.find((r) => r.resident === "New Arrival");
+    assert.ok(admitted, "the new admission is missing");
+    assert.equal(admitted.status, "admitted");
+    assert.match(admitted.line, /^New Arrival moved into Register Change Block RC1 on \w+day \d+ \w+ \d{4}\.$/);
+    const moved = change.find((r) => r.resident === "On TheMove");
+    assert.ok(moved, "the mid-stay move is missing");
+    assert.equal(moved.status, "moved");
+    assert.match(moved.line, /^On TheMove moved from Register Change Block RC1 to Register Change Block RC2 on \w+day \d+ \w+ \d{4}\.$/);
+    // The mover's original assignment, well before the window, must not
+    // also surface here — only the one change inside the window.
+    assert.equal(change.filter((r) => r.resident === "On TheMove").length, 1, "the original, out-of-window assignment must not also appear");
   });
 
   console.log("\n== the Sunday email: recipients, send now, the nightly job (migration 035) ==");
@@ -2189,6 +2229,7 @@ async function main() {
       { section: "Updates from the weekend", status: "approved", resident: "Weekend Resident", room: "W3", building: "Weekly Block", child: "", line: "Weekend Resident was absent at the weekend." },
       { section: "Resident removals", status: "departed", resident: "Departed Resident", room: "W4", building: "Weekly Block", child: "", line: "Departed Resident departed." },
       { section: "Room updates", status: "maintenance", resident: null, room: "W1", building: "Weekly Block", child: null, line: "Weekly Block W1 is under maintenance." },
+      { section: "Weekly register change", status: "admitted", resident: "Arrived Resident", room: "W5", building: "Weekly Block", child: "", line: "Arrived Resident moved into Weekly Block W5." },
     ];
     const out = compose({
       siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows,
@@ -2201,6 +2242,7 @@ async function main() {
     assert.doesNotMatch(out.text, /Updates from the weekend:.*not approved/);
     assert.match(out.text, /Resident removals: 1/);
     assert.match(out.text, /Room updates: 1/);
+    assert.match(out.text, /Weekly register change: 1/);
     assert.match(out.text, /A night inside an authorised absence recorded in CheckSteady is approved/, "the closing sentence describes a night, not a span");
     assert.ok(out.text.includes("https://hut-check-in.onrender.com/admin.html"), "the link is in the body");
     assert.match(out.text, /^Open the app: https:\/\/hut-check-in\.onrender\.com\/admin\.html$/m, "the copy says only that the link opens the app");
@@ -2217,7 +2259,7 @@ async function main() {
     assert.ok(!out.text.includes(secretRoom), "no room anywhere in the composed email");
     assert.ok(!out.text.includes(secretBuilding), "no building anywhere in the composed email");
     assert.ok(!/\bchild\b/.test(out.text), "no child marker anywhere in the composed email");
-    assert.ok(!/was absent|departed on|under maintenance/.test(out.text), "no per-row sentence in the composed email");
+    assert.ok(!/was absent|departed on|under maintenance|moved into/.test(out.text), "no per-row sentence in the composed email");
   });
 
   await test("compose() omits the link when none is given, but still says where to find the report", async () => {

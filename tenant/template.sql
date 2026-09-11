@@ -262,6 +262,19 @@ CREATE TABLE __TENANT__.daily_compliance (
 
 --
 
+-- Name: resident_ref_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE __TENANT__.resident_ref_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+
 -- Name: residents; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -281,6 +294,7 @@ CREATE TABLE __TENANT__.residents (
     room_id uuid,
     evac_need text DEFAULT 'none'::text NOT NULL,
     household_id uuid,
+    ref integer DEFAULT nextval('__TENANT__.resident_ref_seq'::regclass) NOT NULL,
     CONSTRAINT departed_on_matches_status CHECK (((status = 'departed'::text) = (departed_on IS NOT NULL))),
     CONSTRAINT residents_date_of_birth_check CHECK (((date_of_birth > '1900-01-01'::date) AND (date_of_birth <= CURRENT_DATE))),
     CONSTRAINT residents_evac_need_check CHECK ((evac_need = ANY (ARRAY['none'::text, 'mobility'::text, 'hearing'::text, 'sight'::text, 'carer'::text, 'other'::text]))),
@@ -1265,6 +1279,42 @@ $$;
 
 --
 
+-- Name: overnight_safeguarding_count(date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.overnight_safeguarding_count(p_night date) RETURNS integer
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  select count(*)::integer
+    from __TENANT__.overnight_absences o
+    join __TENANT__.residents r on r.id = o.resident_id
+   where o.night = p_night
+     and r.date_of_birth > (o.night - make_interval(years => (select adult_age_years from __TENANT__.app_settings where id)))::date
+     and not __TENANT__.absence_authorised(o.resident_id, o.night);
+$$;
+
+
+--
+
+-- Name: profiles_clear_safeguarding_alert_for_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.profiles_clear_safeguarding_alert_for_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if new.role = 'guard' and (tg_op = 'INSERT' or old.role is distinct from new.role) then
+    new.safeguarding_alert := false;
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+
 -- Name: profiles_clear_weekly_report_for_guard(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2213,13 +2263,30 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
     AS $$
   select q.section, q.building, q.room, q.resident, q.child, q.from_date, q.to_date, q.nights, q.back_on, q.status, q.line
     from (
+      -- Rooms under maintenance or with free contracted beds
+      select 1 as seq, lpad(b.sort::text, 6, '0') || b.name as k1, lpad(rm.sort::text, 6, '0') || rm.floor as k2, rm.number as k3,
+             'Room updates' as section, b.name as building, rm.number as room, null::text as resident, ''::text as child,
+             null::date as from_date, null::date as to_date, null::integer as nights, null::date as back_on,
+             case when rm.status = 'maintenance' then 'maintenance' else x.free || ' free' end as status,
+             case when rm.status = 'maintenance'
+                  then b.name || ' ' || rm.number || ' is under maintenance' || coalesce(': ' || rm.note, '') || '.'
+                  else b.name || ' ' || rm.number || ': ' || x.free || ' of ' || x.contracted || ' bed' || case when x.contracted = 1 then '' else 's' end || ' free'
+                       || coalesce(' (' || rm.bed_config || ')', '') || coalesce(': ' || rm.note, '') || '.' end as line
+        from __TENANT__.rooms rm
+        join __TENANT__.buildings b on b.id = rm.building_id
+        cross join lateral (
+          select coalesce(rm.contracted_capacity, rm.capacity) as contracted,
+                 coalesce(rm.contracted_capacity, rm.capacity)
+                   - (select count(*)::integer from __TENANT__.residents r where r.room_id = rm.id and r.status = 'active') as free
+        ) x
+       where rm.archived_at is null and (rm.status = 'maintenance' or x.free > 0)
+      union all
       -- Absences, then the weekend
-      select case when s.weekend then 2 else 1 end as seq,
-             s.first_night::text as k1, s.last_name as k2, s.first_name as k3,
-             case when s.weekend then 'Updates from the weekend' else 'Resident absences' end as section,
-             s.building, s.room, s.resident, case when s.child then 'child' else '' end as child,
-             s.first_night as from_date, s.last_night as to_date, s.nights, s.back_on,
-             s.approval as status,
+      select case when s.weekend then 3 else 2 end, s.first_night::text, s.last_name, s.first_name,
+             case when s.weekend then 'Updates from the weekend' else 'Resident absences' end,
+             s.building, s.room, s.resident, case when s.child then 'child' else '' end,
+             s.first_night, s.last_night, s.nights, s.back_on,
+             s.approval,
              s.resident || case when s.child then ' (child)' else '' end
                || case when s.room is not null then ' from ' || s.building || ' ' || s.room else '' end
                || ' was absent from ' || to_char(s.first_night, 'FMDay FMDD FMMonth')
@@ -2229,11 +2296,11 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
                || '. '
                || case s.approval when 'approved' then 'Approved by management.'
                                   when 'not approved' then 'Not approved.'
-                                  else 'Partly approved (' || s.authorised_nights || ' of ' || s.nights || ' nights).' end as line
+                                  else 'Partly approved (' || s.authorised_nights || ' of ' || s.nights || ' nights).' end
         from __TENANT__.weekly_absence_spans(p_from, p_to) s
       union all
       -- Removals
-      select 3, r.departed_on::text, r.last_name, r.first_name,
+      select 4, r.departed_on::text, r.last_name, r.first_name,
              'Resident removals', b.name, rm.number,
              btrim(r.first_name) || ' ' || btrim(r.last_name),
              case when r.date_of_birth > (r.departed_on - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
@@ -2248,23 +2315,51 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
         cross join (select adult_age_years from __TENANT__.app_settings where id) st
        where r.status = 'departed' and r.departed_on between p_from and p_to
       union all
-      -- Rooms under maintenance or with free contracted beds
-      select 4, lpad(b.sort::text, 6, '0') || b.name, lpad(rm.sort::text, 6, '0') || rm.floor, rm.number,
-             'Room updates', b.name, rm.number, null, '',
-             null, null, null, null,
-             case when rm.status = 'maintenance' then 'maintenance' else x.free || ' free' end,
-             case when rm.status = 'maintenance'
-                  then b.name || ' ' || rm.number || ' is under maintenance' || coalesce(': ' || rm.note, '') || '.'
-                  else b.name || ' ' || rm.number || ': ' || x.free || ' of ' || x.contracted || ' bed' || case when x.contracted = 1 then '' else 's' end || ' free'
-                       || coalesce(' (' || rm.bed_config || ')', '') || coalesce(': ' || rm.note, '') || '.' end
-        from __TENANT__.rooms rm
-        join __TENANT__.buildings b on b.id = rm.building_id
+      -- Weekly register change: new admissions
+      select 5, (r.registered_at at time zone st.tz)::date::text, r.last_name, r.first_name,
+             'Weekly register change', b.name, rm.number,
+             btrim(r.first_name) || ' ' || btrim(r.last_name),
+             case when r.date_of_birth > ((r.registered_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
+             (r.registered_at at time zone st.tz)::date, (r.registered_at at time zone st.tz)::date, null::integer, null::date, 'admitted',
+             btrim(r.first_name) || ' ' || btrim(r.last_name)
+               || case when r.date_of_birth > ((r.registered_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then ' (child)' else '' end
+               || case when rm.id is not null then ' moved into ' || b.name || ' ' || rm.number else ' was registered' end
+               || ' on ' || to_char((r.registered_at at time zone st.tz)::date, 'FMDay FMDD FMMonth YYYY') || '.'
+        from __TENANT__.residents r
+        left join __TENANT__.rooms rm on rm.id = r.room_id
+        left join __TENANT__.buildings b on b.id = rm.building_id
+        cross join (select adult_age_years, local_timezone as tz from __TENANT__.app_settings where id) st
+       where (r.registered_at at time zone st.tz)::date between p_from and p_to
+      union all
+      -- Weekly register change: a room or building move mid-stay (not the
+      -- first-ever assignment — that is the admission line above). The "from"
+      -- and "to" room read as "Building Number", the same style as every
+      -- other line in this report; room_assignments.room_label (its own
+      -- "Building · Number" form, used by the Room history report) is the
+      -- fallback for a room since deleted or renumbered.
+      select 5, (ra.from_at at time zone st.tz)::date::text, r.last_name, r.first_name,
+             'Weekly register change', b.name, rm.number,
+             btrim(r.first_name) || ' ' || btrim(r.last_name),
+             case when r.date_of_birth > ((ra.from_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then 'child' else '' end,
+             (ra.from_at at time zone st.tz)::date, (ra.from_at at time zone st.tz)::date, null::integer, null::date, 'moved',
+             btrim(r.first_name) || ' ' || btrim(r.last_name)
+               || case when r.date_of_birth > ((ra.from_at at time zone st.tz)::date - make_interval(years => st.adult_age_years))::date then ' (child)' else '' end
+               || ' moved from ' || coalesce(pb.name || ' ' || prm.number, prev.room_label)
+               || ' to ' || coalesce(b.name || ' ' || rm.number, ra.room_label)
+               || ' on ' || to_char((ra.from_at at time zone st.tz)::date, 'FMDay FMDD FMMonth YYYY') || '.'
+        from __TENANT__.room_assignments ra
+        join __TENANT__.residents r on r.id = ra.resident_id
+        left join __TENANT__.rooms rm on rm.id = ra.room_id
+        left join __TENANT__.buildings b on b.id = rm.building_id
+        cross join (select adult_age_years, local_timezone as tz from __TENANT__.app_settings where id) st
         cross join lateral (
-          select coalesce(rm.contracted_capacity, rm.capacity) as contracted,
-                 coalesce(rm.contracted_capacity, rm.capacity)
-                   - (select count(*)::integer from __TENANT__.residents r where r.room_id = rm.id and r.status = 'active') as free
-        ) x
-       where rm.archived_at is null and (rm.status = 'maintenance' or x.free > 0)
+          select ra2.room_id, ra2.room_label from __TENANT__.room_assignments ra2
+           where ra2.resident_id = ra.resident_id and ra2.from_at < ra.from_at
+           order by ra2.from_at desc limit 1
+        ) prev
+        left join __TENANT__.rooms prm on prm.id = prev.room_id
+        left join __TENANT__.buildings pb on pb.id = prm.building_id
+       where (ra.from_at at time zone st.tz)::date between p_from and p_to
     ) q
    order by q.seq, q.k1, q.k2, q.k3;
 $$;
@@ -2541,7 +2636,9 @@ CREATE TABLE __TENANT__.profiles (
     active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     weekly_report boolean DEFAULT false NOT NULL,
+    safeguarding_alert boolean DEFAULT false NOT NULL,
     CONSTRAINT profiles_role_check CHECK ((role = ANY (ARRAY['guard'::text, 'supervisor'::text, 'admin'::text]))),
+    CONSTRAINT profiles_safeguarding_alert_not_guard CHECK ((NOT (safeguarding_alert AND (role = 'guard'::text)))),
     CONSTRAINT profiles_weekly_report_not_guard CHECK ((NOT (weekly_report AND (role = 'guard'::text))))
 );
 
@@ -2987,6 +3084,15 @@ ALTER TABLE ONLY __TENANT__.residents
 
 --
 
+-- Name: residents residents_ref_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.residents
+    ADD CONSTRAINT residents_ref_unique UNIQUE (ref);
+
+
+--
+
 -- Name: roll_call_marks roll_call_marks_client_ref_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3377,6 +3483,14 @@ CREATE TRIGGER profiles_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.pro
 --
 
 CREATE TRIGGER profiles_end_sessions_on_deactivate AFTER UPDATE OF active ON __TENANT__.profiles FOR EACH ROW EXECUTE FUNCTION __TENANT__.end_sessions_on_deactivate();
+
+
+--
+
+-- Name: profiles profiles_safeguarding_alert_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER profiles_safeguarding_alert_guard BEFORE INSERT OR UPDATE ON __TENANT__.profiles FOR EACH ROW EXECUTE FUNCTION __TENANT__.profiles_clear_safeguarding_alert_for_guard();
 
 
 --
@@ -4294,6 +4408,16 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.daily_compliance TO servic
 
 --
 
+-- Name: SEQUENCE resident_ref_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.resident_ref_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.resident_ref_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.resident_ref_seq TO service_role;
+
+
+--
+
 -- Name: TABLE residents; Type: ACL; Schema: public; Owner: -
 --
 
@@ -4578,6 +4702,23 @@ GRANT ALL ON FUNCTION __TENANT__.note_report(p_report text, p_reason text, p_fro
 REVOKE ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.note_view(p_resident_id uuid, p_surface text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION overnight_safeguarding_count(p_night date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.overnight_safeguarding_count(p_night date) FROM PUBLIC;
+
+
+--
+
+-- Name: FUNCTION profiles_clear_safeguarding_alert_for_guard(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.profiles_clear_safeguarding_alert_for_guard() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.profiles_clear_safeguarding_alert_for_guard() TO service_role;
 
 
 --
