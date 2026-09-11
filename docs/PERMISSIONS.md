@@ -69,11 +69,11 @@ validation.
 |---|:---:|:---:|:---:|:---:|:---:|
 | Today's visitors, staff and contractors, and who is still on site<br><code>GET /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Sign a visitor, contractor, supplier or staff member in<br><code>POST /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
-| Sign them out<br><code>POST /api/visits/undefined/leave</code> | — | ✓ | ✓ | ✓ | ✓ |
+| Sign them out<br><code>POST /api/visits/:id/leave</code> | — | ✓ | ✓ | ✓ | ✓ |
 | The site staff list<br><code>GET /api/roster</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Sign a listed staff member in with one tap<br><code>POST /api/visits</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Add to the staff list (one, or a pasted list)<br><code>POST /api/roster</code> | — | ✗ | ✓ | ✓ | ✓ |
-| Rename, retitle or archive a listed staff member<br><code>PATCH /api/roster/undefined</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Rename, retitle or archive a listed staff member<br><code>PATCH /api/roster/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
 
 ## Residents and buildings
 
@@ -83,7 +83,7 @@ validation.
 | Import residents from a spreadsheet (preview and for real)<br><code>POST /api/residents/import</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Authorise an absence (a holiday, a family matter)<br><code>POST /api/residents/:id/absences</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Record that a breach report was issued to IPAS<br><code>POST /api/residents/:id/breaches</code> | — | ✗ | ✓ | ✓ | ✓ |
-| Cut an authorised absence short or cancel it<br><code>POST /api/residents/:id/absences/undefined/end</code> | — | ✗ | ✓ | ✓ | ✓ |
+| Cut an authorised absence short or cancel it<br><code>POST /api/residents/:id/absences/:id/end</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Change a resident's details, room, need or family<br><code>PATCH /api/residents/:id</code> | — | ✗ | ✓ | ✓ | ✓ |
 | Open a resident's full record (date of birth, the edit sheet; logged)<br><small>A guard reads residents through a view that carries age, never the date of birth; the table itself does not exist for them</small><br><code>GET /api/residents/:id/record</code> | — | hidden | ✓ | ✓ | ✓ |
 | Add a building<br><code>POST /api/buildings</code> | — | ✗ | ✓ | ✓ | ✓ |
@@ -118,6 +118,7 @@ validation.
 | Disable or re-enable a staff account<br><code>POST /api/staff/:id/active</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Change a staff member's role<br><code>POST /api/staff/:id/role</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Tick or untick whether a staff member receives the weekly report<br><code>POST /api/staff/:id/weekly-report</code> | — | ✗ | ✗ | ✓ | ✓ |
+| Tick or untick whether a staff member receives the overnight safeguarding alert<br><code>POST /api/staff/:id/safeguarding-alert</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Set a staff member's password<br><code>POST /api/staff/:id/password</code> | — | ✗ | ✗ | ✓ | ✓ |
 
 ## Organisation

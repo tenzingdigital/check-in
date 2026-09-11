@@ -22,7 +22,7 @@ const router = express.Router();
 router.get('/', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `select p.id, u.email, p.full_name, p.role, p.active, p.weekly_report,
+      `select p.id, u.email, p.full_name, p.role, p.active, p.weekly_report, p.safeguarding_alert,
               u.last_sign_in_at, p.created_at
          from profiles p
          join auth.users u on u.id = p.id
@@ -213,6 +213,37 @@ router.post('/:id/weekly-report', wrap(async (req, res) => {
   }).catch((err) => { throw translateDbError(err); });
 
   if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can change who receives the weekly report.');
+  res.json(row);
+}));
+
+// POST /api/staff/:id/safeguarding-alert — whether this staff member gets
+// the nightly overnight safeguarding alert (migration 041). A separate flag
+// from the Sunday report on purpose: a designated safeguarding person may
+// want one and not the other, and ticking one should never tick the other.
+// Everything else mirrors /:id/weekly-report — a guard cannot carry it, the
+// constraint is the guarantee, and the update itself is the authorisation.
+router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'staff id');
+  const on = req.body?.on === true;
+
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    // As with the weekly report: 23514 is user-facing, so without this
+    // pre-check the 400 would carry Postgres's own wording naming the
+    // constraint rather than a sentence written for a manager.
+    if (on && req.session.role === 'admin') {
+      const { rows: [target] } = await client.query('select role from profiles where id = $1', [id]);
+      if (target && target.role === 'guard') {
+        throw new HttpError(400, 'A guard cannot receive the safeguarding alert. Promote them to supervisor or admin first.');
+      }
+    }
+    const { rows } = await client.query(
+      'update profiles set safeguarding_alert = $2 where id = $1 returning id, safeguarding_alert',
+      [id, on],
+    );
+    return rows[0];
+  }).catch((err) => { throw translateDbError(err); });
+
+  if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can change who receives the safeguarding alert.');
   res.json(row);
 }));
 

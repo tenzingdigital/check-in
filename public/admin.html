@@ -115,6 +115,9 @@
   #absTable td.num { font-variant-numeric: tabular-nums; }
   #impTable td.st-error { color: var(--bad); white-space: normal; }
   #impTable td.st-exists { color: var(--muted); }
+  /* Amber, not red: a line that matched more than one person is a question
+     for the importer, not a broken row. */
+  #impTable td.st-ambiguous { color: var(--warn-text, var(--warn)); white-space: normal; }
   #impTable td.st-ready, #impTable td.st-added { color: var(--ok); }
   #importPanel .tablewrap { max-height: 50vh; overflow: auto; margin-top: 10px; }
   @media print {
@@ -123,7 +126,20 @@
     body.printing #toast, body.printing #detail, body.printing #notForYou { display: none !important; }
     body.printing .tablewrap { border: 0; overflow: visible; }
     body.printing #rpTable th, body.printing #rpTable td { white-space: normal; border-color: #999; }
+    /* Column headings repeat on every page — a table that runs to page three
+       is unreadable without them — and a resident's row is never split
+       across a break. */
+    body.printing #rpTable thead { display: table-header-group; }
+    body.printing #rpTable tr { break-inside: avoid; }
+    /* The screen palette is dark. Printed as-is it is a page of ink and the
+       text is unreadable on white, so the report prints black on white. */
+    body.printing, body.printing #rpTable, body.printing #rpTable th,
+    body.printing #rpTable td, body.printing .rphead, body.printing #rpTitle,
+    body.printing #rpSub { background: #fff !important; color: #000 !important; }
+    body.printing #rpTable th { position: static; }
+    body.printing #rpSub { font-size: 9pt; }
   }
+  @page { margin: 14mm; }
   .seg { display: flex; gap: 6px; }
   .seg button {
     flex: 1; padding: 11px 8px; border-radius: 10px;
@@ -880,15 +896,16 @@ function renderImportPreview(results) {
   if (counts.added) parts.push(`${counts.added} added`);
   if (counts.ready) parts.push(`${counts.ready} ready to add`);
   if (counts.exists) parts.push(`${counts.exists} already on the register`);
+  if (counts.ambiguous) parts.push(`${counts.ambiguous} needing a reference to say which resident`);
   if (counts.error) parts.push(`${counts.error} with a problem to fix`);
   $("impSummary").textContent = `${imp.rows.length} line${imp.rows.length === 1 ? "" : "s"}: ${parts.join(", ")}.`;
   const head = ["Line", "Name", "Date of birth", "Room", "Result"];
-  const label = { ready: "Ready", exists: "Already here", error: "Problem", added: "Added" };
+  const label = { ready: "Ready", exists: "Already here", error: "Problem", added: "Added", ambiguous: "Which one?" };
   $("impTable").innerHTML = `<thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${
     imp.rows.map((r) => {
       const res = byLine.get(r.line) || { status: "error", message: "No answer for this line" };
       const room = [r.building, r.floor, r.room].filter(Boolean).join(" · ");
-      return `<tr><td>${r.line}</td><td>${esc(`${r.first_name || ""} ${r.last_name || ""}`.trim())}</td><td>${esc(r.date_of_birth || "")}</td><td>${esc(room)}</td><td class="st-${esc(res.status)}"><b>${label[res.status] || res.status}</b>${res.message && res.status !== "ready" && res.status !== "added" ? ` — ${esc(res.message)}` : ""}</td></tr>`;
+      return `<tr><td>${r.line}</td><td>${esc(`${r.first_name || ""} ${r.last_name || ""}`.trim())}</td><td>${esc(r.date_of_birth || "")}</td><td>${esc(room)}</td><td class="st-${esc(res.status)}"><b>${label[res.status] || res.status}</b>${res.message && res.status !== "ready" ? ` — ${esc(res.message)}` : ""}</td></tr>`;
     }).join("")}</tbody>`;
   $("impPreview").hidden = false;
   imp.last = results;
@@ -954,7 +971,7 @@ function renderDetail(rec, summary) {
   el.innerHTML = `
     ${sheetBar()}
     <h2>${esc(rec.first_name)} ${esc(rec.last_name)}</h2>
-    <div class="sub">${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
+    <div class="sub">${rec.ref ? `<b>${esc(refLabel(rec.ref))}</b> · ` : ""}${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
 
     <form id="editForm" class="formcard mt14" autocomplete="off">
       <div class="grid2">
@@ -1282,11 +1299,17 @@ function staffCard(s) {
   // summarises, so the tick is offered only for those roles (migration 037).
   const weeklyReport = s.role === "guard" ? "" : `
         <label class="check"><input type="checkbox" class="sWk" data-sid="${esc(s.id)}" ${s.weekly_report ? "checked" : ""}> <span>Gets the Sunday report</span></label>`;
+  // A separate tick from the Sunday report, deliberately: a designated
+  // safeguarding person may want the nightly alert and not the weekly return
+  // to head office, or the reverse (migration 041). Same role rule — the
+  // alert points at a report a guard cannot run.
+  const safeguarding = s.role === "guard" ? "" : `
+        <label class="check"><input type="checkbox" class="sSg" data-sid="${esc(s.id)}" ${s.safeguarding_alert ? "checked" : ""}> <span>Gets the nightly safeguarding alert</span></label>`;
   return `
     <div class="card staff">
       <span class="who">
         <span class="name">${esc(s.full_name)}</span>
-        <span class="meta">${meta}</span>${weeklyReport}
+        <span class="meta">${meta}</span>${weeklyReport}${safeguarding}
       </span>
       <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
       <span class="actions-row">
@@ -1474,6 +1497,21 @@ $("staffList").addEventListener("change", async (e) => {
       loadStaff();
     }
   }
+  const sg = e.target.closest("input.sSg[data-sid]");
+  if (sg) {
+    const s = staffRows.get(sg.dataset.sid);
+    if (!s) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/safeguarding-alert`, { on: sg.checked }),
+      (err) => { toast(err.message, "err"); sg.checked = s.safeguarding_alert; },
+    );
+    if (out) {
+      toast(out.safeguarding_alert
+        ? `${s.full_name} will get the nightly safeguarding alert`
+        : `${s.full_name} will not get the nightly safeguarding alert`, "ok");
+      loadStaff();
+    }
+  }
 });
 
 /* ========================================================================
@@ -1650,7 +1688,8 @@ async function loadReports() {
       <div><b>${esc(r.title)}</b><span class="hint">${r.ranged ? "For the dates above" : "As it stands now"}</span></div>
       <div class="row">
         <button class="btn ghost sm" type="button" data-view="${esc(r.name)}">View</button>
-        <button class="btn sm" type="button" data-csv="${esc(r.name)}">CSV</button>
+        <button class="btn ghost sm" type="button" data-csv="${esc(r.name)}">CSV</button>
+        <button class="btn sm" type="button" data-xlsx="${esc(r.name)}">Excel</button>
       </div>
     </div>`).join("");
 }
@@ -1663,16 +1702,33 @@ function reportQuery(name) {
 
 $("reportForm").addEventListener("submit", (e) => e.preventDefault());
 $("reportList").addEventListener("click", async (e) => {
-  const csvBtn = e.target.closest("[data-csv]"); const viewBtn = e.target.closest("[data-view]");
+  const csvBtn = e.target.closest("[data-csv]");
+  const xlsxBtn = e.target.closest("[data-xlsx]");
+  const viewBtn = e.target.closest("[data-view]");
   if (csvBtn) {
     const q = reportQuery(csvBtn.dataset.csv); if (!q) return;
     window.location.href = q; toast("Export recorded and downloading", "ok");
+  } else if (xlsxBtn) {
+    // Excel rather than CSV keeps a leading zero, keeps a date a date, and
+    // cannot execute a cell that begins "=". Same URL, same audit row.
+    const q = reportQuery(xlsxBtn.dataset.xlsx); if (!q) return;
+    window.location.href = q + "&format=xlsx"; toast("Export recorded and downloading", "ok");
   } else if (viewBtn) {
     const q = reportQuery(viewBtn.dataset.view); if (!q) return;
     const out = await guarded(() => apiGet(q + "&format=json"), (err) => toast("Could not load: " + err.message, "err"));
     if (!out) return;
     $("rpTitle").textContent = out.title;
-    $("rpSub").textContent = `${state.settings?.site_name || ""}${out.from ? ` · ${out.from} to ${out.to}` : ""} · ${out.rows.length} row${out.rows.length === 1 ? "" : "s"} · printed ${new Date().toLocaleString()}`;
+    // Provenance, on the line that already prints. An inspector asking where
+    // a printout came from is asking exactly this, and a page that cannot
+    // answer is worth less. It does put a staff name on every sheet that
+    // leaves the building — a decision recorded in the design, not a slip.
+    $("rpSub").textContent = [
+      state.settings?.site_name || "",
+      out.from ? `${out.from} to ${out.to}` : "",
+      `${out.rows.length} row${out.rows.length === 1 ? "" : "s"}`,
+      `printed ${new Date().toLocaleString("en-IE")}`,
+      state.profile?.full_name ? `by ${state.profile.full_name}` : "",
+    ].filter(Boolean).join(" · ");
     const cols = out.rows.length ? Object.keys(out.rows[0]) : [];
     const head = (c) => c.replace(/_/g, " ");
     const cell = (v) => v === null || v === undefined ? "" : typeof v === "boolean" ? (v ? "yes" : "no") : esc(String(v).replace(/T\d\d:\d\d:\d\d.*$/, ""));

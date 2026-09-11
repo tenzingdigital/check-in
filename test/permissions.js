@@ -116,6 +116,7 @@ module.exports = [
   { area: 'Administration', name: 'Disable or re-enable a staff account', method: 'POST', path: (fx) => `/api/staff/${fx.staffId}/active`, body: () => ({ active: true }), expect: ADMIN },
   { area: 'Administration', name: "Change a staff member's role", method: 'POST', path: (fx) => `/api/staff/${fx.staffId}/role`, body: () => ({ role: 'guard' }), expect: ADMIN },
   { area: 'Administration', name: 'Tick or untick whether a staff member receives the weekly report', method: 'POST', path: (fx) => `/api/staff/${fx.weeklyReportStaffId}/weekly-report`, body: () => ({ on: true }), expect: ADMIN, fresh: 'weeklyReportStaff' },
+  { area: 'Administration', name: 'Tick or untick whether a staff member receives the overnight safeguarding alert', method: 'POST', path: (fx) => `/api/staff/${fx.safeguardingStaffId}/safeguarding-alert`, body: () => ({ on: true }), expect: ADMIN, fresh: 'safeguardingStaff' },
   { area: 'Administration', name: "Set a staff member's password", method: 'POST', path: (fx) => `/api/staff/${fx.staffId}/password`, body: () => ({ password: 'a-fresh-long-password-12' }), expect: ADMIN },
 
   // ---- the organisation (platform administrators only) --------------------

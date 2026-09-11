@@ -191,6 +191,7 @@ async function notifyThresholds(schema, label) {
 // weekly_register_rows_unchecked(), the owner's copy: the checked one asks
 // is_supervisor(), which a job is not.
 const weekly = require('./lib/weeklyReport');
+const safeguarding = require('./lib/safeguardingAlert');
 
 // The cron process has no request to build a link from, so it reads
 // PUBLIC_URL directly (see render.yaml). Unset — a misconfigured deploy — is
@@ -200,6 +201,75 @@ const weekly = require('./lib/weeklyReport');
 function reportLink() {
   const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
   return configured ? `${configured}/admin.html` : null;
+}
+
+// The overnight safeguarding alert (041). Runs every night, unlike the weekly
+// return, because the thing it reports on happens every night.
+//
+// An under-18 away overnight with no authorised absence recorded reaches no
+// other screen in this app: v_resident_compliance evaluates 'exempt' before
+// everything else, so a child never has required_today true, never appears
+// under Not seen, and never reaches attention_list(). The source is the In &
+// out register — overnight_absences is derived from gate_events (027) —
+// because children are not on the daily register at all.
+//
+// A clear night still sends. That was asked for: it is evidence the check
+// ran. The subject differs between the two so a nightly nil does not train
+// people to filter the one that matters, and job_runs records every run
+// either way, so the mail is a convenience and never the only evidence.
+async function safeguardingNightly(schema, label) {
+  const name = 'overnight-safeguarding-alert';
+  const started = Date.now();
+  try {
+    const summary = await withOwnerIn(schema, async (client) => {
+      const { rows: [s] } = await client.query(
+        `select site_name, local_timezone,
+                to_char(site_today() - 1, 'YYYY-MM-DD') as night,
+                to_char(site_today(), 'YYYY-MM-DD') as today
+           from app_settings where id`);
+      if (!s) { await record(client, name, true, 'no settings'); return 'no settings'; }
+
+      const staff = await safeguarding.recipients(client);
+      if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
+
+      // Same idempotence shape as the weekly return, and for the same reason:
+      // an operator re-running `node jobs.js` must not send twice. "at least
+      // one delivered" rather than merely "ran", so a night that reached
+      // nobody retries instead of recording itself as done.
+      const { rows: already } = await client.query(
+        `select 1 from job_runs
+           where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
+             and (ran_at at time zone $2)::date = $3::date
+           limit 1`,
+        [name, s.local_timezone, s.today]);
+      if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
+
+      const { rows: [c] } = await client.query('select overnight_safeguarding_count($1) as n', [s.night]);
+      const count = Number(c.n) || 0;
+      const { subject, text } = safeguarding.compose({
+        siteName: s.site_name, night: s.night, count, link: reportLink(),
+      });
+
+      let delivered = 0;
+      for (const email of staff) {
+        const out = await mail.send({ to: email, subject, text });
+        if (out.delivered) delivered += 1;
+      }
+      const result = `${count} to look at, ${delivered}/${staff.length} emailed`;
+      const allDelivered = delivered === staff.length;
+      await record(client, name, allDelivered, result);
+      if (!allDelivered) {
+        console.error(`[jobs] ${name}: ${staff.length - delivered} of ${staff.length} recipients did not receive the overnight alert`);
+      }
+      return result;
+    });
+    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
+    return true;
+  } catch (err) {
+    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
+    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
+    return false;
+  }
 }
 
 async function weeklyRegister(schema, label, { force = false } = {}) {
@@ -303,9 +373,17 @@ async function main() {
         // failure — only recorded, so the skip is visible in job_runs.
         if (ok) {
           if (!(await weeklyRegister(schema, label))) failed += 1;
+          // The alert reads the snapshot the step above just wrote, so it
+          // depends on it exactly as the weekly return does: a missing night
+          // is indistinguishable from "nobody was away", and an alert built
+          // on one would say "nothing to report" about a child nobody has
+          // seen. Skip and record the skip rather than send that.
+          if (!(await safeguardingNightly(schema, label))) failed += 1;
         } else {
           console.log(`[jobs] ${label}weekly-register-email: skipped — snapshot-overnight-absences failed`);
           await withOwnerIn(schema, (client) => record(client, 'weekly-register-email', true, 'skipped: snapshot failed')).catch(() => {});
+          console.log(`[jobs] ${label}overnight-safeguarding-alert: skipped — snapshot-overnight-absences failed`);
+          await withOwnerIn(schema, (client) => record(client, 'overnight-safeguarding-alert', true, 'skipped: snapshot failed')).catch(() => {});
         }
       }
     }

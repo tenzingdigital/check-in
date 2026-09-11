@@ -149,8 +149,28 @@ REPORTS.overnight = {
   title: 'Absent overnight',
   ranged: true,
   sql: `select o.night::text as night, rm.building, rm.room,
-               btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+               lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
                case when vs.is_adult then '' else 'child' end as child,
+               -- The report already held both halves of this and never put
+               -- them together: a child was a 'child' cell beside an empty
+               -- 'note' cell, sorted by surname among authorised adults, so a
+               -- manager had to read two columns, combine them, and notice the
+               -- ABSENCE of a word. An under-18 is exempt from the daily rule
+               -- (v_resident_compliance evaluates 'exempt' before everything
+               -- else), so they never reach Not seen or attention_list either
+               -- — this column is the only place the app says it.
+               --
+               -- Children only. An adult away without authorisation is a
+               -- compliance matter with machinery already: the absence window,
+               -- the breach report, the Sunday return. For a child it is a
+               -- safeguarding matter with no rule behind it, and one column
+               -- carrying both would blur two different meanings.
+               case
+                 when vs.is_adult then ''
+                 when absence_authorised(o.resident_id, o.night) then ''
+                 when o.off_site_since is null then 'CHILD — NEVER SIGNED IN'
+                 else 'CHILD AWAY — NOT AUTHORISED'
+               end as concern,
                to_char(o.off_site_since at time zone s.local_timezone, 'YYYY-MM-DD') as date_out,
                to_char(o.off_site_since at time zone s.local_timezone, 'HH24:MI') as time_out,
                concat_ws('; ', case when o.off_site_since is null then 'never signed in' end,
@@ -161,7 +181,12 @@ REPORTS.overnight = {
           left join v_resident_room rm on rm.id = r.id
           cross join (select local_timezone from app_settings where id) s
          where o.night between $1 and $2
-         order by o.night desc, r.last_name, r.first_name`,
+         -- Flagged rows first within each night, so the thing being looked
+         -- for is the first line on the page rather than alphabetical among
+         -- everyone who was properly signed out.
+         order by o.night desc,
+                  (not vs.is_adult and not absence_authorised(o.resident_id, o.night)) desc,
+                  r.last_name, r.first_name`,
 };
 
 // Every sign OUT in the range with the sign IN that followed it, one row
@@ -179,7 +204,7 @@ REPORTS.away = {
                      lead(e.guard_id)    over w as next_guard
                 from gate_events e
               window w as (partition by e.resident_id order by e.occurred_at, e.id))
-       select rm.building, rm.room, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+       select rm.building, rm.room, lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
               case when vs.is_adult then '' else 'child' end as child,
               to_char(ev.occurred_at at time zone s.tz, 'YYYY-MM-DD') as date_out,
               to_char(ev.occurred_at at time zone s.tz, 'HH24:MI') as time_out,
@@ -216,7 +241,7 @@ REPORTS.weekly = {
 REPORTS.absences = {
   title: 'Authorised absences',
   ranged: true,
-  sql: `select btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
+  sql: `select lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
                a.from_date::text as "from", coalesce(a.ended_on, a.to_date)::text as "to",
                case when a.ended_on is not null and a.ended_on < a.to_date then 'cut short (planned to ' || a.to_date || ')' else '' end as note,
                a.reason, a.guardian_agreed, p.full_name as approved_by,
@@ -257,7 +282,7 @@ REPORTS['roll-call-marks'] = {
 REPORTS['room-history'] = {
   title: 'Room history',
   ranged: true,
-  sql: `select btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, ra.room_label as room,
+  sql: `select lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, ra.room_label as room,
                to_char(ra.from_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as "from",
                to_char(ra.to_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as "to",
                p.full_name as moved_by
@@ -274,7 +299,7 @@ REPORTS['room-history'] = {
 REPORTS.breaches = {
   title: 'Breach reports issued',
   ranged: true,
-  sql: `select b.issued_on::text as issued_on, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
+  sql: `select b.issued_on::text as issued_on, lpad(r.ref::text, 4, '0') as ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as resident, rm.building, rm.room,
                case b.kind when 'house_rules' then 'breach of house rules' else 'misuse of the verification system' end as kind,
                b.reference, p.full_name as issued_by
           from breach_reports b
@@ -309,6 +334,7 @@ REPORTS.access = {
 };
 
 const { csv } = require('../lib/csv');
+const { xlsx } = require('../lib/xlsx');
 
 router.get('/reports', wrap(async (req, res) => {
   res.json(Object.entries(REPORTS).map(([name, r]) => ({ name, title: r.title, ranged: r.ranged, admin: !!r.admin })));
@@ -319,7 +345,9 @@ router.get('/reports/:name', wrap(async (req, res) => {
   if (!def) throw new HttpError(404, 'No such report');
   const reason = String(req.query.reason || '').trim();
   if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
-  const format = req.query.format === 'json' ? 'json' : 'csv';
+  const format = req.query.format === 'json' ? 'json'
+              : req.query.format === 'xlsx' ? 'xlsx'
+              : 'csv';
   let from = null, to = null;
   if (def.ranged) {
     from = dateParam(req.query.from, 'from');
@@ -341,6 +369,14 @@ router.get('/reports/:name', wrap(async (req, res) => {
   const stamp = new Date().toISOString().slice(0, 10);
   const range = def.ranged ? `-${from}-to-${to}` : '';
   if (format === 'json') return res.json({ name: req.params.name, title: def.title, from, to, rows });
+  if (format === 'xlsx') {
+    // note_report() already ran inside the transaction above. The format a
+    // report was taken in does not change that it was taken, so the audit
+    // record is identical either way.
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}${range}-${stamp}.xlsx"`);
+    return res.send(xlsx(rows, { sheetName: def.title }));
+  }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}${range}-${stamp}.csv"`);
   res.send('\ufeff' + csv(rows));

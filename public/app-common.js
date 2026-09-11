@@ -410,6 +410,15 @@ function clearViewChoice() { try { sessionStorage.removeItem(VIEW_SLOT); } catch
 // deliberately keeps the queue and its key while events are still unsent
 // (Tao 2 — never destroy proof that someone attended). Callers await that
 // separately; this is the plaintext residue.
+// The centre's own reference for a resident (migration 040). Stored as an
+// integer and shown zero-padded to four digits, so this is the one place the
+// padding is decided — lib/ref.js is its opposite number on the server, and
+// the two have to agree or a number read off a record will not resolve when
+// somebody types it back in.
+function refLabel(n) {
+  return n === null || n === undefined || n === "" ? "" : String(n).padStart(4, "0");
+}
+
 const TERMINAL_KEYS = [
   "rollcall",       // an in-progress roll call: resident ids and timestamps
   "visitsOnSite",   // names, companies and arrival times of everyone on site
