@@ -309,6 +309,7 @@ REPORTS.access = {
 };
 
 const { csv } = require('../lib/csv');
+const { xlsx } = require('../lib/xlsx');
 
 router.get('/reports', wrap(async (req, res) => {
   res.json(Object.entries(REPORTS).map(([name, r]) => ({ name, title: r.title, ranged: r.ranged, admin: !!r.admin })));
@@ -319,7 +320,9 @@ router.get('/reports/:name', wrap(async (req, res) => {
   if (!def) throw new HttpError(404, 'No such report');
   const reason = String(req.query.reason || '').trim();
   if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
-  const format = req.query.format === 'json' ? 'json' : 'csv';
+  const format = req.query.format === 'json' ? 'json'
+              : req.query.format === 'xlsx' ? 'xlsx'
+              : 'csv';
   let from = null, to = null;
   if (def.ranged) {
     from = dateParam(req.query.from, 'from');
@@ -341,6 +344,14 @@ router.get('/reports/:name', wrap(async (req, res) => {
   const stamp = new Date().toISOString().slice(0, 10);
   const range = def.ranged ? `-${from}-to-${to}` : '';
   if (format === 'json') return res.json({ name: req.params.name, title: def.title, from, to, rows });
+  if (format === 'xlsx') {
+    // note_report() already ran inside the transaction above. The format a
+    // report was taken in does not change that it was taken, so the audit
+    // record is identical either way.
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}${range}-${stamp}.xlsx"`);
+    return res.send(xlsx(rows, { sheetName: def.title }));
+  }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}${range}-${stamp}.csv"`);
   res.send('\ufeff' + csv(rows));

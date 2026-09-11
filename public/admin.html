@@ -123,7 +123,20 @@
     body.printing #toast, body.printing #detail, body.printing #notForYou { display: none !important; }
     body.printing .tablewrap { border: 0; overflow: visible; }
     body.printing #rpTable th, body.printing #rpTable td { white-space: normal; border-color: #999; }
+    /* Column headings repeat on every page — a table that runs to page three
+       is unreadable without them — and a resident's row is never split
+       across a break. */
+    body.printing #rpTable thead { display: table-header-group; }
+    body.printing #rpTable tr { break-inside: avoid; }
+    /* The screen palette is dark. Printed as-is it is a page of ink and the
+       text is unreadable on white, so the report prints black on white. */
+    body.printing, body.printing #rpTable, body.printing #rpTable th,
+    body.printing #rpTable td, body.printing .rphead, body.printing #rpTitle,
+    body.printing #rpSub { background: #fff !important; color: #000 !important; }
+    body.printing #rpTable th { position: static; }
+    body.printing #rpSub { font-size: 9pt; }
   }
+  @page { margin: 14mm; }
   .seg { display: flex; gap: 6px; }
   .seg button {
     flex: 1; padding: 11px 8px; border-radius: 10px;
@@ -1650,7 +1663,8 @@ async function loadReports() {
       <div><b>${esc(r.title)}</b><span class="hint">${r.ranged ? "For the dates above" : "As it stands now"}</span></div>
       <div class="row">
         <button class="btn ghost sm" type="button" data-view="${esc(r.name)}">View</button>
-        <button class="btn sm" type="button" data-csv="${esc(r.name)}">CSV</button>
+        <button class="btn ghost sm" type="button" data-csv="${esc(r.name)}">CSV</button>
+        <button class="btn sm" type="button" data-xlsx="${esc(r.name)}">Excel</button>
       </div>
     </div>`).join("");
 }
@@ -1663,16 +1677,33 @@ function reportQuery(name) {
 
 $("reportForm").addEventListener("submit", (e) => e.preventDefault());
 $("reportList").addEventListener("click", async (e) => {
-  const csvBtn = e.target.closest("[data-csv]"); const viewBtn = e.target.closest("[data-view]");
+  const csvBtn = e.target.closest("[data-csv]");
+  const xlsxBtn = e.target.closest("[data-xlsx]");
+  const viewBtn = e.target.closest("[data-view]");
   if (csvBtn) {
     const q = reportQuery(csvBtn.dataset.csv); if (!q) return;
     window.location.href = q; toast("Export recorded and downloading", "ok");
+  } else if (xlsxBtn) {
+    // Excel rather than CSV keeps a leading zero, keeps a date a date, and
+    // cannot execute a cell that begins "=". Same URL, same audit row.
+    const q = reportQuery(xlsxBtn.dataset.xlsx); if (!q) return;
+    window.location.href = q + "&format=xlsx"; toast("Export recorded and downloading", "ok");
   } else if (viewBtn) {
     const q = reportQuery(viewBtn.dataset.view); if (!q) return;
     const out = await guarded(() => apiGet(q + "&format=json"), (err) => toast("Could not load: " + err.message, "err"));
     if (!out) return;
     $("rpTitle").textContent = out.title;
-    $("rpSub").textContent = `${state.settings?.site_name || ""}${out.from ? ` · ${out.from} to ${out.to}` : ""} · ${out.rows.length} row${out.rows.length === 1 ? "" : "s"} · printed ${new Date().toLocaleString()}`;
+    // Provenance, on the line that already prints. An inspector asking where
+    // a printout came from is asking exactly this, and a page that cannot
+    // answer is worth less. It does put a staff name on every sheet that
+    // leaves the building — a decision recorded in the design, not a slip.
+    $("rpSub").textContent = [
+      state.settings?.site_name || "",
+      out.from ? `${out.from} to ${out.to}` : "",
+      `${out.rows.length} row${out.rows.length === 1 ? "" : "s"}`,
+      `printed ${new Date().toLocaleString("en-IE")}`,
+      state.profile?.full_name ? `by ${state.profile.full_name}` : "",
+    ].filter(Boolean).join(" · ");
     const cols = out.rows.length ? Object.keys(out.rows[0]) : [];
     const head = (c) => c.replace(/_/g, " ");
     const cell = (v) => v === null || v === undefined ? "" : typeof v === "boolean" ? (v ? "yes" : "no") : esc(String(v).replace(/T\d\d:\d\d:\d\d.*$/, ""));

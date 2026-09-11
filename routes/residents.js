@@ -13,6 +13,7 @@
 // can be used to act as somebody else.
 const express = require('express');
 const { csv } = require('../lib/csv');
+const { xlsx } = require('../lib/xlsx');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const { HttpError, uuidParam, intParam, dateParam } = require('../lib/api');
@@ -275,12 +276,16 @@ router.get('/:id/history', wrap(async (req, res) => {
   if (from && to && to < from) throw new HttpError(400, 'to must not be before from');
   if (from && to && (Date.parse(to) - Date.parse(from)) / 86400000 > 366) throw new HttpError(400, 'A history covers at most a year at a time');
   const kind = HISTORY_KINDS.has(req.query.kind) ? req.query.kind : 'all';
-  const asCsv = req.query.format === 'csv';
+  // csv and xlsx are both exports and both need a reason on the record; json
+  // is the screen. asFile is "this leaves the building", which is what the
+  // audit write and the truncation marker actually care about.
+  const format = req.query.format === 'csv' ? 'csv' : req.query.format === 'xlsx' ? 'xlsx' : 'json';
+  const asFile = format !== 'json';
   const reason = String(req.query.reason || '').trim();
-  if (asCsv && (!reason || reason.length > 200)) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
+  if (asFile && (!reason || reason.length > 200)) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
 
   const { rows, resident, truncated } = await db.withIdentity(req.session.userId, async (client) => {
-    if (asCsv) await client.query('select note_report($1, $2, $3, $4)', ['resident_history:' + id, reason, from, to]);
+    if (asFile) await client.query('select note_report($1, $2, $3, $4)', ['resident_history:' + id, reason, from, to]);
     const { rows } = await client.query(
       `with s as (select local_timezone as tz from app_settings where id),
             b as (select coalesce($2::date, site_today() - 29) as d0, coalesce($3::date, site_today()) as d1)
@@ -305,7 +310,7 @@ router.get('/:id/history', wrap(async (req, res) => {
     const truncated = rows.length > 2000;
     if (truncated) rows.length = 2000;
     let resident = null;
-    if (asCsv) {
+    if (asFile) {
       const r = await client.query(`select first_name || ' ' || last_name as full_name from residents where id = $1`, [id]);
       resident = r.rows[0] ? r.rows[0].full_name : null;
     }
@@ -314,7 +319,7 @@ router.get('/:id/history', wrap(async (req, res) => {
     if (err && err.code === '42501') throw new HttpError(403, 'Only a supervisor or admin can export a history');
     throw err;
   });
-  if (!asCsv) return res.json(rows);
+  if (!asFile) return res.json(rows);
 
   const label = { in: 'IN', out: 'OUT', checkin: 'Check-in' };
   const out = rows.map((e) => ({
@@ -332,6 +337,11 @@ router.get('/:id/history', wrap(async (req, res) => {
   const slug = String(resident || 'resident').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'resident';
   const range = from || to ? `-${from || 'start'}-to-${to || 'today'}` : '-last-30-days';
   const which = kind === 'all' ? '' : `-${kind === 'gate' ? 'in-and-out' : 'check-ins'}`;
+  if (format === 'xlsx') {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="history-${slug}${which}${range}.xlsx"`);
+    return res.send(xlsx(out, { sheetName: 'History' }));
+  }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="history-${slug}${which}${range}.csv"`);
   res.send('\ufeff' + csv(out));
