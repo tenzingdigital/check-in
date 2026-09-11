@@ -187,6 +187,8 @@ a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   border: 1px solid #bfdbfe;
   color: var(--primary); font-size: 14px; font-weight: 700; letter-spacing: .02em;
 }
+.hero-badge a { color: inherit; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: #bfdbfe; }
+.hero-badge a:hover { text-decoration-color: var(--primary); }
 #hero h1 em { font-style: normal; color: var(--primary); }
 .lede { font-size: clamp(1.05rem, 1.6vw, 1.3rem); }
 .hero-benefit { color: var(--text-2); max-width: 56ch; margin-top: -6px; }
