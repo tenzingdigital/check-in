@@ -479,6 +479,10 @@ declare
   v_adult integer;
   v_holiday integer;
   v_row   __TENANT__.authorised_absences;
+  v_lo    date;
+  v_hi    date;
+  v_lo2   date;
+  v_hi2   date;
 begin
   if not __TENANT__.is_supervisor() then
     raise exception 'Only a supervisor or admin can authorise an absence' using errcode = '42501';
@@ -497,8 +501,35 @@ begin
     raise exception 'An authorised absence covers at most a year' using errcode = '22023';
   end if;
   select adult_age_years, holiday_max_days into v_adult, v_holiday from __TENANT__.app_settings where id;
-  if p_reason = 'holiday' and p_to - p_from + 1 > v_holiday then
-    raise exception 'A holiday covers at most % consecutive days (Settings)', v_holiday using errcode = '22023';
+  -- Migration 038: measure the cap across the whole run, not one row.
+  -- The check was per row while the overlap guard below uses inclusive
+  -- ranges, which permits ADJACENT rows -- so 1-14 followed by 15-28 passed
+  -- two separate 14-day checks and produced a 28-day authorised holiday
+  -- against an IPAS figure of 14. Absences cannot overlap, so the run this
+  -- new range would join is found by widening a day either side and
+  -- repeating until it stops growing; that terminates because the span only
+  -- ever grows and is bounded by the rows that exist.
+  if p_reason = 'holiday' then
+    v_lo := p_from;
+    v_hi := p_to;
+    loop
+      select least(v_lo, min(a.from_date)),
+             greatest(v_hi, max(coalesce(a.ended_on, a.to_date)))
+        into v_lo2, v_hi2
+        from __TENANT__.authorised_absences a
+       where a.resident_id = p_resident_id
+         and a.reason = 'holiday'
+         and daterange(a.from_date, coalesce(a.ended_on, a.to_date), '[]')
+             && daterange(v_lo - 1, v_hi + 1, '[]');
+      v_lo2 := coalesce(v_lo2, v_lo);
+      v_hi2 := coalesce(v_hi2, v_hi);
+      exit when v_lo2 = v_lo and v_hi2 = v_hi;
+      v_lo := v_lo2;
+      v_hi := v_hi2;
+    end loop;
+    if v_hi - v_lo + 1 > v_holiday then
+      raise exception 'A holiday covers at most % consecutive days (Settings); this would make % in a row', v_holiday, v_hi - v_lo + 1 using errcode = '22023';
+    end if;
   end if;
   if v_res.date_of_birth > (p_from - make_interval(years => v_adult))::date and not coalesce(p_guardian_agreed, false) then
     raise exception 'A child''s absence needs a parent or guardian''s agreement recorded' using errcode = '23514';
@@ -589,10 +620,28 @@ begin
     v_written := v_written + v_batch;
 
     -- Rows written during the day by record_checkin are still open. Close them
-    -- without touching presented, first_seen_at or checkin_count.
-    update __TENANT__.daily_compliance
-       set closed_at = now()
-     where compliance_date = v_day and closed_at is null;
+    -- without touching presented, first_seen_at or checkin_count -- but DO
+    -- recompute `required`.
+    --
+    -- Migration 038: the insert above carries the absence exemption and lands
+    -- `on conflict do nothing`, so on a day a resident both checked in and was
+    -- authorised absent, the row record_checkin_at had already written stood
+    -- unexamined with the pre-028 value. The register said the day was
+    -- required while the absence record said the rule did not apply, and the
+    -- live tile (routes/checkins.js) applied the exemption -- so the screen and
+    -- the record disagreed about the same day. Recomputing at close time is
+    -- what makes the durable row the authority, whichever writer got there
+    -- first, and it also picks up an absence authorised later the same day.
+    update __TENANT__.daily_compliance dc
+       set closed_at = now(),
+           required  = __TENANT__.compliance_required(
+                         r.date_of_birth,
+                         (r.registered_at at time zone v_tz)::date,
+                         r.departed_on, v_day, v_adult)
+                       and not __TENANT__.absence_authorised(r.id, v_day)
+      from __TENANT__.residents r
+     where r.id = dc.resident_id
+       and dc.compliance_date = v_day and dc.closed_at is null;
   end loop;
 
   return v_written;
@@ -694,6 +743,24 @@ $$;
 
 --
 
+-- Name: end_sessions_on_deactivate(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.end_sessions_on_deactivate() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if old.active and not new.active then
+    delete from auth.sessions where user_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+
 -- Name: erase_audit_rows(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -737,8 +804,21 @@ begin
     raise exception 'Resident not found' using errcode = 'P0002';
   end if;
 
-  select count(*)::integer into v_events
-  from __TENANT__.gate_events where resident_id = p_resident_id;
+  -- Migration 038: count everything the cascades take, not two tables. Five
+  -- child tables have been added since this was written (023 resident_views,
+  -- 027 overnight_absences, 028 authorised_absences and room_assignments,
+  -- 029 breach_reports), all `on delete cascade`, so `events_removed` -- the
+  -- number docs/GDPR.md calls the proof of what an erasure removed -- has been
+  -- undercounting. resident_views is deliberately excluded from the total and
+  -- named separately below: it is a record of who LOOKED at the person, not
+  -- something they did.
+  select (select count(*) from __TENANT__.gate_events         where resident_id = p_resident_id)
+       + (select count(*) from __TENANT__.checkin_events      where resident_id = p_resident_id)
+       + (select count(*) from __TENANT__.overnight_absences  where resident_id = p_resident_id)
+       + (select count(*) from __TENANT__.authorised_absences where resident_id = p_resident_id)
+       + (select count(*) from __TENANT__.room_assignments    where resident_id = p_resident_id)
+       + (select count(*) from __TENANT__.breach_reports      where resident_id = p_resident_id)
+    into v_events;
 
   select count(*)::integer into v_register
   from __TENANT__.daily_compliance where resident_id = p_resident_id;
@@ -1719,7 +1799,10 @@ begin
       __TENANT__.compliance_required(
         v_res.date_of_birth,
         (v_res.registered_at at time zone v_tz)::date,
-        v_res.departed_on, v_day, v_adult),
+        v_res.departed_on, v_day, v_adult)
+        -- Migration 038: the same exemption close-out has applied since 028.
+        -- Without it this writer and that one disagreed about the same day.
+        and not __TENANT__.absence_authorised(p_resident_id, v_day),
       true, p_at, 1)
     on conflict (resident_id, compliance_date) do update
       set presented     = true,
@@ -3290,6 +3373,14 @@ CREATE TRIGGER profiles_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.pro
 
 --
 
+-- Name: profiles profiles_end_sessions_on_deactivate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER profiles_end_sessions_on_deactivate AFTER UPDATE OF active ON __TENANT__.profiles FOR EACH ROW EXECUTE FUNCTION __TENANT__.end_sessions_on_deactivate();
+
+
+--
+
 -- Name: profiles profiles_weekly_report_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3820,10 +3911,18 @@ ALTER TABLE __TENANT__.erasure_log ENABLE ROW LEVEL SECURITY;
 
 --
 
--- Name: erasure_log erasure_log_admin; Type: POLICY; Schema: public; Owner: -
+-- Name: erasure_log erasure_log_append; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY erasure_log_admin ON __TENANT__.erasure_log USING (__TENANT__.is_admin()) WITH CHECK (__TENANT__.is_admin());
+CREATE POLICY erasure_log_append ON __TENANT__.erasure_log FOR INSERT WITH CHECK (__TENANT__.is_admin());
+
+
+--
+
+-- Name: erasure_log erasure_log_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY erasure_log_read ON __TENANT__.erasure_log FOR SELECT USING (__TENANT__.is_admin());
 
 
 --
@@ -3934,6 +4033,14 @@ ALTER TABLE __TENANT__.residents ENABLE ROW LEVEL SECURITY;
 
 --
 
+-- Name: residents residents_admin_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY residents_admin_delete ON __TENANT__.residents FOR DELETE USING (__TENANT__.is_admin());
+
+
+--
+
 -- Name: residents residents_read; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -3942,10 +4049,18 @@ CREATE POLICY residents_read ON __TENANT__.residents FOR SELECT USING (__TENANT_
 
 --
 
--- Name: residents residents_supervisor; Type: POLICY; Schema: public; Owner: -
+-- Name: residents residents_supervisor_insert; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY residents_supervisor ON __TENANT__.residents USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
+CREATE POLICY residents_supervisor_insert ON __TENANT__.residents FOR INSERT WITH CHECK (__TENANT__.is_supervisor());
+
+
+--
+
+-- Name: residents residents_supervisor_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY residents_supervisor_update ON __TENANT__.residents FOR UPDATE USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
 
 
 --
@@ -4048,10 +4163,18 @@ CREATE POLICY staff_roster_read ON __TENANT__.staff_roster FOR SELECT USING (__T
 
 --
 
--- Name: staff_roster staff_roster_supervisor; Type: POLICY; Schema: public; Owner: -
+-- Name: staff_roster staff_roster_supervisor_insert; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY staff_roster_supervisor ON __TENANT__.staff_roster USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
+CREATE POLICY staff_roster_supervisor_insert ON __TENANT__.staff_roster FOR INSERT WITH CHECK (__TENANT__.is_supervisor());
+
+
+--
+
+-- Name: staff_roster staff_roster_supervisor_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY staff_roster_supervisor_update ON __TENANT__.staff_roster FOR UPDATE USING (__TENANT__.is_supervisor()) WITH CHECK (__TENANT__.is_supervisor());
 
 
 --
@@ -4154,9 +4277,9 @@ GRANT ALL ON FUNCTION __TENANT__.site_today() TO service_role;
 -- Name: TABLE app_settings; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.app_settings TO anon;
-GRANT ALL ON TABLE __TENANT__.app_settings TO authenticated;
-GRANT ALL ON TABLE __TENANT__.app_settings TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.app_settings TO anon;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.app_settings TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.app_settings TO service_role;
 
 
 --
@@ -4164,9 +4287,9 @@ GRANT ALL ON TABLE __TENANT__.app_settings TO service_role;
 -- Name: TABLE daily_compliance; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.daily_compliance TO anon;
-GRANT ALL ON TABLE __TENANT__.daily_compliance TO authenticated;
-GRANT ALL ON TABLE __TENANT__.daily_compliance TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.daily_compliance TO anon;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.daily_compliance TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.daily_compliance TO service_role;
 
 
 --
@@ -4174,9 +4297,9 @@ GRANT ALL ON TABLE __TENANT__.daily_compliance TO service_role;
 -- Name: TABLE residents; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.residents TO anon;
-GRANT ALL ON TABLE __TENANT__.residents TO authenticated;
-GRANT ALL ON TABLE __TENANT__.residents TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.residents TO anon;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.residents TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.residents TO service_role;
 
 
 --
@@ -4184,8 +4307,8 @@ GRANT ALL ON TABLE __TENANT__.residents TO service_role;
 -- Name: TABLE v_resident_compliance; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.v_resident_compliance TO authenticated;
-GRANT ALL ON TABLE __TENANT__.v_resident_compliance TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_resident_compliance TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_resident_compliance TO service_role;
 
 
 --
@@ -4211,7 +4334,7 @@ REVOKE ALL ON FUNCTION __TENANT__.audit_row() FROM PUBLIC;
 -- Name: TABLE authorised_absences; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.authorised_absences TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.authorised_absences TO service_role;
 GRANT SELECT ON TABLE __TENANT__.authorised_absences TO authenticated;
 
 
@@ -4231,8 +4354,6 @@ GRANT ALL ON FUNCTION __TENANT__.authorise_absence(p_resident_id uuid, p_from da
 --
 
 REVOKE ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) FROM PUBLIC;
-GRANT ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) TO authenticated;
-GRANT ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) TO service_role;
 
 
 --
@@ -4260,7 +4381,7 @@ GRANT ALL ON FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date) TO se
 -- Name: TABLE roll_calls; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.roll_calls TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.roll_calls TO service_role;
 GRANT SELECT ON TABLE __TENANT__.roll_calls TO authenticated;
 
 
@@ -4272,6 +4393,14 @@ GRANT SELECT ON TABLE __TENANT__.roll_calls TO authenticated;
 REVOKE ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone, p_note text) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone, p_note text) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with time zone, p_note text) TO service_role;
+
+
+--
+
+-- Name: FUNCTION end_sessions_on_deactivate(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.end_sessions_on_deactivate() FROM PUBLIC;
 
 
 --
@@ -4349,7 +4478,7 @@ GRANT ALL ON FUNCTION __TENANT__.is_supervisor() TO service_role;
 -- Name: TABLE breach_reports; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.breach_reports TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.breach_reports TO service_role;
 GRANT SELECT ON TABLE __TENANT__.breach_reports TO authenticated;
 
 
@@ -4378,7 +4507,7 @@ GRANT ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resid
 -- Name: TABLE roll_call_marks; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.roll_call_marks TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.roll_call_marks TO service_role;
 GRANT SELECT ON TABLE __TENANT__.roll_call_marks TO authenticated;
 
 
@@ -4397,7 +4526,7 @@ GRANT ALL ON FUNCTION __TENANT__.mark_roll_call(p_roll_call_id uuid, p_resident_
 -- Name: TABLE roll_call_visit_marks; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.roll_call_visit_marks TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.roll_call_visit_marks TO service_role;
 GRANT SELECT ON TABLE __TENANT__.roll_call_visit_marks TO authenticated;
 
 
@@ -4503,8 +4632,6 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_breach_reports() TO service_role;
 --
 
 REVOKE ALL ON FUNCTION __TENANT__.purge_expired_checkin_events() FROM PUBLIC;
-GRANT ALL ON FUNCTION __TENANT__.purge_expired_checkin_events() TO authenticated;
-GRANT ALL ON FUNCTION __TENANT__.purge_expired_checkin_events() TO service_role;
 
 
 --
@@ -4513,8 +4640,6 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_checkin_events() TO service_role;
 --
 
 REVOKE ALL ON FUNCTION __TENANT__.purge_expired_compliance() FROM PUBLIC;
-GRANT ALL ON FUNCTION __TENANT__.purge_expired_compliance() TO authenticated;
-GRANT ALL ON FUNCTION __TENANT__.purge_expired_compliance() TO service_role;
 
 
 --
@@ -4523,8 +4648,6 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_compliance() TO service_role;
 --
 
 REVOKE ALL ON FUNCTION __TENANT__.purge_expired_gate_events() FROM PUBLIC;
-GRANT ALL ON FUNCTION __TENANT__.purge_expired_gate_events() TO authenticated;
-GRANT ALL ON FUNCTION __TENANT__.purge_expired_gate_events() TO service_role;
 
 
 --
@@ -4577,9 +4700,9 @@ GRANT ALL ON FUNCTION __TENANT__.purge_resident_views() TO service_role;
 -- Name: TABLE gate_events; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.gate_events TO anon;
-GRANT ALL ON TABLE __TENANT__.gate_events TO authenticated;
-GRANT ALL ON TABLE __TENANT__.gate_events TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.gate_events TO anon;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.gate_events TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.gate_events TO service_role;
 
 
 --
@@ -4587,8 +4710,8 @@ GRANT ALL ON TABLE __TENANT__.gate_events TO service_role;
 -- Name: TABLE v_resident_status; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.v_resident_status TO authenticated;
-GRANT ALL ON TABLE __TENANT__.v_resident_status TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_resident_status TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_resident_status TO service_role;
 
 
 --
@@ -4644,7 +4767,7 @@ GRANT ALL ON FUNCTION __TENANT__.record_checkin_late(p_resident_id uuid, p_occur
 -- Name: TABLE visits; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.visits TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.visits TO service_role;
 GRANT SELECT ON TABLE __TENANT__.visits TO authenticated;
 
 
@@ -4777,7 +4900,7 @@ GRANT ALL ON FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_t
 -- Name: TABLE absence_windows; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.absence_windows TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.absence_windows TO service_role;
 GRANT SELECT,INSERT,DELETE ON TABLE __TENANT__.absence_windows TO authenticated;
 
 
@@ -4796,8 +4919,8 @@ GRANT ALL ON SEQUENCE __TENANT__.absence_windows_id_seq TO service_role;
 -- Name: TABLE admin_audit; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE ON TABLE __TENANT__.admin_audit TO authenticated;
-GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE ON TABLE __TENANT__.admin_audit TO service_role;
+GRANT SELECT ON TABLE __TENANT__.admin_audit TO authenticated;
+GRANT SELECT ON TABLE __TENANT__.admin_audit TO service_role;
 
 
 --
@@ -4835,8 +4958,8 @@ GRANT ALL ON SEQUENCE __TENANT__.breach_reports_id_seq TO service_role;
 -- Name: TABLE buildings; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.buildings TO authenticated;
-GRANT ALL ON TABLE __TENANT__.buildings TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.buildings TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.buildings TO service_role;
 
 
 --
@@ -4844,9 +4967,9 @@ GRANT ALL ON TABLE __TENANT__.buildings TO service_role;
 -- Name: TABLE checkin_events; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.checkin_events TO anon;
-GRANT ALL ON TABLE __TENANT__.checkin_events TO authenticated;
-GRANT ALL ON TABLE __TENANT__.checkin_events TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.checkin_events TO anon;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.checkin_events TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.checkin_events TO service_role;
 
 
 --
@@ -4864,9 +4987,9 @@ GRANT ALL ON SEQUENCE __TENANT__.checkin_events_id_seq TO service_role;
 -- Name: TABLE erasure_log; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.erasure_log TO anon;
-GRANT ALL ON TABLE __TENANT__.erasure_log TO authenticated;
-GRANT ALL ON TABLE __TENANT__.erasure_log TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.erasure_log TO anon;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.erasure_log TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.erasure_log TO service_role;
 
 
 --
@@ -4894,8 +5017,8 @@ GRANT ALL ON SEQUENCE __TENANT__.gate_events_id_seq TO service_role;
 -- Name: TABLE households; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.households TO authenticated;
-GRANT ALL ON TABLE __TENANT__.households TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.households TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.households TO service_role;
 
 
 --
@@ -4913,7 +5036,7 @@ GRANT ALL ON SEQUENCE __TENANT__.job_runs_id_seq TO service_role;
 -- Name: TABLE overnight_absences; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.overnight_absences TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.overnight_absences TO service_role;
 GRANT SELECT ON TABLE __TENANT__.overnight_absences TO authenticated;
 
 
@@ -4922,9 +5045,9 @@ GRANT SELECT ON TABLE __TENANT__.overnight_absences TO authenticated;
 -- Name: TABLE profiles; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.profiles TO anon;
-GRANT ALL ON TABLE __TENANT__.profiles TO authenticated;
-GRANT ALL ON TABLE __TENANT__.profiles TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.profiles TO anon;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.profiles TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.profiles TO service_role;
 
 
 --
@@ -4932,8 +5055,7 @@ GRANT ALL ON TABLE __TENANT__.profiles TO service_role;
 -- Name: TABLE resident_views; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.resident_views TO authenticated;
-GRANT ALL ON TABLE __TENANT__.resident_views TO service_role;
+GRANT SELECT ON TABLE __TENANT__.resident_views TO authenticated;
 
 
 --
@@ -4951,7 +5073,7 @@ GRANT ALL ON SEQUENCE __TENANT__.resident_views_id_seq TO service_role;
 -- Name: TABLE room_assignments; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.room_assignments TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.room_assignments TO service_role;
 GRANT SELECT ON TABLE __TENANT__.room_assignments TO authenticated;
 
 
@@ -4970,8 +5092,8 @@ GRANT ALL ON SEQUENCE __TENANT__.room_assignments_id_seq TO service_role;
 -- Name: TABLE rooms; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.rooms TO authenticated;
-GRANT ALL ON TABLE __TENANT__.rooms TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.rooms TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.rooms TO service_role;
 
 
 --
@@ -4979,8 +5101,7 @@ GRANT ALL ON TABLE __TENANT__.rooms TO service_role;
 -- Name: TABLE staff_roster; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.staff_roster TO authenticated;
-GRANT ALL ON TABLE __TENANT__.staff_roster TO service_role;
+GRANT SELECT,INSERT,UPDATE ON TABLE __TENANT__.staff_roster TO authenticated;
 
 
 --
@@ -4988,8 +5109,8 @@ GRANT ALL ON TABLE __TENANT__.staff_roster TO service_role;
 -- Name: TABLE v_check_log; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.v_check_log TO authenticated;
-GRANT ALL ON TABLE __TENANT__.v_check_log TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_check_log TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_check_log TO service_role;
 
 
 --
@@ -4997,8 +5118,8 @@ GRANT ALL ON TABLE __TENANT__.v_check_log TO service_role;
 -- Name: TABLE v_resident_room; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.v_resident_room TO authenticated;
-GRANT ALL ON TABLE __TENANT__.v_resident_room TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_resident_room TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_resident_room TO service_role;
 
 
 --
@@ -5006,8 +5127,8 @@ GRANT ALL ON TABLE __TENANT__.v_resident_room TO service_role;
 -- Name: TABLE v_evacuation_list; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.v_evacuation_list TO authenticated;
-GRANT ALL ON TABLE __TENANT__.v_evacuation_list TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_evacuation_list TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_evacuation_list TO service_role;
 
 
 --
@@ -5015,8 +5136,8 @@ GRANT ALL ON TABLE __TENANT__.v_evacuation_list TO service_role;
 -- Name: TABLE v_room_occupancy; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.v_room_occupancy TO authenticated;
-GRANT ALL ON TABLE __TENANT__.v_room_occupancy TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_room_occupancy TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_room_occupancy TO service_role;
 
 
 --
@@ -5024,8 +5145,8 @@ GRANT ALL ON TABLE __TENANT__.v_room_occupancy TO service_role;
 -- Name: TABLE v_system_health; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON TABLE __TENANT__.v_system_health TO authenticated;
-GRANT ALL ON TABLE __TENANT__.v_system_health TO service_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_system_health TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_system_health TO service_role;
 
 
 --

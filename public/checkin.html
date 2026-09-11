@@ -453,7 +453,11 @@ function renderDetail(r) {
         id_type: fresh.id_type, id_number: fresh.id_number, has_id: !!fresh.id_number,
         first_seen_at: fresh.first_seen_at, checkins_today_events: fresh.checkins_today_events || [],
       });
-      if (state.selected && state.selected.id === r.id) renderDetail(row);
+      // Skip the redraw while the ID editor is open: a full re-render would
+      // tear out the form (and whatever the supervisor had already typed)
+      // out from under them the moment this background fetch lands. The row
+      // itself is still updated above, so closing the editor shows it fresh.
+      if (state.selected && state.selected.id === r.id && !$("idForm")) renderDetail(row);
     });
   }
 

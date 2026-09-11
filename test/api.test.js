@@ -1849,7 +1849,9 @@ async function main() {
     // The lists say away; the register does not count them as not seen.
     const door = await api.fetch("/api/residents?q=roomy");
     const me = door.json.find((r) => r.id === roomFinderId);
-    assert.deepEqual(me.away, { reason: "holiday", until: plus(2) });
+    // The reason is deliberately not sent on the list endpoint (routes/residents.js):
+    // "medical" is Article 9 health data, and no front end displays it here.
+    assert.deepEqual(me.away, { until: plus(2) });
     const reg = await api.fetch("/api/residents?q=roomy&compliance=1");
     const mine = reg.json.find((r) => r.id === roomFinderId);
     assert.equal(mine.required_today, false); assert.equal(mine.state, "away");
@@ -2308,12 +2310,28 @@ async function main() {
     assert.equal(mails.length, 1); assert.equal(mails[0].to, "mick@example.ie");
     assert.match(mails[0].text, /Weekly register update/);
     run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
-    assert.equal(run.rows[0].ok, true); assert.match(run.rows[0].result, /rows, \d\/1 emailed/, "the sink answers not delivered, so 0/1 is right here");
-    // A second run today — force bypasses only the Sunday gate, not this —
-    // must not email head office again. This is exactly the case of an
-    // operator re-running `node jobs.js` after some other step failed.
+    // The sink always answers not delivered, so this run reached nobody —
+    // and a Sunday return that reached nobody must not read back as ok=true
+    // (migrations/038: that was the bug the health banner exists to catch).
+    assert.equal(run.rows[0].ok, false); assert.match(run.rows[0].result, /rows, 0\/1 emailed/, "the sink answers not delivered, so 0/1 is right here");
+    // A total failure must not block a same-day retry — that was the old bug
+    // (a failed Sunday return silently blocked every retry that day). A
+    // second forced run with nothing delivered is a fresh attempt, not a
+    // duplicate: the sink still answers not delivered, so a second email
+    // does go, and it is not "already sent today".
     assert.equal(await weeklyRegister("public", "", { force: true }), true);
-    assert.equal((global.__mailSink || []).length, before + 1, "no duplicate email on a second run the same day");
+    assert.equal((global.__mailSink || []).length, before + 2, "a total failure is retried, not treated as already sent");
+    run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
+    assert.equal(run.rows[0].ok, false); assert.match(run.rows[0].result, /rows, 0\/1 emailed/);
+
+    // Now prove the idempotence gate itself: once a run has actually
+    // delivered, a same-day retry must not email again. The sink can't
+    // produce a real delivery, so the prior successful run is recorded
+    // directly, exactly as a real delivery would leave it.
+    await withOwner((c) => c.query(
+      `insert into public.job_runs (job, ok, result) values ('weekly-register-email', true, '6 rows, 1/1 emailed')`));
+    assert.equal(await weeklyRegister("public", "", { force: true }), true);
+    assert.equal((global.__mailSink || []).length, before + 2, "no duplicate email once a run already delivered today");
     run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
     assert.equal(run.rows[0].ok, true); assert.equal(run.rows[0].result, "already sent today");
     const dow = (await withOwner((c) => c.query(`select extract(isodow from public.site_today())::int as d`))).rows[0].d;
