@@ -2051,9 +2051,11 @@ async function main() {
   await test("a room can be marked under maintenance with a note, and the vacancies report carries both", async () => {
     const bld = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Weekly Block" } });
     assert.equal(bld.status, 201, bld.text);
-    const made = await supC.fetch(`/api/buildings/${bld.json.id}/rooms`, { method: "POST", body: { rooms: [{ floor: "", number: "W1", capacity: 2 }, { floor: "", number: "W2", capacity: 3 }] } });
+    const made = await supC.fetch(`/api/buildings/${bld.json.id}/rooms`, { method: "POST", body: { rooms: [{ floor: "", number: "W1", capacity: 2 }, { floor: "", number: "W2", capacity: 3 }, { floor: "", number: "W3", capacity: 2 }] } });
     assert.equal(made.status, 201, made.text);
     const w1 = made.json.find((r) => r.number === "W1"), w2 = made.json.find((r) => r.number === "W2");
+    // W3 is left empty on purpose (migration 045: a fully empty room reads
+    // differently from one with just a spare bed).
     assert.equal(w1.status, "open", "a new room is open");
     const bad = await supC.fetch(`/api/rooms/${w1.id}`, { method: "PATCH", body: { status: "closed" } });
     assert.equal(bad.status, 400);
@@ -2155,6 +2157,10 @@ async function main() {
     const free = rep.json.rows.find((r) => r.section === "Room updates" && r.room === "W2");
     assert.equal(free.status, "2 free", "W2 has 3 beds and one occupant");
     assert.equal(free.line, "Weekly Block W2: 2 of 3 beds free.");
+    const empty = rep.json.rows.find((r) => r.section === "Room updates" && r.room === "W3");
+    assert.ok(empty, "the fully empty room is missing");
+    assert.equal(empty.status, "available", "a fully empty room reads differently from one with a spare bed (migration 045)");
+    assert.equal(empty.line, "Weekly Block W3 is available immediately for new families.");
     const csv = await supC.fetch(`/api/reports/weekly?from=${wkFrom}&to=${wkDay(0)}&reason=Sunday`);
     assert.match(csv.text, /^﻿?section,building,room,ref,resident,child,from_date,to_date,nights,back_on,status,line\r\n/);
   });

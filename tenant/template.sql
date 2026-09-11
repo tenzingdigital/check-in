@@ -2263,13 +2263,18 @@ CREATE FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_to date
     AS $$
   select q.section, q.building, q.room, q.ref, q.resident, q.child, q.from_date, q.to_date, q.nights, q.back_on, q.status, q.line
     from (
-      -- Rooms under maintenance or with free contracted beds
+      -- Rooms under maintenance, fully empty, or with some free contracted beds
       select 1 as seq, lpad(b.sort::text, 6, '0') || b.name as k1, lpad(rm.sort::text, 6, '0') || rm.floor as k2, rm.number as k3,
              'Room updates' as section, b.name as building, rm.number as room, null::text as ref, null::text as resident, ''::text as child,
              null::date as from_date, null::date as to_date, null::integer as nights, null::date as back_on,
-             case when rm.status = 'maintenance' then 'maintenance' else x.free || ' free' end as status,
+             case when rm.status = 'maintenance' then 'maintenance'
+                  when x.free = x.contracted then 'available'
+                  else x.free || ' free' end as status,
              case when rm.status = 'maintenance'
                   then b.name || ' ' || rm.number || ' is under maintenance' || coalesce(': ' || rm.note, '') || '.'
+                  when x.free = x.contracted
+                  then b.name || ' ' || rm.number || ' is available immediately for new families'
+                       || coalesce(' (' || rm.bed_config || ')', '') || coalesce(': ' || rm.note, '') || '.'
                   else b.name || ' ' || rm.number || ': ' || x.free || ' of ' || x.contracted || ' bed' || case when x.contracted = 1 then '' else 's' end || ' free'
                        || coalesce(' (' || rm.bed_config || ')', '') || coalesce(': ' || rm.note, '') || '.' end as line
         from __TENANT__.rooms rm
