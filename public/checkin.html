@@ -552,6 +552,14 @@ async function checkHealth() {
   } else if (h.recent_failures > 0) {
     box.innerHTML = `<b>A maintenance job failed in the last two days.</b> The register is still being closed out; tell the administrator to check the <code>hut-nightly</code> job on Render.`;
     box.hidden = false;
+  } else if (h.safeguarding_alert_unset) {
+    // Not a failure — the nightly check runs regardless — but nobody is
+    // signed up to hear about it, which is its own kind of silent (migration
+    // 046): a child away overnight with no authorised absence reaches no
+    // other screen in this app (v_resident_compliance exempts under-18s from
+    // the daily rule), so this is the one place it would ever be said.
+    box.innerHTML = `<b>Nobody receives the nightly safeguarding alert.</b> Tell the administrator to turn it on for at least one supervisor or admin, in Admin → Staff.`;
+    box.hidden = false;
   } else {
     box.hidden = true;
   }

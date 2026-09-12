@@ -1694,6 +1694,35 @@ async function main() {
     assert.ok(after.json.last_close_out_run, "a recorded run is not reported");
   });
 
+  // The nightly safeguarding alert (041) ships off for every staff member, so
+  // a centre could go live with the entire feature inert and nothing anywhere
+  // saying so. The health view is the one thing that would ever say it
+  // (migration 046) — proved here by turning it on for a fresh account and
+  // watching the flag clear.
+  await test("the health view flags when nobody receives the nightly safeguarding alert", async () => {
+    const before = await api.fetch("/api/session/health");
+    assert.equal(before.status, 200, before.text);
+    assert.equal(typeof before.json.safeguarding_alert_unset, "boolean");
+
+    // dooradmin@hut.example was created earlier in the suite; log in locally
+    // rather than reuse another test's client, which is out of scope here.
+    const healthAdmin = client(base);
+    assert.equal((await healthAdmin.fetch("/api/session", { method: "POST", body: { email: "dooradmin@hut.example", password: PASSWORD } })).status, 200);
+    const target = await healthAdmin.fetch("/api/staff", {
+      method: "POST",
+      body: { email: `sghealth${Math.floor(Math.random() * 1e9)}@example.ie`, full_name: "Safeguarding Health Target", role: "supervisor" },
+    });
+    assert.equal(target.status, 201, target.text);
+    try {
+      const on = await healthAdmin.fetch(`/api/staff/${target.json.id}/safeguarding-alert`, { method: "POST", body: { on: true } });
+      assert.equal(on.status, 200, on.text);
+      const withOne = await api.fetch("/api/session/health");
+      assert.equal(withOne.json.safeguarding_alert_unset, false, "one recipient is enough to clear the flag");
+    } finally {
+      await healthAdmin.fetch(`/api/staff/${target.json.id}/safeguarding-alert`, { method: "POST", body: { on: false } });
+    }
+  });
+
   await test("an applied migration edited on disk is shouted about at boot", async () => {
     await withOwner((c) => c.query(`update public.schema_migrations set checksum = 'not-the-real-one' where name = '001_platform.sql'`));
     const lines = [];

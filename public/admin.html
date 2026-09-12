@@ -447,6 +447,7 @@
         </p>
       </form>
       <div id="linkNotice" class="alert warn" hidden></div>
+      <div id="safeguardingNotice" class="alert warn" hidden></div>
       <div id="staffList" class="list"></div>
       </div>
     </section>
@@ -1384,6 +1385,19 @@ async function loadStaff() {
   $("staffList").innerHTML = rows.length
     ? rows.map(staffCard).join("")
     : `<p class="empty">No staff accounts.</p>`;
+
+  // A guard terminal already says this in red (public/checkin.html) when
+  // nobody is signed up for the nightly safeguarding alert, but that is not
+  // where the fix happens — this tab is. Checked here rather than polled, so
+  // it settles the moment a box below is ticked and this list reloads.
+  const health = await guarded(() => apiGet("/api/session/health"), () => null);
+  const sg = $("safeguardingNotice");
+  if (health && health.safeguarding_alert_unset) {
+    sg.innerHTML = `<b>Nobody receives the nightly safeguarding alert.</b> Tick "Gets the nightly safeguarding alert" for at least one supervisor or admin below.`;
+    sg.hidden = false;
+  } else {
+    sg.hidden = true;
+  }
 }
 
 // What the administrator needs to know after a link is (or is not) sent.

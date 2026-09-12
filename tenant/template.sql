@@ -2925,7 +2925,11 @@ CREATE VIEW __TENANT__.v_system_health AS
            FROM __TENANT__.daily_compliance
           WHERE (daily_compliance.closed_at IS NOT NULL)) < __TENANT__.close_out_due_through()), (EXISTS ( SELECT 1
            FROM __TENANT__.daily_compliance
-          WHERE (daily_compliance.compliance_date < __TENANT__.close_out_due_through())))) AS close_out_behind
+          WHERE (daily_compliance.compliance_date < __TENANT__.close_out_due_through())))) AS close_out_behind,
+    (NOT (EXISTS ( SELECT 1
+           FROM (__TENANT__.profiles p
+             JOIN auth.users u ON ((u.id = p.id)))
+          WHERE (p.active AND p.safeguarding_alert AND (p.role = ANY (ARRAY['supervisor'::text, 'admin'::text])) AND (u.email IS NOT NULL))))) AS safeguarding_alert_unset
   WHERE __TENANT__.is_staff();
 
 
