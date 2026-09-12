@@ -1,224 +1,333 @@
 # GDPR notes
 
-Working notes on the data protection posture of this system — what it holds,
-why, and which decisions in the code were made for compliance reasons. It is
-written to be useful to whoever fills in the actual paperwork.
+What this system holds, why, for how long, and which decisions in the code
+were made for data-protection reasons. Written to feed the record of
+processing (ROPA) and the DPIA, and to agree with the schema as it is, not as
+it was. The customer-facing versions of the same facts are Annex I and Annex
+II of `docs/legal/DPA-2026-09-03.md`; if this file and the DPA ever disagree,
+the DPA is the promise and this file is wrong.
 
-**This is not legal advice.** A system that logs the daily movements of
-residents at a guarded site is a genuinely sensitive piece of infrastructure.
-Have a practitioner review the DPIA before it goes live.
+Rewritten 4 September 2026 against migrations 001–014. The previous version
+described columns that migration 006 removed, a retention period that
+migration 008 changed, and a scheduler that no longer exists.
+
+Updated 10 September 2026 against migration 035. The Weekly register update
+turned an internal staff notification (the House Rules reminder, migration
+032) into a second, different kind of processing: a weekly outbound
+disclosure of resident data by email to addresses that need not belong to
+the centre. The Resend section below and the processor table were wrong
+about this and are corrected.
+
+Updated again 10 September 2026 against migration 037 and the same day's
+rewrite of the email's content (`lib/weeklyReport.js`). The disclosure above
+lasted less than a day. Recipients of the Weekly register update are now a
+tick on the staff record, offered only to supervisors and admins, and the
+email itself carries counts and a link only — no resident name, room, date
+or child marker. The email now goes only to the centre's own staff, and no
+resident data leaves by it at all. The Resend section and processor table
+below are corrected again.
+
+**This is not legal advice.** A system that records the daily presence of
+residents in accommodation, some of whom are in the international protection
+process, is systematic monitoring of people who are frequently vulnerable.
+Have a practitioner review the DPIA before a centre goes live.
+
+---
+
+## Roles
+
+The **centre** (the customer) is the controller: it decides that residents
+are recorded, on what basis, and answers to them. **Tenzing Digital** is the
+processor, and Render and Resend are its sub-processors (DPA Annex III). This
+file is written from the processor's side; the centre's own privacy notice to
+residents is the centre's document, and the DPA says so.
 
 ---
 
 ## What is held
 
-| Data | Where | Why |
-|---|---|---|
-| Name | `residents` | Identifying the person the guard is looking at |
-| Date of birth | `residents` | Applying the 18+ rule, computed as of each date |
-| Room / unit reference | `residents` | Distinguishing people with similar names |
-| Operational note | `residents` | Free text, e.g. "works nights" |
-| Departure date | `residents.departed_on` | Stops the daily duty applying after move-out |
-| Sign-in / sign-out events | `gate_events` | Who is on site right now — the gate app |
-| Check-in events | `checkin_events` | Deliberate daily presentation at the hut — the statutory record |
-| Daily attendance register | `daily_compliance` | One row per resident per day: required, presented, first-seen time, count. Retained for the statutory period — see "Retention" below |
-| Annotations on missed days | `compliance_annotations` | A staff-supplied reason for a missed day; never changes the outcome |
-| Guard name and role | `profiles` | Attribution of each event |
+### About residents
 
-No PINs, no photographs, no biometrics, no ID document numbers, no health data.
-The absence of biometrics is a deliberate design choice: identity is established
-by the guard looking at the person, which keeps the system clear of Art. 9
-special-category data entirely.
+| Data | Where | Why | Who sees it |
+|---|---|---|---|
+| First and last name | `residents` | Identifying the person at the window | All staff |
+| Date of birth | `residents` | The under-18 exemption, computed as of each day | Supervisors and admins only. Guards read a view that carries age, never the date |
+| Identity document type and number (TRC or IRP) | `residents.id_type`, `id_number` | The IPAS verification policy asks that the document is checked | Detail view only, never in a list (Annex II). Searchable, so a guard can find a person by the number on the card |
+| Registration and departure dates, status | `residents` | When the daily rule starts and stops applying | All staff |
+| Entry and exit events | `gate_events` | Who is on site now; the door log | All staff |
+| Check-in events | `checkin_events` | The daily presentation the policy requires | All staff |
+| The daily register | `daily_compliance` | One row per resident per day: required, presented, first seen, count. The durable record | All staff |
+| Late-entry provenance | `late_entry`, `recorded_at`, `client_ref` on both event tables | Separates "recorded live" from "recorded on the terminal during an outage and sent later" | All staff; appears in the export |
+| Room | `residents.room_id` (migration 016, only where the centre turns buildings on) | Where the person sleeps; occupancy and the evacuation list | All staff |
+| Evacuation need | `residents.evac_need` (migration 017, only where the centre turns evacuation on) | One code from a fixed list: needs help to move, to hear the alarm, to find the way, has an infant or is a carer, other. The PEEP minimum | The roll call, the evacuation list and room occupancy only. Never on the gate or register cards, never searchable |
+| Household | `residents.household_id` (migration 018, only where the centre turns households on) | Which residents are one family, so a child appears with a parent on the roll call. An id and nothing else: no family name, no relationship, no free text | All staff |
+| Roll calls | `roll_calls`, `roll_call_marks`, `roll_call_visit_marks` | Who was accounted for in a drill or an incident, by whom, when | All staff; kept as long as the register |
+| Authorised absences | `authorised_absences` (migration 028) | First and last day away, a reason from a fixed list (holiday, family, medical, education, work, other), whether a parent or guardian agreed (children only), who approved, when cut short. No destination, no free text | All staff; supervisors record. Kept as long as the register, then purged; approvals are on the audit trail; erasing a resident removes their rows |
+| The site's staff list | `staff_roster` (migration 030) | Name and job title of the centre's own staff who do not use the app, so signing them in is one tap and the roll call names them. No contact details | All staff read; supervisors keep it. Archived, never deleted, so visits that name them keep their meaning; on the audit trail |
+| Breach reports issued | `breach_reports` (migration 029) | That a report went to IPAS: which kind (house rules, misuse of the verification system), the day, who recorded it, its reference. Never what happened | All staff; supervisors record. Kept as long as the register, then purged; on the audit trail; erasing a resident removes their rows |
+| Room history | `room_assignments` (migration 028) | Which room, from when to when, who moved them | All staff; written only by the trigger on the resident row. Erasing a resident removes their rows |
+| Who was off site at midnight, night by night | `overnight_absences` (migration 027) | One row per resident per night they were off site at the end of the site day, with when they last left. Taken by the nightly job from the movement log, so the question "who was out on the night of the 3rd?" has an answer after the log itself has been purged | All staff, through the "Absent overnight" report; kept as long as the register (`compliance_retention_days`), then purged. Erasing a resident removes their rows |
+| Visitors, staff, contractors and suppliers on site | `visits` (migration 024, only where the centre turns visitors on) | Kind from a fixed list, name, optional company or reason, arrival and departure times, who recorded them. So a roll call counts everyone in the building, not only residents. No phone number, vehicle or ID | All staff; kept as long as the movement log (`event_retention_days`), then purged |
 
-`residents.note` is free text and is therefore the most likely place for
-special-category data to arrive by accident — a guard typing "diabetic, keeps
-insulin at the hut" has created a health record. The column comment says so.
-Worth a line in the staff briefing, and worth periodically reviewing.
+Nothing else. There is no free-text note, no photograph, no biometric, and
+no field in which to put any. Identity is established by the guard looking
+at the person and, where the centre requires it, at their card.
+
+**The evacuation need is the one special-category field.** It exists because
+a centre has a fire-safety duty to know who needs help to get out, and a
+personal emergency evacuation plan is what a fire officer expects. It is
+held as a single code from a fixed list (no free text, so nothing beyond the
+code can arrive), shown only where evacuation happens, and only where the
+centre has turned the feature on. A centre that turns it on is holding
+Article 9 data and must say so in its DPIA; Art. 9(2)(c), protecting vital
+interests, and the centre's statutory fire-safety duty are the bases to
+record. The old free-text room reference and note were removed in
+migration 006 precisely because free text is where such detail arrives by
+accident; the room is now a reference to a room a supervisor created.
+
+**Special-category data by inference.** A TRC or IRP number is not itself
+Article 9 data, but a number issued only to international protection
+applicants can reveal immigration status. The DPA says this to the customer
+in Annex I. The register is treated here as sensitive for that reason:
+detail-view only, never in a list, and never in an email.
+
+**Children.** Residents under 18 are excluded from the daily rule by
+`compliance_required()` on the day in question. Their names, dates of birth
+and any events are held like anyone else's if the centre registers them.
+
+### About staff
+
+| Data | Where | Why | Retention |
+|---|---|---|---|
+| Name, role, active flag | `profiles` | Attribution of every record; authorisation | Life of the account. A staff identity that records depend on cannot be deleted, only disabled |
+| Email, password hash (bcrypt, cost 12) | `auth.users` | Login | Life of the account |
+| Session tokens (SHA-256 digests), created and last-seen times, IP, user agent | `auth.sessions` | Keeping the person logged in for a shift | Until expiry (12 hours) or logout; purged nightly |
+| Password-reset and invitation tokens (digests) | `auth.password_resets` | The emailed one-day link | 24 hours; purged nightly |
+| Login codes (SHA-256 digests) and trusted-device tokens (digests), with the user agent | `auth.mfa_challenges`, `auth.mfa_devices` | The second login step for supervisors and admins where a site requires it (migration 021) | Codes purged a day after expiry; devices 30 days |
+| Every sign-in attempt: email as typed, outcome, IP, the country it resolved to, why it was unusual, user agent | `auth.login_events` | Detecting misuse; refusing senior logins from abroad; the privacy notice promises it | 90 days; purged nightly |
+| Administrators' and supervisors' changes, with the row before and after | `admin_audit` | Accountability for changes to residents, staff and settings | Same period as the register; purged nightly |
+| Who opened which resident's record, where (register sheet, edit sheet, export) and when | `resident_views` (migration 023) | The access log: the first thing to read after a complaint that somebody was looking at a record they had no business with. Written by the server with the read itself; the gate's sheet (no identity number) and a sheet opened offline are not logged | Administrators, through the "Who viewed which record" report; each resident's own export includes theirs. Same period as the audit trail; purged nightly |
+
+Staff data is Tenzing Digital's own processing as well as the centre's, and
+`docs/legal/PRIVACY-2026-09-03.md` is the notice for it.
+
+### On the terminal
+
+Since the offline work (`README.md`, "Working offline") each terminal keeps
+an encrypted copy of the register it last loaded — names, identity numbers
+and today's status, never dates of birth — and an encrypted queue of events
+recorded while the link was down. Both are AES-GCM ciphertext in the
+browser's storage; the key lives only in the tab and is gone when it closes;
+the register copy is cleared at logout; the queue is cleared once sent. The
+terminal is therefore a device holding resident data at rest, briefly, under
+the centre's physical control, and belongs in the ROPA as such. The
+mitigations are the encryption, the short life of the key, the idle lock
+(`app_settings.idle_lock_minutes`, default 20), and the physical controls on
+the terminal itself.
 
 ---
 
 ## Lawful basis
 
-Two candidates, and the choice has consequences:
+This is the centre's decision, and it should be made before go-live, because
+the retention period, the notice to residents and their rights all follow
+from it.
 
-- **Legitimate interests (Art. 6(1)(f))** — the usual basis for site security.
-  Requires a documented Legitimate Interests Assessment, and gives residents an
-  Art. 21 right to object that you must be able to handle.
-- **Legal obligation (Art. 6(1)(c))** — if the daily presence requirement comes
-  from a statutory or licensing requirement on the site, this is stronger and
-  removes the right to object.
+- **Legal obligation (Art. 6(1)(c))** where the daily presence check is
+  required of the centre by its contract with IPAS and the verification
+  policy behind it. This is the basis the product is designed around: the
+  register's default retention (180 days) is the six months that policy
+  names, and the register is the evidence the centre is inspected on.
+- **Legitimate interests (Art. 6(1)(f))** for the door log, if the centre
+  runs one for site security beyond what the policy requires. That needs a
+  written balancing test and gives residents a right to object.
 
-The daily presence requirement points strongly at the second: a rule that
-everyone over 18 must physically present every calendar day is unusual outside
-a regulated setting. **Establish which it is before go-live**, because the
-retention period, the privacy notice, and residents' rights all follow from it.
+If the basis is a legal obligation, Art. 17(3)(b) may allow an erasure
+request to be refused while the record is still required. The erasure
+function is the mechanism; the decision is the centre's.
 
-If it is legitimate interests, note that a daily attendance record is a
-meaningful intrusion, and the balancing test needs to reflect that rather than
-waving at "security".
+---
+
+## Retention
+
+All periods are rows in `app_settings`, editable by an administrator under
+Settings, and enforced by the nightly job (`jobs.js`, run by Render's
+scheduler at 00:30 UTC). Every run is recorded in `job_runs`, and the register
+page shows a red banner if the close-out falls behind, so a purge that stops
+running is noticed.
+
+| Data | Setting | Default | Why that default |
+|---|---|---|---|
+| Entry, exit and check-in events | `event_retention_days` | 90 days | Granular movement data; minimise (Art. 5(1)(e)). The register outlives it |
+| The daily register | `compliance_retention_days` | 180 days | The six-month limit in the IPAS verification policy of March 2026 (migration 008) |
+| Administrators' audit trail | follows `compliance_retention_days` | 180 days | Accountability for the period the register itself exists |
+| Access log (who viewed which record) | follows `compliance_retention_days` | 180 days | Same reasoning as the audit trail |
+| Sign-in attempts | fixed | 90 days | Long enough to investigate misuse; short because it holds IP addresses |
+| Job run history | fixed | 90 days | Operational |
+| Backups (Tenzing's off-provider copy) | `tools/backup.sh` | 35 days | DPA section 9 |
+
+The register is deliberately thin — a resident reference, a date, two
+booleans, a count and a timestamp — which is what makes keeping it for six
+months proportionate. The rich event stream it was derived from goes at 90
+days.
+
+**Shortening a period deletes at the next nightly run.** The Settings screen
+says so.
 
 ---
 
 ## Design decisions made for compliance
 
-### Data minimisation is enforced by the schema, not by convention
+**Minimisation is enforced by the schema, not by convention.** Guards hold
+no `SELECT` on `residents`; they read `v_resident_status`, which carries
+`age_years` and `is_adult` and no date of birth. Lists never carry the
+identity number; `has_id` says whether there is one. The test suites assert
+both (`test/sql.sh`, `test/api.sh`).
 
-Guards never hold `SELECT` on `residents`. They read `v_resident_status`, which
-exposes `age_years` and `is_adult` but **no date of birth**. A guard has no
-operational need for a resident's birthday, so they cannot see it. The
-acceptance suite asserts this — the same query returns 0 rows to a guard and 10
-to a supervisor.
+**Why a date of birth rather than an "is adult" flag.** A flag is wrong the
+day a 17-year-old turns 18 unless someone remembers to flip it, and a missed
+flip either marks a minor in breach or exempts an adult. The age is computed
+as of the day being evaluated, so backfilling never applies the rule to a day
+the person was still a minor.
 
-### Why a full date of birth is stored at all
+**The record is append-only.** No role, including administrator, holds
+`UPDATE` or `DELETE` on `gate_events`, `checkin_events` or
+`daily_compliance`. Corrections are new events; a missed day is never edited
+to look attended. This serves accuracy (Art. 5(1)(d)) in both directions: a
+record cannot be quietly altered, and a resident disputing an entry has an
+intact history. Events synced after an outage carry `late_entry = true` and
+the server's `recorded_at` beside the terminal's `occurred_at`, so a synced
+event is never presented as if it had been recorded live.
 
-Storing "is an adult" as a boolean would be less data. It would also be wrong
-within a year: a 17-year-old becomes subject to the rule on their 18th birthday,
-and a boolean requires someone to notice and flip it. A missed flip means either
-a minor wrongly flagged in breach, or an adult silently exempt from a rule the
-site is obliged to enforce.
+**Administrators are on the record.** Triggers on `residents`, `profiles`
+and `app_settings` write `admin_audit` as the table owner with the row
+before and after; an export is noted with its reason. Admins can read it;
+nobody can change it. A resident's change history is part of their Art. 15
+export.
 
-Deriving age from date of birth makes the transition automatic and correct on
-the day — and `compliance_required()` always computes it as of the day being
-evaluated, not as of today, so backfilling a resident's history never
-retroactively applies the duty to a day when they were still a minor. That is
-the necessity argument for holding the field, and it is paired with never
-showing it to the people who don't need it.
+**Erasure leaves proof without leaving data.** `erase_resident()` removes the
+person, every event, every register row and their audit rows, then writes
+`erasure_log`: a SHA-256 digest of the internal id, the number of rows
+removed, the reason, the admin and the time. That demonstrates the erasure
+(Art. 5(2)) without keeping anything that identifies the person.
 
-### Storage limitation now splits into two horizons
+**Access is a session, not obscurity.** Every table has row-level security;
+every view and function is revoked from `anon`. The API refuses a request
+without a valid session before it opens a transaction, and if that check
+were ever wrong the request would still run as `anon`, where the policies
+deny everything. The browser holds no credential the page can read: the
+session is an `HttpOnly`, `__Host-` cookie.
 
-The original design derived compliance on the fly from the movement log, which
-`purge_expired_check_events()` deleted at 90 days. After 90 days the system
-could no longer show whether anyone had met the requirement, and a resident
-who presented every day for a year became indistinguishable from one who never
-did — a real defect the current design fixes by separating the granular log
-from the durable proof of attendance:
+**Nothing third-party in the browser.** The pages load no script, font or
+image from anyone else, and the content-security policy (`default-src
+'none'`, `connect-src 'self'`, scripts admitted by hash, no inline styles)
+enforces it. A resident's browser never exists here; a staff browser
+contacts exactly one host. This describes the app, at app.checksteady.com,
+where residents' data lives. It does not describe checksteady.com, the
+brochure site: that site's pages (including the trial and this
+data-protection page) load Cloudflare Web Analytics, a cookieless beacon
+that briefly transmits the visitor's address to Cloudflare, which acts as a
+processor for it there — Cloudflare neither stores nor exposes it, and no
+resident data ever reaches that site, but a centre's data protection
+officer should know a third party is in the browser on that domain.
 
-| Data | Purge function | Retained (default) | Rationale |
-|---|---|---|---|
-| `gate_events` | `purge_expired_gate_events()` | `app_settings.event_retention_days` (90 days) | Granular movement data — minimise (Art. 5(1)(e)) |
-| `checkin_events` | `purge_expired_checkin_events()` | `app_settings.event_retention_days` (90 days) | Same window as gate events; one setting covers both |
-| `daily_compliance`, `compliance_annotations` | `purge_expired_compliance()` | `app_settings.compliance_retention_days` (2555 days, ≈ 7 years) | Proof of daily reporting — needs to outlive the movement log it was derived from |
+**What leaves by email.** Invitations and password resets carry no resident
+data: a staff member's own address, name and a single-use link. Of the two
+recurring reports below, one carries resident data and one does not.
 
-All three purge functions are database settings rather than code constants, so
-retention can be aligned to the actual retention schedule without a deploy,
-and all three need scheduling with `pg_cron` — see `README.md`.
+The nightly House Rules reminder (migration 032), where the centre has
+turned it on, goes to the centre's own active supervisors and
+administrators: each resident at or over a figure, their name and room
+label, and two counts against the site's House Rules settings — consecutive
+nights missed, and nights missed within the configured window.
 
-**Both defaults are placeholders.** 90 days for the event logs and 2555 days
-(~7 years) for the compliance register are starting points, not the answer.
-Set both to whatever the retention schedule actually says; if the lawful basis
-is a legal obligation, the source of that obligation usually specifies a
-period for the compliance register specifically.
+The Sunday Weekly register update (migrations 035 and 037), where the
+centre has turned it on — or at any time an administrator sends it by hand
+from Settings, switch or no switch — goes to the centre's own staff ticked
+"Gets the Sunday report" on their record, offered only to supervisors and
+admins because only they may run the report it summarises. It carries no
+resident data at all: a count for resident absences, weekend updates,
+removals and room updates, and a link into the app. The names, rooms and
+dates behind those counts stay in the app, under Admin → Reports, where
+they can also be downloaded as a spreadsheet.
 
-The register itself is deliberately tiny — one row per resident per day,
-holding a resident reference, a date, two booleans (`required`, `presented`),
-a count, and a timestamp. No name, no note, no location beyond "the hut", no
-free text unless a guard chooses to annotate a missed day. That minimalism is
-what makes retaining the register for years — rather than the 90-day window
-that applies to the movement log — proportionate: the data that must survive a
-long time is a thin factual record, not the rich event stream it was derived
-from.
-
-### The audit trail is genuinely append-only
-
-No role holds `UPDATE` or `DELETE` on `gate_events`, `checkin_events`,
-`daily_compliance` or `compliance_annotations`. This serves accuracy
-(Art. 5(1)(d)) in both directions: a record cannot be quietly altered after the
-fact, and a resident disputing an entry has an intact history to point at.
-Corrections are recorded as new events; a missed day is never edited to look
-attended, only annotated with a reason that sits alongside it.
-
-### Erasure leaves proof without leaving data
-
-`erase_resident()` deletes the resident and cascades to `gate_events`,
-`checkin_events`, `daily_compliance` and (via `daily_compliance`)
-`compliance_annotations` — the entire event and register history — then writes
-to `erasure_log`: a SHA-256 digest of the resident's internal id, the number of
-events removed, the reason, the admin, and the timestamp. That demonstrates
-the erasure happened (Art. 5(2) accountability) without retaining anything
-identifying about the person who asked for it.
-
-Note that erasure is **not** automatic on request. If the lawful basis is a
-legal obligation, Art. 17(3)(b) may mean the request can be refused. The
-function is the mechanism; the decision is a human one.
-
-### Access is gated on a session, not on obscurity
-
-Every table has RLS enabled; the guard-facing views (`v_resident_status`,
-`v_check_log`, `v_resident_compliance`) and every RPC are revoked from `anon`.
-A logged-out caller holding the publishable key — which is in the page source
-and always will be — can read nothing, search nothing, and write nothing. This
-is asserted by the acceptance suite rather than assumed.
+Neither message carries a date of birth, an identity-document number, an
+evacuation need, or any free text about a person. The House Rules reminder
+is the only one of the two that names a resident, and it carries nothing
+beyond a name, a room label and the two night counts above.
 
 ---
 
 ## Data subject rights
 
-| Right | How |
-|---|---|
-| Access (Art. 15) | `select public.export_resident_record('<uuid>')` — admin only |
-| Portability (Art. 20) | Same function; returns JSON |
-| Rectification (Art. 16) | Supervisor edits `residents`; ledger corrections are new events |
-| Erasure (Art. 17) | `select public.erase_resident('<uuid>', 'reason')` — admin only |
-| Objection (Art. 21) | Procedural; depends on the lawful basis above |
+All three rights that touch the record have a route in the app, admin-only,
+on the resident's edit sheet under Admin, and each is refused to a guard or a
+supervisor by the database function itself, not just by the screen.
 
-The export includes the resident's record, every gate and check-in event with
-the recording guard's name, and the daily compliance register with its
-annotations. Consider whether guard names should be redacted before handing an
-export to a resident — they are the personal data of a third party, and in a
-setting where a resident may be in dispute with staff, that matters.
-
----
-
-## Transfers and processors
-
-Both providers in the default stack are **US companies**, even when the data
-sits in the EU:
-
-| Processor | Role | Where the data sits |
+| Right | How | Notes |
 |---|---|---|
-| Supabase Inc. (US) | Database, auth | The region chosen at project creation — **pick Frankfurt or Ireland** |
-| Vercel Inc. (US) | Static hosting | Edge; serves `index.html` only, but sees request IPs |
-| jsDelivr / Fastly | CDN for `supabase-js` | Sees the visitor's IP on page load |
+| Reports for an inspection | Admin → Reports: register, attendance, movements, occupancy, evacuation, drills, as CSV or a printable page | Supervisors and admins. A reason is required; each export is written to `admin_audit` with the range (`note_report()`) |
+| Access (Art. 15) and portability (Art. 20) | Export button → `GET /api/residents/:id/export?reason=…` | JSON: the record, every event with the recording staff member's name, the register, the change history, and who has viewed the record. The reason is recorded in `admin_audit` |
+| Who has looked at a record | Admin → Reports → *Who viewed which record*, for a date range | Administrators only (`resident_views_between()`); a reason is required and the report itself is logged like any other |
+| Rectification (Art. 16) | Edit sheet (supervisors and admins) | Names, date of birth, identity document, departure date. The change is audited. Events are corrected by new events, never edited |
+| Erasure (Art. 17) | Erase button, with the reason and the full name typed back | See "Erasure leaves proof" above. The decision is the centre's; Art. 17(3)(b) may apply |
+| Objection (Art. 21) | Procedural | Only arises under legitimate interests |
+| Restriction (Art. 18) | Set `departed_on` | Stops the daily rule applying without deleting history |
 
-Actions:
-
-1. **Sign the DPA with both.** Each publishes one; neither is signed by default.
-2. **Choose an EU region at project creation.** It cannot be changed afterwards.
-3. **Record the transfer basis.** Both rely on Standard Contractual Clauses plus
-   the EU–US Data Privacy Framework. Note the current status of both in your
-   ROPA; this area moves.
-4. **Consider the CDN.** Loading `supabase-js` from jsDelivr sends the browser's
-   IP to a third party before anyone logs in — the same issue that made hotlinked
-   Google Fonts a finding in German case law. Both `index.html` and
-   `checkin.html` load it the same way, so both need the change. It is easy to
-   remove:
-
-   ```bash
-   curl -o supabase.js https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js
-   # then in both index.html and checkin.html:
-   #   <script src="/supabase.js"></script>
-   ```
-
-   Still no build step, one fewer processor, and it removes a supply-chain
-   dependency from a security system. The SRI hash in each file pins the exact
-   bytes either way.
-
-If EU-owned infrastructure is a requirement rather than a preference,
-`docs/TECH-STACK.md` sets out what that costs.
+**Third-party data in an export.** Each event carries the name of the staff
+member who recorded it. Before handing an export to a resident, the centre
+should decide whether staff names are redacted; in a setting where a resident
+may be in dispute with staff, that matters.
 
 ---
 
-## Before go-live
+## Processors and transfers
 
-- [ ] Decide and document the lawful basis
-- [ ] DPIA — this is systematic monitoring of individuals' movements
-- [ ] Privacy notice for residents: what is logged, why, retention, their rights
-- [ ] Set `event_retention_days` to the real retention period for `gate_events` / `checkin_events`
-- [ ] Set `compliance_retention_days` to the real statutory period — the default (2555 days) is a placeholder, not a decision
-- [ ] Confirm `pg_cron` is enabled and all four scheduled jobs are running (`select * from cron.job`), in particular `close-out-compliance-days` — without it the register only ever gains positive rows and no one is ever recorded as having missed a day
-- [ ] DPAs signed with every processor
-- [ ] Supabase project confirmed in an EU region
-- [ ] Public sign-up disabled (verify by trying to register)
-- [ ] Staff briefed that `note` must not carry health or other sensitive data
-- [ ] A named person who can action access and erasure requests
-- [ ] Decide whether guard names are redacted from resident-facing exports
+| Processor | Purpose | Where |
+|---|---|---|
+| Render Services, Inc. | Hosting, the managed database, backups, the nightly scheduler | Frankfurt (EU); fixed at creation in `render.yaml` |
+| Resend, Inc. | Invitation and password-reset email to staff; the nightly House Rules reminder to the centre's own supervisors and administrators; the Sunday Weekly register update, which carries no resident data, to the centre's own staff ticked to receive it | EU/US; see DPA section 6 |
+
+Both are US companies with EU data residency, so the transfer basis (Standard
+Contractual Clauses plus the EU–US Data Privacy Framework, as each provider
+states it) must be on file with a transfer impact assessment before the
+position is claimed to a customer. `docs/legal/README.md` lists this as
+outstanding. If EU-owned infrastructure becomes a requirement rather than a
+preference, `docs/TECH-STACK.md` sets out the cost, and the DPIA should say in
+one paragraph why the current bar was chosen over it.
+
+**Who can read the database.** The Render dashboard's shell and the external
+connection string are the only routes to the raw data outside the app. The
+list of people holding either is kept in
+`docs/procedures/ACCESS-JOINER-MOVER-LEAVER.md` and reviewed quarterly.
+
+---
+
+## Breaches, backups, continuity
+
+- **Breach:** `docs/procedures/INCIDENT-RESPONSE.md`. The DPA gives the
+  customer 48 hours; the customer has 72 to the Data Protection Commission.
+- **Backups:** Render's daily managed backups (Annex II) plus an encrypted
+  off-provider copy, kept 35 days, rehearsed quarterly:
+  `docs/procedures/BACKUP-AND-RESTORE.md`.
+- **The link goes down:** the terminal keeps working for hours and syncs
+  later; beyond that, the paper sheet: `docs/procedures/PAPER-FALLBACK.md`.
+- **Risks and their treatment:** `docs/procedures/RISK-REGISTER.md`.
+
+---
+
+## Before a centre goes live
+
+- [ ] The centre has decided and written down its lawful basis
+- [ ] DPIA done — the DPA (section 7) tells the customer one is very likely required, and Annex I and II are written to be used in it
+- [ ] The centre's privacy notice to residents exists: what is recorded, why, for how long, their rights, who to ask
+- [ ] `compliance_retention_days` and `event_retention_days` match the centre's retention schedule (the defaults are 180 and 90)
+- [ ] The nightly job's last run is green (`/api/session/health`, or the register page shows no red banner)
+- [ ] Render's and Resend's DPAs and SCCs on file; transfer impact assessment written
+- [ ] Database confirmed in Frankfurt on a paid plan with point-in-time recovery, and not the smallest plan (`docs/KNOWN-ISSUES.md` 19c)
+- [ ] Email configured (`RESEND_API_KEY`), so invitation links go to their owner and not to an administrator's screen
+- [ ] If the Weekly register update is turned on, the staff ticked "Gets the Sunday report" (Admin → Staff) are the right supervisors and admins — the email itself carries no resident data, so this is a check on who holds those roles rather than on what leaves by email
+- [ ] A named person at the centre who actions access and erasure requests, and a named person at Tenzing who receives breach reports
+- [ ] The list of people holding the external connection string is written down and short
+- [ ] The paper fallback sheet is printed and in the hut
+- [ ] Staff briefed: shared-terminal rules, the idle lock, what to do when the pill goes amber, and that no health or other sensitive detail is ever typed into the register (there is no field for it, but there is a search box)

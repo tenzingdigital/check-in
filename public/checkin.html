@@ -5,21 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="dark">
-<title>Hut Check-In — Daily Register</title>
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="CheckSteady">
+<meta name="theme-color" content="#1d4ed8">
+<title>CheckSteady — Daily register</title>
 
 <!--
-  Hut Check-In — Daily Register. Single-file front end, no build step.
+  CheckSteady — Daily register. Single-file front end, no build step.
   Shares its CSS/JS layer with index.html (the gate app) via app-common.css
   and app-common.js — see those files rather than duplicating them here.
 
-  Configuration: set the two values in the CONFIG block below, or define
-  window.CHECKIN_SUPABASE_URL / window.CHECKIN_SUPABASE_ANON_KEY before this
-  script runs (e.g. from a small config.js you keep out of git).
+  There is nothing to configure. The page talks to /api on its own origin,
+  served by the same Render service that served this file, and authenticates
+  with an HttpOnly session cookie it cannot itself read.
 
-  The anon key is a public value — it identifies the project, it does not grant
-  access. Every table is behind row-level security and every read a guard makes
-  is gated on an authenticated session. See supabase/schema.sql.
+  Authorisation still lives in the database, not here: every read a guard makes
+  is gated on `public.is_staff()` inside a view or a SECURITY DEFINER function,
+  under the identity the API binds to the transaction. See db/schema.sql.
 -->
 
 <link rel="stylesheet" href="/app-common.css">
@@ -32,42 +39,92 @@
   .badge.seen_today    { color: var(--ok); }
   .badge.expected      { color: var(--muted); }
   .badge.due_today     { color: var(--warn); }
-  .badge.exempt        { color: var(--exempt); }
-  .badge.breach_open   { color: var(--bad); }
-  .badge.breach_noted  { color: var(--bad); }
+  .badge.exempt, .badge.not_required { color: var(--muted); }
+  .badge.away { color: var(--warn-text); }
   .badge.never         { color: var(--bad); }
-  .badge.not_required  { color: var(--muted); }
 
-  .card.breach_open, .card.never    { border-left: 4px solid var(--bad); }
-  .card.breach_noted                { border-left: 4px solid var(--bad); }
-  .card.due_today                   { border-left: 4px solid var(--warn); }
-
-  /* Demoted, never hidden: an annotated breach still needs a border and a
-     badge, just not the guard's full attention. */
-  .card.noted { opacity: .6; }
+  .card.never          { border-left: 4px solid var(--bad); }
+  .card.due_today      { border-left: 4px solid var(--warn); }
 
   /* ---- 30-day strip ---- */
   .stripTitle { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
   .strip { line-height: 0; }
   .cell { display: inline-block; width: 10px; height: 18px; margin: 1px; border-radius: 2px; }
   .cell.ok  { background: var(--ok); }
-  .cell.miss { background: var(--bad); cursor: pointer; }
+  .cell.miss { background: var(--bad); }
   .cell.na  { background: var(--surface-2); }
-  .cell.miss:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .strip .cell[title] { cursor: pointer; }
+  .legend { margin: 6px 0 0; font-size: 12px; line-height: 1.4; }
+  .legend .cell { width: 10px; height: 12px; vertical-align: middle; margin: 0 4px 0 10px; cursor: default; }
+  .legend .cell:first-child { margin-left: 0; }
+
+  /* ---- identity and policy notes (detail panel only) ---- */
+  .idline { margin-top: 6px; font-size: 14px; color: var(--muted); }
+  .idline b { color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+
+  /* Inline editor for the ID, replacing two browser prompt() dialogs: a
+     phone offers to suppress those after a couple, after which every
+     later prompt silently returns nothing and "Add" appears to do nothing. */
+  #panelCheckin { margin-top: 14px; }
+
+  .idform { margin-top: 10px; display: grid; gap: 10px; }
+  .idform .seg { display: flex; gap: 6px; }
+  .idform .seg button {
+    flex: 1; padding: 11px 8px; border-radius: 10px;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-weight: 650;
+  }
+  .idform .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #041025; }
+  .idform .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .idform input.field { font-variant-numeric: tabular-nums; letter-spacing: .04em; text-transform: uppercase; }
+  .idform .actions { margin: 0; }
+  .idform .actions .btn { padding: 14px 12px; font-size: 15px; }
+
+  /* Facts with the rule named, never a verdict. Amber, not red: this is
+     something for the manager to weigh, not an alarm the app has raised. */
+  .policy {
+    margin: 14px 0 0; padding: 12px 14px;
+    background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+    border-radius: 10px;
+  }
+  .policy p { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--text); }
+  .policy p + p { margin-top: 8px; }
+
+  .events { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+  .events div { padding: 2px 0; }
+  .events b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .fact b small { font-weight: 400; color: var(--muted); font-size: 12px; }
 </style>
 </head>
-<body>
+<body class="app-register">
 
 <!-- ========================= LOGIN ========================= -->
 <section id="login" class="login" hidden>
-  <h1>Hut Check-In</h1>
-  <p>Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
-  <div id="loginError" class="alert" hidden></div>
-  <form id="loginForm" autocomplete="on">
-    <input id="email" class="field" type="email" placeholder="Email" autocomplete="username" required>
-    <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
-    <button id="loginBtn" class="btn" type="submit">Log in</button>
-  </form>
+  <div class="logincard">
+    <!-- mountBrand() puts the mark inside the h1. The screen's name is its own
+         line rather than a span inside the heading: at 380px "Daily register"
+         wrapped under the wordmark and left the mark stranded beside it. -->
+    <h1>CheckSteady</h1>
+    <p class="loginwhich">Daily register</p>
+    <p class="loginlede">Guard sign-in required. This terminal shows resident data only while you are logged in.</p>
+    <div id="loginError" class="alert" hidden></div>
+    <form id="loginForm" autocomplete="on">
+      <label class="lbl" for="email">Email</label>
+      <input id="email" class="field" type="email" autocomplete="username"
+             autocapitalize="off" spellcheck="false" enterkeyhint="next" required>
+      <label class="lbl" for="password">Password</label>
+      <input id="password" class="field" type="password" autocomplete="current-password"
+             enterkeyhint="go" required>
+      <button id="loginBtn" class="btn" type="submit">Log in</button>
+    </form>
+    <!-- mountResetUI() inserts "Forgot your password?" and its panels after
+         the form; showMfa() inserts the code panel in the same place. -->
+  </div>
+  <p class="loginfoot">
+    <a href="/help.html">New here? How CheckSteady works</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://checksteady.com/">checksteady.com</a>
+  </p>
 </section>
 
 <!-- ========================= APP ========================= -->
@@ -75,79 +132,72 @@
   <header>
     <div class="bar">
       <div class="brand">
-        <span id="siteName">Security Hut</span>
-        <small id="guardName">&nbsp;</small>
+        <div>
+          <span>CheckSteady</span>
+          <small><b id="siteName"></b> <span id="guardName">&nbsp;</span></small>
+        </div>
       </div>
-      <span class="clock" id="clock"></span>
-      <button class="btn ghost" id="logoutBtn" style="padding:8px 12px">Log out</button>
+      <nav class="viewswitch" aria-label="App view">
+        <a href="/index.html">In &amp; out</a>
+        <span aria-current="page">Daily register</span>
+        <a href="/admin.html" id="adminLink" hidden>Admin</a>
+      </nav>
+      <span id="netState" class="net" role="status" hidden></span>
+<a class="help" href="/help.html" aria-label="Help and guide" title="Help">?</a>
+      <button class="btn ghost sm" id="logoutBtn">Log out</button>
     </div>
-    <div class="stats">
-      <div class="stat bad">  <b id="statNotSeen">–</b><span>Not seen today</span></div>
-      <div class="stat bad">  <b id="statOpenBreach">–</b><span>Open breaches</span></div>
-      <div class="stat ok">   <b id="statCheckins">–</b><span>Seen today</span></div>
-    </div>
+    <!-- The two tiles are the questions a guard asks about today; tapping
+         one shows exactly those residents in the Check in list. Tap again
+         for all. History lives on Admin → Absences. -->
   </header>
+    <div class="stats">
+      <button class="stat" type="button" data-filter="not_seen" aria-pressed="false" data-tip="Residents required today who have not checked in yet. This is the list the register opens on; a check-in drops the card off it. Hold any tile for this note."><b id="statNotSeen">–</b><span>Not seen</span></button>
+      <button class="stat ok"  type="button" data-filter="seen"     aria-pressed="false" data-tip="Residents already checked in today. Tap to see them; tap again for the default list."><b id="statCheckins">–</b><span>Seen today</span></button>
+    </div>
 
   <main class="wrap">
     <div id="appError" class="alert" hidden></div>
+    <div id="syncNotice" class="alert warn" hidden></div>
+    <div id="healthNotice" class="alert" hidden></div>
 
-    <nav class="tabs" role="tablist">
-      <button role="tab" id="tabCheckin"   aria-selected="true"  aria-controls="panelCheckin">Check in</button>
-      <button role="tab" id="tabAttention" aria-selected="false" aria-controls="panelAttention">Attention<span class="pip" id="attentionPip" hidden>0</span></button>
-    </nav>
-
-    <!-- ---- check in ---- -->
-    <section id="panelCheckin" role="tabpanel" aria-labelledby="tabCheckin">
-      <input id="q" class="field" type="search" placeholder="Search resident by name or room…"
+    <!-- One list, one filter. The two tiles above are the filter; the line
+         under the search box says which is on and offers the way back. -->
+    <section id="panelCheckin">
+      <input id="q" class="field pinned" type="search" placeholder="Filter residents by name, room number or building…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-      <p class="hint" style="margin:8px 2px 0">Verify the person in front of you against the register before recording a check-in.</p>
+      <p id="filterLine" class="hint filterline" hidden></p>
+      <p class="jobline"><b class="register">Daily register:</b><span>tap Check in on the card, or swipe it either way, to record today's check-in. Movements in and out are on In &amp; out.</span></p>
+      <p class="hint tight">Verify the person first. Tap a name for detail.</p>
       <div id="searchResults" class="list"></div>
     </section>
 
-    <!-- ---- attention ---- -->
-    <section id="panelAttention" role="tabpanel" aria-labelledby="tabAttention" hidden>
-      <div class="row">
-        <p class="hint" style="flex:1;margin:0">Open and noted breaches, plus residents never seen or due today. Annotated breaches stay listed, dimmed.</p>
-        <button class="btn ghost" id="refreshAttention">Refresh</button>
-      </div>
-      <div id="attentionList" class="list"></div>
-    </section>
-
-    <!-- ---- resident detail (shared by both tabs) ---- -->
+    <!-- ---- resident detail ---- -->
     <div id="detail" class="detail" hidden></div>
   </main>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"
-        integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE"
-        crossorigin="anonymous"></script>
 <script src="/app-common.js"></script>
+<script src="/offline.js"></script>
 
 <script>
 "use strict";
 
 /* ========================================================================
-   Configuration
-   ====================================================================== */
-const CONFIG = {
-  url: window.CHECKIN_SUPABASE_URL  || "https://YOUR-PROJECT.supabase.co",
-  key: window.CHECKIN_SUPABASE_ANON_KEY || "YOUR-PUBLISHABLE-ANON-KEY",
-};
-
-const sb = createHutClient(CONFIG);
-
-/* ========================================================================
    State
    ====================================================================== */
 const state = {
-  profile:   null,   // { full_name, role }
+  profile:   null,   // { id, full_name, role }
+  userId:    null,   // the guard this session belongs to; queued events carry it
   settings:  null,   // app_settings row
   selected:  null,   // resident row shown in the detail panel
-  tab:       "checkin",
   busy:      false,
-  attention: [],      // last attention_list() result, for the header stats and pip
+  filter:    "not_seen",   // which tile is pressed: all | not_seen | seen
+  searchRows:  [],    // the last list response, refiltered client-side
+  searchQuery: "",
+  loaded:    false,   // false until the first list has arrived — before that, every count is unknown, not zero
+  allRows:   [],      // the last full (unfiltered by name) list, for the tile counts
   // Every row we have rendered, by id. Tapping a card reads from here rather
   // than making a second round trip.
   rows:      new Map(),
@@ -159,27 +209,52 @@ const state = {
 // $, esc(), toast(), ago() come from app-common.js. showError() too — this
 // page reuses its default element id ("appError"), same as index.html.
 
+// Plain words on the cards, about TODAY. The server's `state` ranks an open
+// past breach above seen_today — right for the manager's list, wrong for a
+// guard with the person at the window. viewState() keeps the server's
+// exempt/not_required, and otherwise answers only "seen today, never seen,
+// due, or expected".
 const STATE_LABEL = {
   seen_today:   "Seen today",
   expected:     "Expected",
   due_today:    "Due today",
-  exempt:       "Exempt (under 18)",
-  breach_open:  "BREACH",
-  breach_noted: "Breach (noted)",
-  never:        "Never checked in",
+  exempt:       "Under 18 — not required",
+  never:        "Not yet seen",
   not_required: "Not required",
+  away:         "Away — authorised",
 };
 
 function stateLabel(s) {
   return STATE_LABEL[s] || s;
 }
 
+function pastDueHour() {
+  const h = state.settings && Number.isFinite(state.settings.due_soon_after_hour) ? state.settings.due_soon_after_hour : null;
+  if (h === null) return false;
+  const tz = state.settings.local_timezone;
+  try {
+    const now = Number(new Intl.DateTimeFormat("en-GB", { timeZone: tz || undefined, hour: "2-digit", hour12: false }).format(new Date()));
+    return now >= h;
+  } catch (_) { return new Date().getHours() >= h; }
+}
+
+function viewState(r) {
+  if (r.state === "exempt" || r.state === "not_required") return r.state;
+  if (r.away) return "away";
+  if (r.seen_today) return "seen_today";
+  if (!r.last_seen_on) return "never";
+  return pastDueHour() ? "due_today" : "expected";
+}
+
 // last_seen_on only ever counts CLOSED days (see v_resident_compliance) — a
 // resident who checked in an hour ago has seen_today=true but last_seen_on
 // still null, because today hasn't closed yet. seen_today is the only safe
-// source for "have they presented today"; last_seen_on is history, not today.
+// source for "have they presented today"; first_seen_at is when.
 function lastSeenText(r) {
-  if (r.seen_today) return "Today";
+  if (r.seen_today) {
+    const t = siteTime(r.first_seen_at, state.settings && state.settings.local_timezone);
+    return t ? `Today ${t}` : "Today";
+  }
   if (r.last_seen_on) return formatDate(r.last_seen_on);
   return "Never";
 }
@@ -195,54 +270,215 @@ function formatDate(yyyy_mm_dd) {
    ====================================================================== */
 
 function residentCard(r) {
-  const cls = ["card", esc(r.state)];
-  if (r.state === "breach_noted") cls.push("noted");
+  const vs = viewState(r);
+  const cls = ["card", esc(vs)];
 
   const bits = [];
-  if (r.room_ref) bits.push(esc(r.room_ref));
-  bits.push(`age ${r.age_years}`);
+  if (r.room_label && state.settings?.feature_buildings) bits.push(esc(r.room_label));
   bits.push(`last seen ${esc(lastSeenText(r))}`);
 
-  return `
+  // The pill on the right already says seen / not yet. The badge appears
+  // only when it adds something the pill does not.
+  const badge = (vs === "exempt" || vs === "not_required" || vs === "due_today" || vs === "never")
+    ? ` · <span class="badge ${esc(vs)}">${esc(stateLabel(vs))}</span>`
+    : vs === "away" ? ` · <span class="badge away">Away until ${esc(dayLabel(r.away.until))}</span>` : "";
+
+  // The strip behind the card says what a right swipe does (see .swipe-bg).
+  // The tick to the right records the check-in in one tap, the way "Safe"
+  // does on the roll call; once the day is satisfied it is filled and inert,
+  // so nobody records the same person twice by habit.
+  const tick = r.queued
+    ? `<button class="btn ghost tick queued" type="button" disabled aria-label="${esc(r.full_name)}: check-in queued">Queued</button>`
+    : r.seen_today
+      ? `<button class="btn tick done" type="button" disabled aria-label="${esc(r.full_name)}: seen today">Seen ✓</button>`
+      : `<button class="btn ghost tick in" type="button" data-tick="${esc(r.id)}" aria-label="Check in ${esc(r.full_name)}">Check in</button>`;
+  return `<div class="cardrow ${esc(vs)}"><div class="swipe">
+    <span class="swipe-bg right" aria-hidden="true">Check in ✓</span>
+    <span class="swipe-bg left" aria-hidden="true">Check in ✓</span>
     <button class="${cls.join(" ")}" data-id="${esc(r.id)}" type="button">
       <span class="who">
         <span class="name">${esc(r.full_name)}</span>
-        <span class="meta">${bits.join(" · ")}</span>
-        <span class="meta badge ${esc(r.state)}">${esc(stateLabel(r.state))}</span>
+        <span class="meta">${bits.join(" · ")}${badge}</span>
       </span>
-      <span class="pill ${r.seen_today ? "in" : "out"}">${r.seen_today ? "Seen today" : "Not yet"}</span>
-    </button>`;
+      ${r.queued
+        ? `<span class="pill queued">Queued</span>`
+        : `<span class="pill ${r.seen_today ? "in" : "out"}">${r.seen_today ? "Seen today" : r.away ? "Away" : "Not yet"}</span>`}
+    </button></div>${tick}</div>`;
 }
 
 function renderList(container, rows, emptyMsg) {
-  (rows || []).forEach((r) => state.rows.set(r.id, r));
+  (rows || []).forEach((r) => {
+    const had = state.rows.get(r.id);
+    if (had && had.id_number && !r.id_number) { r.id_type = had.id_type; r.id_number = had.id_number; }
+    state.rows.set(r.id, r);
+  });
   if (!rows || rows.length === 0) {
     container.innerHTML = `<p class="empty">${esc(emptyMsg)}</p>`;
     return;
   }
-  // No cap assumed here: attention_list() deliberately returns every open or
-  // noted breach uncapped, so this list can be long on a site with a large
+  // No cap assumed here: attention_list() deliberately returns every open
+  // breach uncapped, so this list can be long on a site with a large
   // backlog. It just renders in the ordinary scrolling flow — nothing here
   // slices it down or gives it a fixed clipped height.
-  container.innerHTML = rows.map((r) => residentCard(r)).join("");
+  container.innerHTML = withLetters(rows, !state.searchQuery && state.filter === "all");
+  nudgeFirstCard(container, "register");
+}
+
+// Letter separators for the full alphabetical list, so a thumb scrolling a
+// long register knows where it is. Skipped for a name filter or a short list,
+// where they would only add noise.
+function withLetters(rows, wanted) {
+  if (!wanted || rows.length < 12) return rows.map((r) => residentCard(r)).join("");
+  let last = "";
+  return rows.map((r) => {
+    // The list is ordered by surname, so the separators follow the surname.
+    const surname = r.last_name || String(r.full_name || "").trim().split(/\s+/).pop() || "";
+    const letter = surname.charAt(0).toUpperCase() || "#";
+    const head = letter !== last ? `<div class="letter" aria-hidden="true">${esc(letter)}</div>` : "";
+    last = letter;
+    return head + residentCard(r);
+  }).join("");
+}
+
+
+// The card the resident presents at sign-in. Shown on the detail panel only,
+// never in a list: a number belongs on screen when somebody is checking it
+// against a card, and at no other time.
+function canEditId() {
+  return !!(state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin"));
+}
+
+function idLine(r) {
+  // List rows never carry the number (docs/GDPR.md: detail view only), just
+  // has_id. The sheet fetches it on open; until then say it exists.
+  const shown = r.id_number
+    ? `<b>${esc(r.id_type)} ${esc(r.id_number)}</b>`
+    : r.has_id ? `<span class="hint">ID recorded · loading…</span>`
+    : `<span class="hint">No ID recorded</span>`;
+  const edit = canEditId()
+    ? ` <button class="linkish" id="editId" type="button">${r.id_number ? "Change" : "Add"}</button>`
+    : "";
+  return shown + edit;
+}
+
+// The editor itself, rendered into the detail sheet on demand. Supervisors
+// and admins only — and the database enforces that regardless, through the
+// residents_supervisor row policy behind PATCH /api/residents/:id.
+function idForm(r) {
+  const type = r.id_type || "TRC";
+  return `
+    <form id="idForm" class="idform" autocomplete="off">
+      <div class="seg" role="group" aria-label="ID type">
+        <button type="button" data-type="TRC" aria-pressed="${type === "TRC"}">TRC</button>
+        <button type="button" data-type="IRP" aria-pressed="${type === "IRP"}">IRP</button>
+      </div>
+      <input id="idNumber" class="field" type="text" placeholder="Number as printed on the card"
+             value="${esc(r.id_number || "")}" maxlength="40" autocapitalize="characters"
+             autocorrect="off" spellcheck="false" enterkeyhint="done" required>
+      <div class="actions">
+        <button class="btn primary-in" id="idSave" type="submit">Save ID</button>
+        <button class="btn ghost" id="idCancel" type="button">Cancel</button>
+      </div>
+    </form>`;
+}
+
+// Facts against the figures in Settings. The app never says a threshold
+// "was met" as a verdict; it states the count and the figure side by side
+// and the decision is the manager's (migrations/008).
+function policyNotes(r) {
+  const notes = [];
+  const nights = r.consecutive_missed || 0;
+  const inWindow = r.absent_in_window || 0;
+  const nightLimit = r.warn_after_consecutive_nights || 3;
+  const windowLimit = r.absence_window_limit || 10;
+  const windowDays = r.absence_window_days || 28;
+
+  if (nights >= nightLimit) {
+    notes.push(`${nights} consecutive nights recorded; the figure in Settings is ${nightLimit}.`);
+  }
+  if (inWindow >= windowLimit) {
+    notes.push(`${inWindow} days absent in the last ${windowDays}; the figure in Settings is ${windowLimit}.`);
+  } else if (inWindow >= windowLimit - 2 && inWindow > 0) {
+    notes.push(`${inWindow} of ${windowLimit} days in the last ${windowDays}.`);
+  }
+  if (!notes.length) return "";
+  return `<div class="policy">${notes.map((n) => `<p>${esc(n.replace(/\s+/g, " "))}</p>`).join("")}</div>`;
+}
+
+// "Seen 23:31 (1×)": the first presentation today, in the site's zone, and
+// how many taps landed on the day. "Seen at the door" when the earliest
+// check-in came from a Door sign-in (feature_door_checkin). A queued
+// check-in is not yet a time the server has; it says so.
+function todayFact(r) {
+  if (r.queued) return "Queued";
+  if (!r.seen_today) return "Not yet";
+  const t = siteTime(r.first_seen_at, state.settings && state.settings.local_timezone);
+  const evs = r.checkins_today_events || [];
+  const first = evs.length ? evs[evs.length - 1] : null;   // newest first, so the earliest is last
+  const where = first && first.source === "door" ? " at In & out" : "";
+  return `Seen${where}${t ? " " + esc(t) : ""} (${r.checkins_today || 1}×)`;
+}
+
+// Every check-in recorded today, newest first, with where it was recorded
+// and by whom. This is the line a manager reads when a resident says "I
+// checked in" and the register says otherwise.
+function eventsToday(r) {
+  const evs = r.checkins_today_events || [];
+  if (!evs.length) return "";
+  const tz = state.settings && state.settings.local_timezone;
+  return `<div class="events"><span class="stripTitle">Today's check-ins</span>${evs.map((e) =>
+    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b>${e.source === "door" ? " · at In & out" : ""} · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
 }
 
 function renderDetail(r) {
+  // An opening is a different sheet from the one on screen; a re-render (a
+  // check-in, a list refresh, the number arriving) is not.
+  const opening = !!r && !(state.selected && state.selected.id === r.id);
   state.selected = r;
   if (r) state.rows.set(r.id, r);
   const el = $("detail");
   if (!r) { el.hidden = true; el.innerHTML = ""; return; }
 
+  // Every opening asks the server for the detail row: the identity number
+  // lives on that endpoint only, and the request is what puts the opening
+  // on the access log (migration 023) — so it goes whether or not there is
+  // a number to fetch. Kept on the row so a re-render does not lose it,
+  // and redrawn if this sheet is still the one on screen. Offline, the
+  // sheet reads the encrypted copy and nothing is logged.
+  if (opening && Offline.isOnline()) {
+    guarded(() => apiGet(`/api/residents/${r.id}/compliance`), () => {}).then((fresh) => {
+      if (!fresh) return;
+      const row = state.rows.get(r.id) || r;
+      Object.assign(row, {
+        id_type: fresh.id_type, id_number: fresh.id_number, has_id: !!fresh.id_number,
+        first_seen_at: fresh.first_seen_at, checkins_today_events: fresh.checkins_today_events || [],
+      });
+      // Skip the redraw while the ID editor is open: a full re-render would
+      // tear out the form (and whatever the supervisor had already typed)
+      // out from under them the moment this background fetch lands. The row
+      // itself is still updated above, so closing the editor shows it fresh.
+      if (state.selected && state.selected.id === r.id && !$("idForm")) renderDetail(row);
+    });
+  }
+
   el.innerHTML = `
+    ${sheetBar()}
     <h2>${esc(r.full_name)}</h2>
-    <div class="sub">${r.room_ref ? esc(r.room_ref) + " · " : ""}age ${r.age_years}</div>
+
+    <div class="idline">${idLine(r)}</div>
 
     <div class="facts">
-      <div class="fact"><span>Status</span><b class="badge ${esc(r.state)}">${esc(stateLabel(r.state))}</b></div>
-      <div class="fact"><span>Today</span><b>${r.seen_today ? `Seen (${r.checkins_today}×)` : "Not yet"}</b></div>
+      <div class="fact"><span>Status</span><b class="badge ${esc(viewState(r))}">${esc(stateLabel(viewState(r)))}</b></div>
+      <div class="fact"><span>Today</span><b>${todayFact(r)}</b></div>
       <div class="fact"><span>Last seen</span><b>${esc(lastSeenText(r))}</b></div>
-      <div class="fact"><span>Consecutive missed</span><b>${r.consecutive_missed || 0}</b></div>
+      <div class="fact"><span>Consecutive nights</span><b>${r.consecutive_missed || 0} <small>of ${r.warn_after_consecutive_nights || 3}</small></b></div>
+      <div class="fact"><span>Absent in ${r.absence_window_days || 28} days</span><b>${r.absent_in_window || 0} <small>of ${r.absence_window_limit || 10}</small></b></div>
+      <div class="fact"><span>Missed days on record</span><b>${r.open_breaches || 0}</b></div>
     </div>
+
+    ${eventsToday(r)}
+
+    ${policyNotes(r)}
 
     <div class="actions">
       <button class="btn primary-in wide" id="doCheckin" type="button">Record check-in</button>
@@ -250,19 +486,26 @@ function renderDetail(r) {
     </div>
 
     <div class="stripTitle">Last 30 days</div>
-    <div id="strip" class="strip"><span class="hint">Loading…</span></div>`;
+    <div id="strip" class="strip"><span class="hint">Loading…</span></div>
+    <p class="hint legend"><span class="cell ok"></span>seen <span class="cell miss"></span>missed <span class="cell na"></span>not required</p>
+    <div id="detailHistory"></div>`;
   el.hidden = false;
+  if (renderDetail.historyFor !== r.id || !$("detailHistory").querySelector(".hlist")) mountHistory($("detailHistory"), r.id, { canExport: canEditId() });
+  renderDetail.historyFor = r.id;
 
   $("doCheckin").onclick = () => checkin(r.id);
   $("closeDetail").onclick = () => renderDetail(null);
-  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const editBtn = $("editId");
+  if (editBtn) editBtn.onclick = () => openIdEditor(r);
 
   loadStrip(r.id).then((html) => {
     if (!state.selected || state.selected.id !== r.id) return; // a newer selection already won
     const stripEl = $("strip");
     if (!stripEl) return;
     stripEl.innerHTML = html || '<span class="hint">No history yet.</span>';
-    wireStripClicks(r.id);
+    // A tap on a cell shows what the title says: the date, and for a
+    // presented day the time. title alone never surfaces on a phone.
+    stripEl.onclick = (e) => { const c = e.target.closest(".cell[title]"); if (c) toast(c.title); };
   });
 }
 
@@ -270,209 +513,380 @@ function renderDetail(r) {
    Data access
    ====================================================================== */
 
-// Header stats: "Open breaches" comes from attention_list() (it is the one
-// source guaranteed never to drop a breach under a cap). "Not seen today" and
-// "Seen today" are queried straight from v_resident_compliance instead of
-// being derived from attention_list() — attention_list() only ever admits
-// states breach_open | breach_noted | never | due_today, so a resident who is
-// required today but not yet past due_soon_after_hour sits in "expected" and
-// would silently fall out of a count derived from that list, understating how
-// many residents are actually still outstanding.
-async function refreshSummary() {
-  const [{ data: attn, error: aErr }, { count: seenToday }, { count: notSeen }] = await Promise.all([
-    sb.rpc("attention_list", { max_results: 200 }),
-    sb.from("v_resident_compliance")
-      .select("id", { count: "exact", head: true })
-      .eq("seen_today", true),
-    sb.from("v_resident_compliance")
-      .select("id", { count: "exact", head: true })
-      .eq("required_today", true)
-      .eq("seen_today", false),
-  ]);
+// Header tiles are counted from the list itself. The list endpoint already
+// returns every resident with state, open_breaches, required_today and
+// seen_today, and the two tiles are exactly the two filters applied to
+// those rows — so the numbers on the tiles and the list under a pressed tile
+// cannot disagree, and a page load costs the database ONE evaluation of
+// v_resident_compliance rather than four (the list, attention_list(), and
+// two counts). On the smallest Postgres plan that view took seven seconds a
+// go on 4 Sep 2026; four of them per phone per minute is what pushed the
+// instance over its memory limit. /api/checkin-summary still exists for
+// anything that wants a server-side count.
+function refreshSummary() {
+  if (!state.loaded) return;
+  const rows = state.searchQuery ? state.allRows : state.searchRows;   // counts describe the whole register, not a name filter
+  const all = rows || [];
+  const notSeen  = all.filter(FILTERS.not_seen).length;
+  const seen     = all.filter(FILTERS.seen).length;
+  $("statNotSeen").textContent  = notSeen;
+  $("statCheckins").textContent = seen;
 
-  if (!aErr) {
-    state.attention = attn || [];
-    const openBreach = state.attention.filter((r) => r.open_breaches > 0).length;
-    $("statOpenBreach").textContent = openBreach;
+  // Colour follows the number, not the tile. "Not seen" is neutral while
+  // the day is young, amber once the due-soon hour has passed and people
+  // are still missing.
+  tone($("statNotSeen").parentElement, notSeen === 0 ? "ok" : pastDueHour() ? "warn" : "neutral");
+}
+
+// The register only proves who was missed if the nightly close-out runs. If
+// it stops, the register looks exactly like one where nobody was missed —
+// so every terminal checks, and says so in red. Polled with the list.
+async function checkHealth() {
+  const h = await guarded(() => apiGet("/api/session/health"), (err) => Offline.noteFailure(err));
+  const box = $("healthNotice");
+  if (!h) return;
+  if (h.close_out_behind) {
+    const last = h.last_closed_day ? `The last day closed was ${h.last_closed_day}.` : "No day has been closed yet.";
+    box.innerHTML = `<b>The nightly close-out has not run.</b> ${last} Missed days are not being recorded until it does — tell the administrator to check the <code>hut-nightly</code> job on Render.`;
+    box.hidden = false;
+  } else if (h.recent_failures > 0) {
+    box.innerHTML = `<b>A maintenance job failed in the last two days.</b> The register is still being closed out; tell the administrator to check the <code>hut-nightly</code> job on Render.`;
+    box.hidden = false;
+  } else if (h.safeguarding_alert_unset) {
+    // Not a failure — the nightly check runs regardless — but nobody is
+    // signed up to hear about it, which is its own kind of silent (migration
+    // 046): a child away overnight with no authorised absence reaches no
+    // other screen in this app (v_resident_compliance exempts under-18s from
+    // the daily rule), so this is the one place it would ever be said.
+    box.innerHTML = `<b>Nobody receives the nightly safeguarding alert.</b> Tell the administrator to turn it on for at least one supervisor or admin, in Admin → Staff.`;
+    box.hidden = false;
+  } else {
+    box.hidden = true;
   }
-  $("statNotSeen").textContent  = notSeen ?? "–";
-  $("statCheckins").textContent = seenToday ?? "–";
+}
 
-  const pip = $("attentionPip");
-  pip.textContent = state.attention.length;
-  pip.hidden = state.attention.length === 0;
+function tone(tile, t) {
+  if (!tile) return;
+  tile.classList.remove("bad", "warn", "ok");
+  if (t !== "neutral") tile.classList.add(t);
 }
 
 let searchToken = 0;
 async function runSearch(q) {
   const token = ++searchToken;
   const box = $("searchResults");
+  q = (q || "").trim();
 
-  if (!q || q.trim().length < 2) {
-    box.innerHTML = "";
+  // Until the first list arrives the box says so, rather than sitting blank
+  // in a way that reads as "nobody is on the register". Once cards are on
+  // screen they stay while a newer list is fetched, so typing never flickers.
+  if (!box.querySelector("button.card")) {
+    box.innerHTML = '<p class="empty">Loading the register…</p>';
+  }
+
+  // Online: the server's typo-tolerant search with the compliance state
+  // merged in (`compliance=1`) — and, when the box is empty, the whole
+  // register, which is also the copy kept for an outage. Offline: that
+  // encrypted copy, filtered here, with anything still queued laid over it
+  // so a check-in recorded a minute ago is still on the card.
+  let rows = null;
+  if (Offline.isOnline()) {
+    rows = await guarded(
+      () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000&compliance=1`),
+      (err) => { Offline.noteFailure(err); if (!Offline.isOutage(err)) showError("Search failed: " + err.message); },
+    );
+    if (token !== searchToken) return;     // a newer keystroke already won
+    if (rows && !q) Offline.saveRegister("checkin", rows);
+  }
+  if (!rows && !Offline.isOnline()) {
+    const cached = await Offline.loadRegister("checkin");
+    if (token !== searchToken) return;
+    if (!cached) {
+      box.innerHTML = "";
+      showError("Offline, and this terminal holds no copy of the register yet.");
+      return;
+    }
+    rows = Offline.filterRows(cached.rows, q);
+  }
+  if (!rows) return;
+
+  showError("");
+  state.searchRows = await Offline.overlay("checkin", rows);
+  state.searchQuery = q;
+  if (!q) state.allRows = state.searchRows;
+  state.loaded = true;
+  renderSearch();
+  refreshSummary();
+}
+
+// The two header tiles and the chip row are one filter, applied here to
+// the rows already on screen. Client-side on purpose: the counts on the
+// chips always describe the rows the current query matched, switching never
+// costs a round trip, and it works offline against the cached copy. The
+// tests mirror the header's own definitions (routes/checkins.js).
+const FILTERS = {
+  all:      () => true,
+  not_seen: (r) => r.required_today && !r.seen_today,
+  seen:     (r) => !!r.seen_today,
+};
+const FILTER_LABEL = { all: "everyone", not_seen: "not seen today", seen: "seen today" };
+
+function setFilter(name) {
+  state.filter = FILTERS[name] ? name : "not_seen";
+  renderDetail(null);
+  renderSearch();
+}
+
+// Every view is alphabetical: a guard at the window is looking for a name.
+// The manager's worst-first list is Admin → Absences.
+function orderFor(filter, rows) {
+  return rows;
+}
+
+function renderSearch() {
+  const rows = state.searchRows || [];
+  document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.filter === state.filter));
+  });
+
+  // A typed name searches everyone: a guard looking for a person must find
+  // them whether or not they have been seen today.
+  const active = state.searchQuery ? "all" : state.filter;
+  const shown = orderFor(active, rows.filter(FILTERS[active]));
+  const line = $("filterLine");
+
+  // Nothing has arrived yet: say so. A filter applied to an empty list is
+  // not "0 with open breaches", it is "not loaded", and the tile beside it
+  // already shows the server's count.
+  if (!state.loaded) {
+    if (state.filter === "all") { line.hidden = true; line.innerHTML = ""; }
+    else { line.innerHTML = `Loading ${FILTER_LABEL[state.filter]}…`; line.hidden = false; }
+    $("searchResults").innerHTML = '<p class="empty">Loading the register…</p>';
     return;
   }
 
-  const { data: residents, error } = await sb.rpc("search_residents", {
-    q: q.trim(), include_departed: false, max_results: 20,
-  });
-  if (token !== searchToken) return;       // a newer keystroke already won
-  if (error) { showError("Search failed: " + error.message); return; }
-
-  // search_residents() returns v_resident_status rows — typo-tolerant, but
-  // without the compliance state a guard needs on the card. Fetch the
-  // matching v_resident_compliance rows in one follow-up query and merge, so
-  // search stays cheap while the badge stays accurate.
-  const ids = (residents || []).map((r) => r.id);
-  const compliance = new Map();
-  if (ids.length) {
-    const { data: comp } = await sb
-      .from("v_resident_compliance")
-      .select("id, state, required_today, seen_today, checkins_today, open_breaches, noted_breaches, consecutive_missed, last_seen_on")
-      .in("id", ids);
-    (comp || []).forEach((c) => compliance.set(c.id, c));
+  if (active === "all") {
+    line.hidden = true;
+    line.innerHTML = "";
+  } else {
+    line.innerHTML = `Showing ${shown.length} ${FILTER_LABEL[active]} · <button class="linkish" type="button" id="showAll">Show everyone</button>`;
+    line.hidden = false;
+    $("showAll").onclick = () => setFilter("all");
   }
-  if (token !== searchToken) return;
+  const q = state.searchQuery;
+  const empty = q
+    ? `No resident matching “${q}”.`
+    : state.filter === "not_seen" ? "Everyone who is required today has been seen."
+    : state.filter === "seen"     ? "Nobody has been seen yet today."
+    : "No residents on the register.";
+  renderList($("searchResults"), shown, empty);
+}
 
-  showError("");
-  const rows = (residents || []).map((r) => ({ ...r, ...(compliance.get(r.id) || {}) }));
-  renderList(box, rows, `No resident matching “${q.trim()}”.`);
+// Update the card on screen from the server's answer straight away. The
+// full refresh that follows re-queries v_resident_compliance, which takes
+// seconds on the live database — long enough for a guard to think the swipe
+// did nothing and swipe again (and each new swipe cancelled the refresh the
+// last one had started). record_checkin() returns the day's register row.
+// The sheet closes after a recorded tap (checkin() calls renderDetail(null)); a reopen refetches the detail row, so checkins_today_events is not refreshed here. Keep the sheet closing.
+function applyCheckin(residentId, dc) {
+  const r = state.rows.get(residentId);
+  if (!r) return;
+  r.seen_today = true;
+  r.checkins_today = dc && dc.checkin_count ? dc.checkin_count : (r.checkins_today || 0) + 1;
+  if (dc && dc.first_seen_at) r.first_seen_at = dc.first_seen_at;
+  renderSearch();
+  refreshSummary();
 }
 
 async function checkin(residentId) {
   if (state.busy) return;
   state.busy = true;
-  const { data, error } = await sb.rpc("record_checkin", {
-    p_resident_id: residentId, p_note: null,
-  });
-  state.busy = false;
-  if (error) { toast("Not recorded: " + error.message, "err"); return; }
-  const row = Array.isArray(data) ? data[0] : data;
-  toast(`Check-in recorded — ${row.checkin_count > 1 ? "already seen today" : "day satisfied"}`, "ok");
-  refreshSummary();
-  if ($("q").value.trim().length >= 2) runSearch($("q").value);
-  if (state.tab === "attention") loadAttention();
-  if (state.selected && state.selected.id === residentId) refreshResident(residentId);
-}
 
-async function loadAttention() {
-  const { data, error } = await sb.rpc("attention_list", { max_results: 200 });
-  if (error) { showError("Could not load the attention list: " + error.message); return; }
-  showError("");
-  state.attention = data || [];
-  const pip = $("attentionPip");
-  pip.textContent = state.attention.length;
-  pip.hidden = state.attention.length === 0;
-  renderList($("attentionList"), data, "Nobody is outstanding.");
-}
-
-async function loadStrip(residentId) {
-  const from = new Date(Date.now() - 29 * 86400e3).toISOString().slice(0, 10);
-  const { data } = await sb.from("daily_compliance")
-    .select("compliance_date, required, presented")
-    .eq("resident_id", residentId).gte("compliance_date", from)
-    .order("compliance_date", { ascending: true });
-  return (data || []).map(d =>
-    `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(d.compliance_date)}"></i>`
-  ).join("");
-}
-
-// Only cells with class "miss" ever get a click handler — a day the resident
-// presented ("ok") or that wasn't required ("na") is never offered for
-// annotation. This also cannot show up for the day in progress: close-out
-// never writes a negative row for today, so today has no daily_compliance
-// row — and no cell — until the resident actually checks in.
-function wireStripClicks(residentId) {
-  document.querySelectorAll("#strip .cell.miss").forEach((cell) => {
-    cell.addEventListener("click", () => annotateCell(residentId, cell.dataset.date));
-  });
-}
-
-async function annotateCell(residentId, dateStr) {
-  const note = prompt(`Note for the missed check-in on ${dateStr}:`);
-  if (note === null) return;               // cancelled
-  const trimmed = note.trim();
-  if (!trimmed) { toast("Note cannot be empty — nothing saved", "err"); return; }
-
-  const { error } = await sb.rpc("annotate_compliance_day", {
-    p_resident_id: residentId, p_date: dateStr, p_note: trimmed,
-  });
-  if (error) { toast("Could not save note: " + error.message, "err"); return; }
-
-  toast("Note saved", "ok");
-  // An annotation can move a resident from breach_open to breach_noted —
-  // demoted, never hidden — so refresh its badge and, if visible, the
-  // Attention list and header stats.
-  await refreshResident(residentId);
-  if (state.tab === "attention") loadAttention();
-  refreshSummary();
-}
-
-// Re-reads one resident's compliance row and, if it is still the one shown
-// in the detail panel, re-renders the panel (and reloads the strip) with it.
-async function refreshResident(residentId) {
-  const { data, error } = await sb
-    .from("v_resident_compliance")
-    .select("id, full_name, room_ref, age_years, required_today, seen_today, checkins_today, open_breaches, noted_breaches, consecutive_missed, last_seen_on, state")
-    .eq("id", residentId)
-    .maybeSingle();
-  if (error || !data) return;
-  if (state.selected && state.selected.id === residentId) renderDetail(data);
-}
-
-/* ========================================================================
-   Tabs
-   ====================================================================== */
-function selectTab(name) {
-  state.tab = name;
-  for (const t of ["checkin", "attention"]) {
-    const cap = t[0].toUpperCase() + t.slice(1);
-    $("tab" + cap).setAttribute("aria-selected", String(t === name));
-    $("panel" + cap).hidden = t !== name;
+  // With no link, or when the request itself fails to reach the server, the
+  // check-in is queued on this terminal with its own timestamp and sent when
+  // the link returns; the server dates it to when it happened, so a
+  // presentation at 23:50 that syncs at 00:10 still satisfies the right day
+  // (offline.js, migrations/010). Any other refusal is the database's.
+  let row = null;
+  let queue = !Offline.isOnline();
+  if (!queue) {
+    row = await guarded(
+      () => apiPost("/api/checkins", { resident_id: residentId }),
+      (err) => {
+        if (Offline.isOutage(err)) { Offline.noteFailure(err); queue = true; return; }
+        toast("Not recorded: " + err.message, "err");
+      },
+    );
   }
-  renderDetail(null);
-  if (name === "checkin")   $("q").focus();
-  if (name === "attention") loadAttention();
+  if (queue) {
+    const r = state.rows.get(residentId);
+    try {
+      await Offline.enqueue({
+        kind: "checkin", resident_id: residentId, resident_name: r ? r.full_name : "",
+        guard_id: state.userId, guard_name: state.profile ? state.profile.full_name : "",
+      });
+    } catch (err) {
+      state.busy = false;
+      toast("Not recorded: " + err.message, "err");
+      return;
+    }
+    state.busy = false;
+    toast(`Check-in for ${r ? r.full_name : "resident"} queued until the connection returns`, "ok");
+    Offline.renderNet();
+    runSearch($("q").value);
+    if (state.selected && state.selected.id === residentId) renderDetail(null);
+    return;
+  }
+
+  state.busy = false;
+  if (!row) return;
+  toast(`Check-in recorded — ${row.checkin_count > 1 ? "already seen today" : "day satisfied"}`, "ok");
+  applyCheckin(residentId, row);
+  runSearch($("q").value);
+  // The panel's job is done once the check-in is recorded: close it so the
+  // guard is straight back at the list for the next person. The toast and the
+  // card's refreshed badge are the confirmation.
+  if (state.selected && state.selected.id === residentId) renderDetail(null);
+}
+
+// Recording the card a resident presented. Supervisors and admins only —
+// enforced by the row policy, so a guard who somehow reaches this gets a 403
+// from the database rather than a hidden button being the only barrier.
+function openIdEditor(r) {
+  const line = document.querySelector("#detail .idline");
+  if (!line || $("idForm")) return;
+  line.insertAdjacentHTML("afterend", idForm(r));
+  const form = $("idForm");
+  let type = r.id_type || "TRC";
+
+  form.querySelectorAll(".seg button").forEach((b) => {
+    b.addEventListener("click", () => {
+      type = b.dataset.type;
+      form.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      $("idNumber").focus();
+    });
+  });
+  $("idCancel").onclick = () => form.remove();
+  $("idNumber").focus();
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const number = $("idNumber").value.trim().toUpperCase();
+    if (!number) { toast("Enter the number printed on the card", "err"); return; }
+    if (!Offline.isOnline()) { toast("Recording an ID needs a connection. Try again when the pill is green.", "err"); return; }
+
+    $("idSave").disabled = true;
+    const saved = await guarded(
+      () => apiPatch(`/api/residents/${r.id}`, { id_type: type, id_number: number }),
+      (err) => { Offline.noteFailure(err); toast("Not saved: " + err.message, "err"); },
+    );
+    $("idSave").disabled = false;
+    if (!saved) return;
+
+    toast(`${type} ${number} recorded`, "ok");
+    // Keep the saved number on the row itself, so the list refresh below
+    // (whose rows carry has_id only) cannot turn it back into "No ID".
+    const row = state.rows.get(r.id) || r;
+    Object.assign(row, { id_type: type, id_number: number, has_id: true });
+    if (state.selected && state.selected.id === r.id) renderDetail(row);
+    runSearch($("q").value);
+  });
+}
+
+// The 30-day window is anchored to public.site_today() on the server rather
+// than to this terminal's clock, so the strip lines up with the register.
+async function loadStrip(residentId) {
+  const data = await guarded(() => apiGet(`/api/residents/${residentId}/days`), (err) => Offline.noteFailure(err));
+  const tz = state.settings && state.settings.local_timezone;
+  return (data || []).map(d => {
+    const t = d.presented ? siteTime(d.first_seen_at, tz) : "";
+    const title = t ? `${d.compliance_date} · ${t}` : d.compliance_date;
+    return `<i class="cell ${!d.required ? "na" : d.presented ? "ok" : "miss"}" data-date="${esc(d.compliance_date)}" title="${esc(title)}"></i>`;
+  }).join("");
 }
 
 /* ========================================================================
    Session
    ====================================================================== */
 
+// One request answers "is there a session, whose is it, and what is this site
+// called". A deactivated account never gets this far — the API refuses to
+// issue a session for one, and revokes an existing session on the next
+// request — so there is no active-profile check left to do here.
 async function enterApp() {
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return showLogin();
+  // A reset link always lands on the login screen, even for a terminal that
+  // still holds a valid session: the person following it is trying to change
+  // a password, not to be shown somebody else's app.
+  if (resetTokenFromUrl()) return showLogin("");
 
-  const [{ data: profile, error: pErr }, { data: settings }] = await Promise.all([
-    sb.from("profiles").select("full_name, role, active").eq("id", user.id).maybeSingle(),
-    sb.from("app_settings").select("*").maybeSingle(),
-  ]);
+  // A logout made offline is finished here, once the link is back, before
+  // the cookie is asked who it belongs to.
+  if (Offline.isOnline()) await Offline.finishLogout();
 
-  if (pErr || !profile || !profile.active) {
-    await sb.auth.signOut();
-    return showLogin("This account has no active guard profile. Ask an administrator to enable it.");
+  let session;
+  try {
+    session = await apiGet("/api/session");
+    Offline.rememberSession(session);
+  } catch (err) {
+    if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
+    // The server is unreachable. A tab that was already signed in carries on
+    // with the profile it last saw; the server re-checks the session the
+    // moment anything is sent. A tab with no such memory cannot log in
+    // offline — login is the one thing that needs the server.
+    Offline.noteFailure(err);
+    session = Offline.rememberedSession();
+    if (!session) {
+      return showLogin("Cannot reach the server, and this tab was not signed in before the connection dropped. Try again when it returns.");
+    }
   }
 
+  const { profile, settings } = session;
   state.profile = profile;
+  state.userId = profile.id;
   state.settings = settings;
 
-  $("guardName").textContent = `${profile.full_name} · ${profile.role}`;
+  $("guardName").textContent = `· ${profile.full_name} · ${profile.role}`;
   if (settings?.site_name) $("siteName").textContent = settings.site_name;
+  $("adminLink").hidden = !(profile.role === "admin" || profile.role === "supervisor");
+  mountViewChooser({ current: "register", canAdmin: profile.role === "admin" || profile.role === "supervisor", canOrg: !!profile.platform_admin });
 
   $("login").hidden = true;
   $("app").hidden = false;
+  mountTips();
+  mountCoach({ app: "register", title: "The daily register in three lines", before: "searchResults", points: [
+    "Tap Check in on the card, or swipe it either way, to record today's check-in. The card drops off the Not seen list.",
+    "The list opens on who has not been seen today. Type a name to find anyone.",
+    "Tap a name for the ID number and the last 30 days.",
+  ] });
 
-  selectTab("checkin");
+  $("q").focus();
   refreshSummary();
+  runSearch($("q").value);
+  checkHealth();
+  Offline.syncNow();
+  idleLock.start();
 }
 
 function showLogin(message) {
+  idleLock.stop();
+  const chooser = $("chooser"); if (chooser) chooser.remove();
   state.profile = null;
+  state.userId = null;
   $("app").hidden = true;
   $("login").hidden = false;
   $("loginError").hidden = !message;
   if (message) $("loginError").textContent = message;
   $("email").focus();
+  // Events recorded during an outage outlive a logout on purpose. Say so on
+  // the way back in, so the guard knows they are waiting rather than lost.
+  if (!message) {
+    Offline.list().then((items) => {
+      const n = items.filter((e) => !e.rejected).length;
+      if (!n || state.profile) return;
+      $("loginError").textContent = `${n} event${n === 1 ? "" : "s"} recorded offline ${n === 1 ? "is" : "are"} waiting to sync. Log in to send ${n === 1 ? "it" : "them"}.`;
+      $("loginError").hidden = false;
+    });
+  }
 }
 
 /* ========================================================================
@@ -480,13 +894,35 @@ function showLogin(message) {
    ====================================================================== */
 
 mountLogin({ onReady: enterApp });
+trackHeaderHeight();
 
-$("logoutBtn").addEventListener("click", async () => {
-  await sb.auth.signOut();
+// Ends the session from the Log out button or the idle lock. Sends whatever
+// is still queued first. What cannot be sent — the link is down — stays
+// encrypted on this terminal until the same guard logs in again; the copy of
+// the register is cleared either way.
+async function endSession(message) {
+  clearTerminalState();         // view choice, roll call, visitors-on-site
+  await Offline.syncNow();
+  const pending = await Offline.onLogout();
+  await logout();
   $("q").value = "";
   $("searchResults").innerHTML = "";
   renderDetail(null);
-  showLogin();
+  const waiting = pending
+    ? `${pending} event${pending === 1 ? "" : "s"} recorded offline ${pending === 1 ? "is" : "are"} still waiting to sync. Log in again on this terminal to send ${pending === 1 ? "it" : "them"}.`
+    : "";
+  showLogin([message, waiting].filter(Boolean).join(" "));
+}
+
+$("logoutBtn").addEventListener("click", () => endSession(""));
+
+// A shared terminal locks after the idle minutes set under Settings (default
+// 20) — but never while the connection is down, because a guard could not
+// log back in until it returned and would lose the offline register.
+const idleLock = mountIdleLock({
+  minutes: () => state.settings?.idle_lock_minutes,
+  isActive: () => Offline.isOnline(),
+  onLock: () => endSession(`Locked after ${state.settings?.idle_lock_minutes || 20} minutes without activity. Log in again.`),
 });
 
 let searchTimer;
@@ -504,6 +940,18 @@ $("q").addEventListener("keydown", (e) => {
   if (first) first.click();
 });
 
+// The ✕ on the sheet, Escape, or a tap on the page behind it — see
+// mountSheetDismiss() in app-common.js.
+mountSheetDismiss(() => renderDetail(null));
+
+// The tick at the right of a card records the check-in without opening the
+// sheet, like a swipe.
+document.addEventListener("click", (e) => {
+  const tick = e.target.closest("button.tick[data-tick]");
+  if (!tick || tick.disabled) return;
+  checkin(tick.dataset.tick);
+});
+
 // Card clicks are delegated so re-rendering never orphans a listener.
 document.addEventListener("click", (e) => {
   const card = e.target.closest("button.card");
@@ -513,27 +961,53 @@ document.addEventListener("click", (e) => {
   renderDetail(row);
 });
 
-$("tabCheckin").addEventListener("click",   () => selectTab("checkin"));
-$("tabAttention").addEventListener("click", () => selectTab("attention"));
-$("refreshAttention").addEventListener("click", loadAttention);
+// Either direction records the check-in: there is only one act on this page.
+mountCardSwipe({ onRight: (id) => checkin(id), onLeft: (id) => checkin(id) });
 
-// Clock in the header, plus a periodic summary refresh so a terminal left open
-// overnight does not show a stale attention count.
-setInterval(() => {
-  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}, 1000);
-setInterval(() => { if (state.profile) refreshSummary(); }, 60000);
-setInterval(() => { if (state.profile && state.tab === "attention") loadAttention(); }, 120000);
-
-sb.auth.onAuthStateChange((event) => {
-  if (event === "SIGNED_OUT") showLogin();
+// A tile sets the filter; the pressed tile pressed again clears it, and so
+// does "Show everyone" on the line under the search box.
+document.querySelectorAll(".stats button[data-filter]").forEach((b) => {
+  b.addEventListener("click", () => setFilter(b.dataset.filter === state.filter ? "all" : b.dataset.filter));
 });
 
-// Boot.
-(async () => {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) await enterApp(); else showLogin();
-})();
+// Periodic refresh so a terminal left open overnight does not show stale
+// counts or a stale list.
+setInterval(() => { if (state.profile) runSearch($("q").value); }, 60000);
+setInterval(() => { if (state.profile && Offline.isOnline()) checkHealth(); }, 300000);
+
+// Any request that comes back 401 — an expired session, or a supervisor
+// deactivating the account mid-shift — returns the terminal to the login
+// screen instead of leaving a dead app on display.
+// A 401 is the server saying this session is over, so it is an ending like
+// any other and gets the same teardown. It previously cleared nothing: the
+// encrypted register, its key, the remembered profile, the view choice and the
+// roll call all survived on a shared terminal after the server had already
+// refused the cookie — and a reload during a later outage walked back into the
+// revoked guard's app from the cached copy. No logout() round trip: the 401
+// already told us the cookie is dead.
+setUnauthenticatedHandler(async () => {
+  clearTerminalState();
+  try { await Offline.onLogout(); } catch (_) { /* the login screen still shows */ }
+  showLogin("Your session has ended. Log in again.");
+});
+
+// Offline support: the service worker keeps this page loadable with no
+// connection, and the header pill, the sync notice and the periodic replay
+// of queued events are wired here. See offline.js.
+Offline.registerWorker();
+Offline.mountUI({
+  getUserId: () => state.userId,
+  onSynced: (s) => {
+    toast(`${s.sent} check-in${s.sent === 1 ? "" : "s"} recorded offline ${s.sent === 1 ? "has" : "have"} been sent`, "ok");
+    refreshSummary();
+    runSearch($("q").value);
+  },
+  onUnauthenticated: () => showLogin("Your session has ended. Log in again to send the events recorded offline."),
+});
+
+// Boot. enterApp() shows the login form itself if there is no session, so
+// there is no separate "do I have a token" check to make first.
+enterApp();
 </script>
 </body>
 </html>

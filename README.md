@@ -1,4 +1,4 @@
-# Hut Check-In
+# CheckSteady
 
 ## Where this runs
 
@@ -7,66 +7,127 @@ and it is deliberately the first thing in the file.
 
 | | |
 |---|---|
-| **Hosting** | **Render** — static site, config in `render.yaml`, Frankfurt |
-| **Database + auth** | Supabase (Postgres) — use an **EU region** |
-| **Live URL** | _fill in_ |
-| **Render service** | _fill in_ (workspace: My Workspace, region **Frankfurt**) |
-| **Supabase project** | _fill in_ — use an EU region |
+| **Everything** | **Render**, region **Frankfurt** — one blueprint, `render.yaml` |
+| **Web service** | `hut-check-in` — Node 22, serves `public/` and `/api` |
+| **Database** | `hut-db` — Render Postgres 16 |
+| **Nightly cron** | `hut-nightly` — the maintenance `pg_cron` used to run |
+| **Brochure site** | `checksteady-site` — static, published from `site/` |
+| **App URL** | `app.checksteady.com` |
+| **Site URL** | `checksteady.com` (and `www.`) |
 
-Render was chosen over Vercel for two reasons. Its free static sites permit
-commercial use, where Vercel's Hobby plan does not — and this workspace already
-runs paid services in Frankfurt, so the hut apps add nothing to the bill and sit
-in the same EU region as everything else.
+One vendor, one region, one bill. The same Express service that serves the two
+HTML files also serves the API they call, which is why the session cookie is a
+first-party cookie and why there is no CORS configuration anywhere in this
+repo. The brochure site is the one exception and is a separate static service:
+an edit to marketing copy must not restart the app mid-shift.
 
-`vercel.json` stays committed as an escape hatch, and `./check.sh` fails if the
-two configs disagree about security headers — so whichever one you are not using
-cannot quietly rot.
+**Both hostnames are live.** DNS is wired and Render is serving all three
+(`checksteady.com`, `www.checksteady.com`, `app.checksteady.com`) — checked
+10 September 2026. `render.yaml`'s `domains:` blocks document that, they did
+not create it.
 
-**Only `public/` is served.** The repo root is deliberately NOT the publish
-directory: doing that would expose `docs/KNOWN-ISSUES.md` — a list of every
-known weakness in this system — plus the schema and RLS policies, at guessable
-public URLs. Anything you add that must not be public goes outside `public/`.
+The stack and the file layout mirror `tenzingdigital/scheduler` — Express on
+Node 22, `pg`, numbered SQL migrations applied at boot, vanilla front end with
+no build step, Render in Frankfurt. Deliberately: the two are maintained by the
+same person, so they are shaped the same way.
+
+**Only `public/` is served.** This is now enforced in code — `resolveStatic()`
+in `server.js` refuses any path that escapes that directory — rather than
+by a host's publish-directory setting. `docs/TAO.md` (the rules this
+system is built on), `docs/KNOWN-ISSUES.md` (a list of every
+known weakness in this system), the schema and the RLS policies all sit outside
+it and are unreachable over HTTP. The HTTP suite asserts this.
 
 If you are ever unsure which of your deployments this is: it serves
 `/index.html` (gate app) and `/checkin.html` (daily register), and has **no
-`/login` route** — login is a section inside the gate app, so a static host 404s
+`/login` route** — login is a section inside the gate app, so the server 404s
 on that path.
 
-Run `./check.sh` before every deploy. It checks the host configs agree, both
-front ends parse, and the database suite passes.
+Run `./check.sh` before every deploy. It parses every front end and server
+file, then runs both suites: the database's authorisation model and the HTTP
+tier in front of it.
 
 ---
 
-Two front ends, one Supabase backend, one resident register.
+Two front ends, one API, one Postgres database, one resident register.
 
-**`index.html` — the gate app.** Who is on site right now. A guard logs in,
+**`index.html` — In & out (the Door or gate app in older notes).** Who is on site right now. A guard logs in,
 searches a registered resident by name, verifies the person visually, and taps
 one button to sign them in or out. Two tabs: Search and Log.
 
 **`checkin.html` — the check-in app.** The statutory daily register: did this
-resident present at the hut today? Two tabs: Check in and Attention. A gate
-sign-in/out is a different act from a check-in and does not satisfy the daily
-requirement — see "Compliance is per calendar day" below.
+resident present at the hut today? One list, filtered by two tiles above it:
+not seen today, seen today. Each card says when the person was seen today and
+the detail sheet says who recorded it. History — runs of missed nights and
+days absent in the rolling window — is the manager's list under Admin →
+Absences, not the guard's screen. A gate sign-in/out is a different act from
+a check-in and does not satisfy the daily requirement — unless the site turns
+on `feature_door_checkin`, in which case a sign **in** (never a sign out) is
+also recorded as the day's check-in with `source = 'door'` — see "Compliance is
+per calendar day" below.
 
 Every event, at either app, is timestamped and attributed to the guard who
 recorded it. Both apps share `app-common.css` and `app-common.js`, loaded as
-plain `<script>`/`<link>` tags — still no build step, no framework.
+plain `<script>`/`<link>` tags — still no build step, no front-end framework,
+and no CDN.
+
+The back end is Express on Node 22 with three dependencies (`express`, `pg`,
+`dotenv`), matching `tenzingdigital/scheduler`. Aligning the two was a
+deliberate choice over minimising this repo's dependency count on its own: one
+person maintains both, and the cost of two different designs is paid on every
+context switch.
 
 ```
+The layout deliberately mirrors `tenzingdigital/scheduler`, so that moving
+between the two repos means reading the same shapes twice rather than learning
+two designs.
+
+```
+server.js               Express app: middleware, route mounting, boot()
+database.js             pool, withTransaction, withIdentity, withOwner, migrate
+lib/
+  auth.js               passwords, sessions, cookies, throttling, middleware
+  api.js                HttpError and the parameter validators routes share
+  asyncRoute.js         wrap() — async handler rejections reach the error handler
+  security.js           the response headers and the CSP script hashes
+routes/
+  session.js            log in, log out, "who am I"
+  residents.js          search, one resident's compliance, the 30-day strip
+  gate.js               on-site summary, sign in/out, the day's movement log
+  checkins.js           the register: check in, attention list, annotations
+  sync.js               replay of events a terminal recorded while offline
+migrations/             numbered SQL, applied in order, exactly once
+  001_platform.sql      auth.users, auth.sessions, auth.uid(), the request roles
+  002_schema.sql        tables, views, RPCs, row-level security, GDPR functions
+  010_offline_sync.sql  late-entry functions: bounded, flagged, idempotent
 public/                 the ONLY directory served publicly
   index.html            the gate app — Search and Log
-  checkin.html          the check-in app — Check in and Attention
+  checkin.html          the check-in app — the register, filtered by its tiles
+  admin.html            the organisation's page — residents (supervisors) and staff (admins)
+  help.html             the guide: every screen, task by task, for a person with no training
   app-common.css        styles shared by both front ends
-  app-common.js         Supabase client setup and helpers shared by both
-render.yaml             static hosting config and security headers (Render — in use)
-vercel.json             the same headers for Vercel; check.sh fails if they drift
-check.sh                one command: host configs + front ends + database suite
-scripts/                check-deploy-headers.py — the host-config parity check
-supabase/schema.sql     tables, views, RPCs, row-level security, GDPR functions
-supabase/seed.sql       optional demo data (test projects only)
-supabase/tests/         throwaway-Postgres acceptance suite (authorisation + compliance)
+  app-common.js         the API client and helpers shared by both
+  offline.js            encrypted register copy, event queue, replay — see "Working offline"
+  sw.js                 service worker: keeps the two pages loadable with no connection
+test/
+  api.test.js           the HTTP suite
+  acceptance.sql        the authorisation model
+  compliance.sql        calendar-day semantics, close-out, retention, GDPR
+  cluster.sh            shared throwaway-Postgres scaffolding
+  api.sh / sql.sh       the two runners
+staff.js                account administration CLI (add / passwd / disable)
+jobs.js                 nightly maintenance, run by the Render cron job
+seed.sql                optional demo data (test databases only)
+seed-200.sql            optional: tops a demo database up to 200 residents
+seed-today.js           optional: shapes today's register so every state is visible (SEED_TODAY_CHECKINS=1)
+seed-rooms.js           optional: puts every resident in a room, inventing buildings if none (SEED_ROOMS=1)
+render.yaml             the blueprint: web service + Postgres + cron, all Frankfurt
+check.sh                one command: parse everything, then both suites
 docs/GDPR.md            what personal data is held, why, and for how long
+docs/PERMISSIONS.md     who may do what, role by role — generated from test/permissions.js, which the HTTP suite enforces
+docs/ONBOARDING-REVIEW.md  using the product with no training: what is in place, what to do next
 docs/TECH-STACK.md      stack options, costs, and why this one
+docs/SECURITY-ROADMAP.md  hardening, privacy and resilience roadmap, mapped to ISO 27001
 ```
 
 ---
@@ -125,8 +186,8 @@ scheduling that job is not optional.
 
 Staff may attach a reason to a missed day with `annotate_compliance_day()`,
 but the reason never flips the outcome — a `breach_noted` day still counts as a
-breach and still appears in the attention list. Annotation only demotes a row
-in the attention list's ordering and greys it in the UI; it never removes it.
+breach and still counts under Admin → Absences. Annotation only demotes a row
+in `attention_list()`'s ordering and greys it in the UI; it never removes it.
 **Consecutive missed days, not the total, is the headline number** — three
 days running is a different kind of problem than three scattered Tuesdays over
 six months.
@@ -142,11 +203,12 @@ days when they were legally a minor. This is the reason the register stores a
 full date of birth rather than a boolean — see `docs/GDPR.md` for the
 necessity argument.
 
-The **Attention** tab in the check-in app is the flow itself: unexplained
-breaches first (worst consecutive-run first), then noted breaches greyed out,
-then residents not yet seen today past the cutoff. What the hut does about a
-breach — call, escalate, welfare check — is a procedure, not a feature; the
-app tells you who and for how long.
+**Admin → Absences** is the flow itself: every active resident with a run of
+consecutive missed nights or a missed day inside the rolling window, worst
+first, with each count beside the figure in Settings ("5 of 7", "8 of 10").
+The **Not seen** tile on the register is the working list for the day. What
+the hut does about an absence — call, escalate, welfare check, the letter —
+is a procedure, not a feature; the app tells you who and for how long.
 
 ### Roles
 
@@ -163,73 +225,492 @@ birth. The acceptance suite asserts this.
 
 ---
 
+## Self-serve trials
+
+A centre can start its own trial from `checksteady.com/trial/` without anyone at
+Tenzing doing anything. Migration 009 already built the whole trial
+*lifecycle* — `status = 'trial'`, `trial_ends_at`, `tenant_may_write()` going
+false when it lapses, `expire_lapsed_trials()` in the nightly job. Migration
+034 added the front door.
+
+    POST /signup            writes public.signup_requests, sends one email
+    GET  /signup/confirm    provisions the centre, then redirects to /?reset=…
+
+**Nothing is provisioned before the email is proven.** Provisioning runs
+`create schema` plus the whole of `tenant/template.sql`, and a public endpoint
+that does that on an unverified POST is a way to fill the database from a
+script. The POST writes a pending row and sends a link; the click on the link
+is what creates the centre. That is the single most important property of this
+route, and `test/signup.test.js` asserts it first.
+
+What else guards it, in order of how much work it does:
+
+- Per-address (3/hour, in Postgres, survives a restart) and per-IP (5/hour, in
+  memory, same reasoning as the login throttle) rate limits.
+- Throwaway email domains refused. Not a security control — it removes the
+  casual case and keeps trials contactable.
+- An address that already has a login is told to sign in, rather than getting
+  a second centre it cannot reach.
+- The link is single-use and lasts 24 hours; a failure part-way through unwinds
+  the tenant, the schema and the login before returning.
+
+The `/api` cross-origin check is deliberately **not** extended to `/signup`:
+the form lives on `checksteady.com` and posts to `app.checksteady.com`, so it is
+cross-origin by design. The site's own CSP names that origin in `form-action`
+— with `form-action 'none'` the browser blocks the submit *silently*.
+
+### Sample data
+
+The form asks whether to start with sample residents or empty, because the
+answer changes what the person sees in the first second and because fabricated
+residents must never appear in a register somebody believed was empty.
+
+`lib/demoSeed.js` writes about thirty fictional residents across rooms, with
+families, evacuation needs, three weeks of check-ins, somebody on the attention
+list and somebody on an authorised absence — and turns on the buildings,
+evacuation, households and visitors features, which default to off. A trial
+exists to show the product.
+
+**Every row it writes is registered in `public.tenant_demo_rows`**, so
+`DELETE /api/settings/demo-data` removes exactly those people and nothing else.
+A trial can become a real register without fabricated people staying in it, and
+the button that does it sits at the top of Admin → Residents until it is used.
+The registry lives in `public` rather than as a column on the tenant's own
+`residents` table because there is no per-tenant migration ledger yet
+(`docs/MULTI-TENANCY.md`): a column in `tenant/template.sql` would reach
+centres provisioned afterwards and not the ones already running.
+
+### What a trial costs, and what an abandoned one costs
+
+Measured, not estimated, on a database provisioned from these migrations:
+
+| | Empty trial | Sample-data trial |
+|---|---|---|
+| Its own tables and indexes | 1.1 MB | 2.1 MB |
+| Database growth, including overhead | ~1.5 MB | ~2.1 MB |
+| Rows added to `pg_class` / `pg_attribute` | 129 / 730 | 129 / 730 |
+| Time to provision | 226 ms | 981 ms |
+
+Disk is not the constraint — a hundred trials is about 210 MB. The catalogue
+rows are: they are memory, and `hut-db` is on the 256 MB plan, which section 7b
+already says to leave before a second centre goes live. Trials bring that
+upgrade forward; they do not create it.
+
+**An abandoned trial is not free, and used to be worse.** `expire_lapsed_trials()`
+sets the status to `expired` and deliberately deletes nothing — losing a
+centre's evidence would be the worse failure — so a dead trial keeps its schema
+indefinitely. It also used to keep running the *whole* nightly job set: measured
+on an abandoned sample trial, one run wrote 60 rows into `daily_compliance` and
+30 into the overnight snapshot, recording every night that thirty fictional
+people had missed their check-in.
+
+`jobs.js` now asks of each centre the same question `tenant_may_write()` asks of
+the API. A centre that may not write — an expired trial, a suspended contract —
+gets the purges and nothing else. The purges must keep running: retention is a
+promise in the DPA and they only ever delete. Nothing is lost by waiting, because
+`close_out_compliance_days()` backfills every day it missed, so a centre that
+later activates is closed out from where it left off on the next run.
+
+Reviewing and closing dead trials stays a deliberate act on `/org.html`, not
+something the schedule does on its own.
+
 ## Setup
 
-### 1. Create the Supabase project
+Everything below is one Render blueprint plus two commands. There is no second
+vendor to sign up for and no keys to copy between dashboards.
 
-Pick an **EU region** — Frankfurt or Ireland. This matters for the transfer
-analysis in `docs/GDPR.md` and cannot be changed after the project is created.
+### 1. Create the services
 
-### 2. Apply the schema
+Render dashboard → **New → Blueprint** → point at this repo. `render.yaml`
+creates all three resources in Frankfurt:
 
-Supabase dashboard → SQL Editor → paste `supabase/schema.sql` → Run.
+| Resource | What it is |
+|---|---|
+| `hut-db` | Postgres 16. The register. |
+| `hut-check-in` | The Node web service — serves `public/` and `/api`. |
+| `hut-nightly` | The cron job that runs the maintenance functions. |
 
-It is written for a fresh project. Re-running it is safe, but note that
-`residents.search_key` is a generated column: if you later change how names are
-normalised you will need a migration rather than a re-run.
+`DATABASE_URL` is wired from the database into both services by the blueprint;
+you never paste a connection string anywhere.
 
-### 3. Turn off public sign-up
+**Pick the region before you create anything.** Frankfurt keeps the resident
+data in the EU, which is the whole transfer analysis in `docs/GDPR.md`, and
+Render cannot move a database between regions after the fact.
 
-**Authentication → Sign In / Providers → Email → disable "Allow new users to
-sign up".**
+**Do not run this on the free tier.** A free Render Postgres is *deleted* after
+30 days — not paused, deleted — and this database is a statutory audit trail.
+A free web service also spins down after 15 minutes idle and takes the best
+part of a minute to wake, which at 3am reads as "the system is broken". The
+blueprint asks for `basic-256mb` and `starter`, about $14/month together. See
+`docs/TECH-STACK.md`.
 
-Do not skip this. Several policies grant access to any authenticated user on
-the assumption that the only way to hold an account is for an admin to have
-created one. With open sign-up, anyone who finds the URL could register and
-read the resident register.
+### 2. The schema applies itself
 
-### 4. Create staff accounts
+`server.js` runs the migrations before it starts listening, so the first
+deploy builds the database and every later deploy applies whatever is new. You
+do not have to do anything for this step — it is here so you know what happened.
 
-Authentication → Users → Add user. Set **User Metadata** to control the role:
+To run it by hand, from a machine that can reach the database using the
+**external** connection string from the Render dashboard:
 
-```json
-{ "full_name": "Gina Guard", "role": "guard" }
+```bash
+npm install
+DATABASE_URL="postgres://…render.com/hut?sslmode=require" npm run migrate
 ```
 
-A `profiles` row is created automatically by trigger. Valid roles are `guard`,
-`supervisor`, `admin`. Omitting `role` gives `guard`. Make at least one `admin`.
+**`?sslmode=require` matters on the external URL** and must be absent on the
+internal one. Render's external endpoint requires TLS; the internal one does
+not offer it, and forcing TLS there fails to connect. The service reads the
+mode from the connection string rather than guessing from the hostname, so
+whichever URL you paste, say what it needs.
 
-To revoke access, set `profiles.active = false` — do not delete the user.
-Deleting is blocked by design: `gate_events.guard_id` and
-`checkin_events.guard_id` are `ON DELETE RESTRICT`, so the database refuses to
-erase the identity behind a historical audit trail.
+#### Changing the schema
 
-### 5. Schedule the cron jobs
+Migrations live in `migrations`, named `NNN_description.sql`, applied in
+filename order and recorded in `schema_migrations` with a checksum.
 
-Database → Extensions → enable `pg_cron`, then run the four `cron.schedule`
-calls in the commented block at the end of `supabase/schema.sql`:
+**To change the schema, add a new numbered file.** Never edit one that has been
+applied — the runner will not re-run it, so the change would simply not exist
+in the database while looking as though it does. It checksums each applied file
+and warns loudly at boot if one has drifted; the HTTP suite asserts that
+warning fires.
+
+Two properties the runner guarantees, both worth keeping if you touch it:
+
+- Each migration runs in its own transaction, so a file that fails part-way
+  leaves nothing behind. That is why the SQL files carry no `begin`/`commit`.
+- The run holds a Postgres advisory lock, so two instances booting together on
+  a deploy cannot both apply the same migration.
+
+`001_platform.sql` is the identity layer (`auth.users`, `auth.sessions`,
+`auth.uid()`, the `anon`/`authenticated` roles) and `002_schema.sql` is the app
+(tables, views, RPCs, RLS). Order matters — the second references the first.
+
+One caveat carried over from before: `residents.search_key` is a generated
+column, so changing how names are normalised needs a real migration that
+rebuilds it, not a redefinition.
+
+### 3. Create the first account
+
+There is no sign-up route, no invite email and no public registration form — by
+construction, not by configuration. (Under Supabase this was step 3 of setup,
+"remember to disable public sign-up"; the endpoint that had to be disabled does
+not exist here.) So the first account is made for you, from the environment.
+
+**Set `ADMIN_EMAIL` and `ADMIN_PASSWORD`.** The blueprint declares both with
+`sync: false`, so Render prompts you for them when you create it. On an empty
+database — and only then — the first boot creates that account as an `admin`
+and logs the address it used. It never logs the password, and it never fires
+again once any staff account exists.
+
+Once you have logged in, **delete `ADMIN_PASSWORD` from the service's
+environment.** The account stays; nothing re-reads the variable.
+
+If you skip this, the deploy still succeeds and the log says plainly that
+nobody can log in.
+
+> **Why this exists rather than "just run the CLI":** `node staff.js add` needs
+> a shell on the running service, and **Render's Shell tab is only available on
+> paid instance types**. Without an environment-driven first account, a free
+> deploy would come up healthy and be permanently unreachable.
+
+### 3b. Forgotten passwords
+
+A staff member who is locked out can use **Forgot your password?** on the login
+screen. They get a one-time link that expires in an hour; following it lets
+them choose a new password and, in doing so, signs the account out everywhere
+else. The link is single-use and is invalidated the moment it is spent, so one
+left in an inbox or a browser history is not a spare key.
+
+The request form never says whether an address has an account. That is
+deliberate: a reset endpoint that distinguishes real staff from strangers is a
+staff directory for anyone who can reach the login page.
+
+**Email delivery needs three variables.** Set `RESEND_API_KEY` (a key from
+resend.com), `MAIL_FROM` (a verified sender) and `PUBLIC_URL` (your own
+domain — `https://app.checksteady.com` in render.yaml). `PUBLIC_URL` is not
+optional: the link in every password reset, staff invitation and trial
+sign-up email is built from it and from nothing else — never the request's
+Host header, which a caller can forge — so without it those three routes
+refuse the request outright rather than send a link pointing somewhere an
+attacker chose.
+
+> **With `RESEND_API_KEY`/`MAIL_FROM` unset the link is written to the
+> service log instead**, with a warning, rather than silently going nowhere
+> — but only once `PUBLIC_URL` is set; without it there is no link to build
+> and the request is refused before mail is even attempted. On a
+> single-site deployment the operator already has log access, and with it
+> the database URL, so the log fallback grants them nothing they did not
+> have. It is still a fallback: anyone who can read your logs can take an
+> account during the hour a link is live. Configure all three before you
+> have staff who are not you.
+
+Two other routes exist and always have: an admin can send anyone a fresh
+login link from the **Admin** page, and `node staff.js passwd <email>` works
+from a shell.
+The reset link is the only one of the three that helps the *last remaining
+admin*, who has nobody above them to do it.
+
+### 4. Add the rest of the staff, and the residents
+
+Once you can log in as an admin, the header of either app shows an **Admin**
+link (supervisors see it too). `admin.html` is the organisation's page, kept
+out of the two working apps:
+
+- **Residents** (supervisors and admins): the register itself. Add a
+  resident (name, date of birth, TRC/IRP if known), correct their details,
+  and mark them departed with their last day on site — or reactivate them.
+  The date of birth is entered here and never shown anywhere else. An Active
+  / Departed switch shows who has left. Set the departure date before the
+  next nightly close-out, or the days after it are recorded as missed.
+- **Staff** (admins only): every account, with add (name, email, role —
+  no password: the new colleague gets a one-day link by email to choose
+  their own), send a fresh login link, change role, and disable or
+  re-enable. Nobody but the account's owner ever sees their password.
+  With email unconfigured the link is shown to the admin to pass on.
+  Disabling ends the account's open sessions immediately.
+- **Buildings** (supervisors and admins; only when the site's *Buildings
+  and rooms* feature is on): the centre's buildings and the rooms in each,
+  with a capacity; a resident's room is set on their record and shows on
+  every card; occupancy per room with who is on site now.
+- **Evacuation** (only when the site's *Evacuation* feature is on): an
+  evacuation-need code on each record, from a fixed list with no free text,
+  and a **Roll call** tab on the gate: everyone on site by building, needs
+  first, a tap per person at the assembly point, working without a
+  connection and syncing the ticks later. A printable evacuation list.
+  Drills and incidents are kept as a record for as long as the register.
+- **The register opens on who has not been seen today.** A recorded
+  check-in drops the card off that view; the tiles and "Show everyone" are
+  one tap away, and a typed name always searches everyone. A card swiped
+  either way records the check-in.
+- **Households** (only when the site's *Households* feature is on): link
+  family members from a resident's edit sheet. A family stays together on
+  the roll call, children marked, and reads as a family in a room. The
+  link is an id shared by the members and nothing else.
+- **Reports** (supervisors and admins): the daily register, an attendance
+  summary, the movement log, *Out and back* (one row per absence: building,
+  room, date and time out, date and time back, hours away, who signed
+  each), the drill record, visitors and *Absent overnight* for a date
+  range, the *Weekly register update* (the report behind the Sunday email:
+  absence spans with approval in words, the weekend's, departures, rooms
+  under maintenance or with free beds), and occupancy, the evacuation list and *Absent now* as they stand, each as a CSV download or a printable page.
+  A reason is required and every export is on the audit record with the
+  range.
+- **Authorised absences** (migration 028): a supervisor records the days a
+  resident is away with the centre's agreement, with a reason from a fixed
+  list and, for a child, that a parent or guardian agreed. The nightly
+  close-out writes those days as not required, so they never count as
+  missed; cards say *Away until*; a report covers a range. Nothing else is
+  held.
+- **The Sunday email** (migrations 035 and 037): early Sunday the nightly
+  job emails the previous Sunday night through Saturday night as counts and
+  a link, never a resident name, to the staff ticked *Gets the Sunday
+  report* on their record — offered only to supervisors and admins, since
+  only they may run the report it summarises, and cleared automatically on
+  a demotion to guard. A switch under Settings turns the send on or off for
+  the site; *Send last week's now* checks it regardless of the switch.
+  **Permitted absence periods** (migration 036): the IPAS windows as dates
+  under Settings; a holiday authorised outside them is recorded with a
+  warning, never refused.
+- **Room history** (migration 028): every room a resident has had, from
+  when to when and who moved them, kept by a trigger as the room changes
+  and closed when they leave. On the edit sheet and as a report. The label
+  is kept, so history survives a room being removed.
+- **Search by room**: In & out and the register find "B1" or "K12" as well as a
+  name, and a letter alone lists the block, online and offline. Ticking one
+  member of a family in *Select several* ticks the family, and *All* ticks
+  everyone the search found.
+- **Site staff list** (migration 030): the centre's own staff who do not
+  use the app, name and job title, kept by supervisors under Admin →
+  Staff (pasted in, one per line). On the Visitors tab, under Staff, each
+  name is one tap to sign in; the visit points back at the list entry.
+  Archived rather than deleted.
+- **A note when a drill ends** (migration 033): one line about the event
+  itself, which alarm, the assembly point, what went wrong, on the drills
+  report. Never about a person.
+- **Roll call filters**: a name-or-room box and a building chip row on the
+  Roll call tab, so a warden at one assembly point sees one block. The two
+  buttons say *Practice drill* and *Real evacuation*, and the record keeps
+  them apart.
+- **A tablet that always does one job**: open the app with `?view=inout`
+  or `?view=register` once, or tick *Always open this on this tablet* on
+  the chooser, and that device skips the chooser from then on.
+- **Several residents at once** under Admin → Residents: tick people, then
+  *Departed* marks them all departed from one date, or *Family* makes them
+  one household.
+- **The nightly House Rules reminder** (migration 032, off by default):
+  after close-out, supervisors and admins are emailed the residents at or
+  over a figure, on the nights there is anyone to list. Needs
+  `RESEND_API_KEY` and `MAIL_FROM`.
+- **Rooms archived, not deleted** (migration 031): a room that has been
+  lived in keeps its history when taken out of use and can be restored;
+  nobody can be moved into it meanwhile. Each room carries the beds
+  contracted with IPAS where that differs from the physical count, and the
+  bed set-up in words; the *Vacancies* report reads both.
+- **Breach reports** (migration 029): that a report was issued to IPAS,
+  which kind (house rules, or misuse of the verification tablet), on what
+  day, by whom, with its reference. On the edit sheet, on the Absences tab
+  against each person, and as a report. Holidays are capped at
+  `holiday_max_days` (14) and an IPO interview is a reason of its own.
+- **Roll call: who was marked safe**: one row per person per roll call,
+  residents and visitors, with the time, who marked them and the room they
+  had at the time.
+- **Who was off site at midnight** (migration 027): the nightly job takes a
+  snapshot of every resident whose last movement before the end of the day
+  was OUT, or who has never been signed in, with when they left. Kept as
+  long as the register (`compliance_retention_days`), so the question can
+  be answered for any night after the movement log itself has been purged.
+- **History, search and several at once** at the door: every card says
+  *on site since* or *off site since* with the time of the last movement;
+  the detail sheet (door, register and admin) lists one person's movements
+  and check-ins over any range up to a year, with the time and who recorded
+  each; the Log covers up to a month at a time, with Today, Yesterday, This
+  week and This month one tap away, and filters by name or room;
+  and *Select several* signs a group in or out in one go, one movement per
+  person.
+- **Visitors, staff and contractors** (behind `feature_visitors`): a
+  Visitors tab on the gate signs anyone who is not a resident in on arrival
+  and out when they leave, with a kind from a fixed list, a name and an
+  optional company. Whoever is still on site is a group on the roll call,
+  marked safe like a resident, and a Visitors report covers a date range.
+  Kept as long as the movement log.
+- **Roll call on several phones at once**: every warden's Roll call tab
+  shows the same drill, ticks made on one phone appear on the others within
+  about five seconds, and a tick is per resident so nobody is counted
+  twice. Ending the roll call on one phone ends it on all.
+- **Import from a spreadsheet** (supervisors and admins, Admin → Residents
+  → Import): a CSV with first name, last name and date of birth, and
+  optionally ID type and number, building, floor, room and evacuation need.
+  The page previews every line (ready, already on the register, or the
+  problem to fix) before anything is written, and the same sheet can be
+  imported again safely: a person already there is skipped. Dates as
+  people write them (DD/MM/YYYY or YYYY-MM-DD); the evacuation column as
+  words ("needs help to move"). Up to 200 lines per request; the page
+  sends a bigger sheet in batches.
+- **Help without training**: a round ? beside Log out opens the guide
+  (`/help.html`), written task by task and cached for offline reading;
+  hold a tile or a tab for a sentence about what it counts; a ? beside a
+  label explains the rule behind it; and the first visit to each app on a
+  device shows a three-line card with "Got it". `docs/ONBOARDING-REVIEW.md`
+  is the review behind it.
+- **Who viewed which record** (admins, under Reports): every opening of a
+  resident's detail sheet on the register, of their edit sheet, and every
+  export, with who and when. Written by the server with the read itself,
+  kept as long as the audit trail, and included in the resident's own
+  export. The gate's sheet shows nothing beyond the list and is not
+  logged; nor is a sheet opened offline, which never reaches the server.
+- **Codes by email at login** (admins, Settings → Security; on the working
+  branch until proven on a copy): supervisors and administrators type a
+  six-digit emailed code after their password, may trust a personal device
+  for 30 days, and guards keep password-only login. Needs email configured.
+- **Where a login comes from** (migration 022, on the working branch): every
+  sign-in records the country its address resolves to. Home is the site's
+  list under Settings → Security, Ireland by default. A supervisor or
+  administrator from anywhere else is refused with `security@tenzing.ie` in
+  the message; a guard from elsewhere, or anyone on a device never seen
+  before after three wrong passwords, must type the emailed code. Unknown
+  addresses are not treated as abroad. The country table is the bundled
+  GeoLite2 data in `geoip-country`; update the package with `npm update`
+  every few months. `HUT_TRUST_CF_COUNTRY=1` is a faster alternative, but
+  **do not set it yet**: checksteady.com and app.checksteady.com sit at
+  Cloudflare DNS-only ("grey cloud") — traffic reaches Render directly, so
+  Cloudflare never sets `CF-IPCountry`, and with the flag on `lib/geo.js`
+  would trust that header verbatim from whoever sends it, letting anyone
+  forge `CF-IPCountry: IE` and walk straight past this guard. Before turning
+  it on, check the record is actually proxied (orange cloud in the
+  Cloudflare dashboard, or `dig` the hostname and confirm it resolves to a
+  Cloudflare range rather than straight to Render) — only then is the header
+  trustworthy.
+- **Organisation page** (`/org.html`, platform administrators only, on the
+  working branch until it has been proven on a copy of the live database):
+  a level above any one site. Every centre on the service with its counts,
+  a form that provisions a new one and invites its first administrator, and
+  a close step that drops the centre's schema. The site admin page never
+  shows this list. A platform administrator is made in SQL:
+  `update auth.users set platform_admin = true where email = '…'`.
+- **Features for this site** (admins, under Settings): the three switches
+  above. All are off until an administrator turns them on, so a centre
+  that never does sees exactly what it saw before.
+- **Settings** (admins only): site name, timezone, the adult age, the
+  due-soon hour, the House Rules thresholds, retention, the offline
+  sync window, and the idle lock (minutes without a touch before a
+  terminal logs itself out; default 20). Every change is audited.
+- **Export and erase** (admins only), on a resident's edit sheet: the
+  Art. 15 / 20 export downloads as JSON with the reason recorded, and the
+  Art. 17 erasure needs the full name typed back.
+
+Visibility is presentation, not security: the database refuses each of those
+operations for anyone else regardless. Resident writes go through the
+`residents_supervisor` row policy, staff creation and resets through
+admin-gated `SECURITY DEFINER` functions, and profile updates through the
+admin-only row policy. A guard who opens the page is told it is not for them.
+
+The same operations are also available as a CLI. Run it from Render
+→ your service → **Shell** if your plan has one, or from your own machine
+against the **external** `DATABASE_URL`:
+
+```bash
+node staff.js list
+node staff.js add gina@hut.example "Gina Guard" guard
+```
+
+It prompts for the password rather than taking it as an argument, so the
+password never lands in shell history, in `ps` output, or in Render's command
+log. Minimum twelve characters; stored as bcrypt at cost 12.
+
+Valid roles are `guard`, `supervisor`, `admin`; omitting it gives `guard`. The
+`profiles` row is created automatically by the same trigger that fired on
+Supabase.
+
+To revoke access:
+
+```bash
+node staff.js disable gina@hut.example
+```
+
+That sets `profiles.active = false` **and** deletes their sessions, so access
+ends immediately rather than at the next login. Deleting the account outright is
+blocked by design: `gate_events.guard_id` and `checkin_events.guard_id` are
+`ON DELETE RESTRICT`, so the database refuses to erase the identity behind a
+historical audit trail. `node staff.js passwd <email>` changes a password and,
+in the same transaction, ends every session that account has open.
+
+No shell and no local Postgres client? Everything the CLI does is a one-line
+SQL call, so Render's database page → **Connect → PSQL command** also works:
 
 ```sql
-select cron.schedule(
-  'purge-expired-gate-events',
-  '15 3 * * *',                        -- 03:15 UTC daily
-  $$ select public.purge_expired_gate_events(); $$
-);
-
-select cron.schedule(
-  'close-out-compliance-days',
-  '30 0 * * *',                        -- 00:30 UTC daily, after midnight in Europe/Dublin
-  $$ select public.close_out_compliance_days(); $$
-);
-
-select cron.schedule('purge-expired-checkin-events', '20 3 * * *',
-  $$ select public.purge_expired_checkin_events(); $$);
-select cron.schedule('purge-expired-compliance', '25 3 * * *',
-  $$ select public.purge_expired_compliance(); $$);
+select auth.create_user('gina@hut.example', 'a-long-password', 'Gina Guard', 'guard');
+select auth.set_password('gina@hut.example', 'a-new-long-password');
+update public.profiles set active = false where id =
+  (select id from auth.users where lower(email) = 'gina@hut.example');
 ```
 
-Four jobs, not one:
+### 4b. What is on the record
 
+Three things are written that nobody types:
+
+- **`admin_audit`** — every change a supervisor or admin makes to a resident,
+  a staff account or the settings, with the row before and after, and every
+  export of a resident's record with the reason given. Admins can read it;
+  nobody can edit it. It is included in a resident's Art. 15 export and
+  removed by their erasure.
+- **`auth.login_events`** — every sign-in attempt, its outcome, the IP and
+  the browser, for 90 days. Only the service can read it; use psql.
+- **`job_runs`** — one row per nightly job per run. The register page shows
+  a red banner on every terminal when the close-out is behind.
+
+### 5. Check the nightly job is running
+
+Four maintenance functions used to be scheduled with `pg_cron` inside Supabase.
+Render's managed Postgres has no `pg_cron`, so the blueprint creates a cron
+job — `hut-nightly` — that runs `node jobs.js` at 00:30 UTC:
+
+- **`close-out-compliance-days`** — closes each day and writes the *negative*
+  register rows for residents who were never seen. **This one is not
+  optional.** If it never runs, `daily_compliance` only ever gains rows from
+  `record_checkin()` — the positive path — so nobody is ever recorded as
+  having missed a day, and the register silently stops proving compliance at
+  all.
 - **`purge-expired-gate-events`** and **`purge-expired-checkin-events`** —
   delete movement rows older than `app_settings.event_retention_days` (default
   90). Without these, movement history accumulates forever, a
@@ -237,82 +718,121 @@ Four jobs, not one:
 - **`purge-expired-compliance`** — deletes `daily_compliance` rows older than
   `app_settings.compliance_retention_days` (default 2555 days, a placeholder —
   see `docs/GDPR.md`).
-- **`close-out-compliance-days`** — closes each day and writes the *negative*
-  register rows for residents who were never seen. **This one is not
-  optional.** If it is not scheduled, `daily_compliance` only ever gains rows
-  from `record_checkin()` — the positive path — so nobody is ever recorded as
-  having missed a day, and the register silently stops proving compliance at
-  all. If the site timezone is far from UTC, move its schedule so it runs
-  after local midnight; running it early only defers rows to the next run, it
-  never writes a wrong day.
+- **`purge-expired-sessions`** — new here, because sessions are ours now.
 
-Confirm all four with `select * from cron.job;`.
+Confirm it by looking at the job's last run in the Render dashboard. The runner
+exits non-zero if any function failed, which is the only way anyone finds out a
+maintenance job has been failing quietly. If the site timezone is far from UTC,
+move the schedule so it runs after local midnight; running early only defers
+rows to the next run, and the function backfills any day it missed.
 
-### 6. Point the front ends at the project
+**Losing the scheduler is the single biggest operational risk this migration
+introduced.** Inside Supabase the schedule lived in the database and survived
+everything; here it is a separate Render resource that somebody can delete
+while tidying up, and the register would degrade silently.
 
-Edit the `CONFIG` block near the bottom of **both** `index.html` and
-`checkin.html` — they point at the same project and use the same keys:
+### 6. Point the front ends at the API
 
-```js
-const CONFIG = {
-  url: window.CHECKIN_SUPABASE_URL  || "https://YOUR-PROJECT.supabase.co",
-  key: window.CHECKIN_SUPABASE_ANON_KEY || "YOUR-PUBLISHABLE-ANON-KEY",
-};
-```
+Nothing to do. The apps call `/api` on their own origin, served by the same
+service. There is no URL to configure, no key to paste, and no `config.js` —
+all three are gone.
 
-Settings → API → Project URL and the **anon / publishable** key. Never the
-service-role key: it bypasses every policy in `schema.sql`, and anything in
-`index.html` or `checkin.html` is public.
-
-The anon key itself is not a secret. It identifies the project; it grants
-nothing. The acceptance suite confirms a logged-out caller holding that key
-cannot read the register, search, or write an event.
-
-Alternatively, keep the repo project-agnostic by serving a `config.js` (already
-gitignored) that sets `window.CHECKIN_SUPABASE_URL` before either app runs.
-
-### 7. Deploy
-
-There is no build step on any host — four static files served as-is. Configs
-for two hosts are committed; use whichever you are on.
-
-**Render** (`render.yaml`) — dashboard → New → Blueprint → point at this repo.
-Or New → Static Site with publish directory `.` and an empty build command.
-
-**Vercel** (`vercel.json`):
+### 7. Running it locally
 
 ```bash
-npx vercel --prod
+# a local Postgres, or point at anything you do not mind rewriting
+createdb hut
+npm install
+cp .env.example .env             # set DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD
+HUT_ALLOW_INSECURE_COOKIE=1 npm start          # http://localhost:3000
 ```
 
-`render.yaml` and `vercel.json` carry the **same security headers**. If you edit
-one, edit the other — those headers are what stop the resident register being
-framed, MIME-sniffed, or leaked through a referrer. Anything else static
-(Cloudflare Pages, Netlify, S3) works too; port the header set.
+`HUT_ALLOW_INSECURE_COOKIE=1` is only for `http://localhost`. The session
+cookie is normally `Secure` and carries the `__Host-` prefix, which browsers
+refuse to store over plain http, so without it you can never log in locally.
+**Never set it on Render** — Render terminates TLS, so production is always
+https.
 
-Two things to check before this is genuinely live:
+One local-only trap: the CSP hashes every inline `<script>` at boot, so if you
+edit the JavaScript inside `index.html` or `checkin.html` while the server is
+running, the browser refuses to run the page until you restart it. A blank page
+with a CSP error in the console is almost always this.
 
-- **Check your plan allows commercial use.** Render's free static sites do.
-  Vercel's Hobby plan does **not** — a security contractor running this for a
-  client is commercial and needs a paid plan. See `docs/TECH-STACK.md`.
-- **Restrict who can reach it.** Add the deployment's domain to Supabase's
-  allowed redirect URLs, and put the login page behind something — Render
-  supports password protection and IP allowlists, Vercel has deployment
-  protection — so it is not simply open on the internet.
+### 7b. Watch the database's memory
 
----
+`hut-db` is on Render's smallest plan, 256 MB with half of it in shared
+buffers. A burst of concurrent queries — one phone loading the register while
+another terminal refreshes — has pushed it over that limit and crash-restarted
+it (see `docs/KNOWN-ISSUES.md`, item 19c). The service keeps the burst small
+(`PGPOOL_MAX`, default 4) and stays up while the database recovers, and the
+front ends queue anything recorded meanwhile, but the outage itself is a plan
+limit. Turn on Render's failure notifications for both resources, and move to
+the 1 GB plan before a second centre goes live.
+
+### 8. Restrict who can reach it
+
+The login page is on the public internet. Render supports IP allowlists on
+paid instance types; use one if the hut has a fixed address. Failing that, the
+controls that are already on are: bcrypt at cost 12, an eight-attempt lockout
+per email and IP, and 12-hour sessions.
+
 
 ## Verifying the security model
 
+**The permission matrix.** `docs/PERMISSIONS.md` is the written answer to
+"who may do what": every API action, one column per role. It is generated
+from `test/permissions.js` (`node tools/gen-permissions-doc.js`), and the
+HTTP suite makes every request in that file as every role and holds the
+server to the expectation, so the document cannot drift from the code:
+`./check.sh` fails if either changes without the other. A refusal is always
+a 403 with a message written for the person to read; a record that a role
+cannot see is a 404.
+
+
 ```bash
-./supabase/tests/run.sh
+npm test              # everything — this is check.sh
+./test/sql.sh         # just the database: authorisation and compliance
+./test/api.sh         # just the web tier in front of it
 ```
 
-This starts a throwaway PostgreSQL cluster, stubs the parts of Supabase the
-schema depends on (`auth.users`, `auth.uid()`, and the `anon`/`authenticated`
-role grants), applies `schema.sql`, and runs two suites: `01_acceptance.sql`
-(the authorisation model) and `02_compliance.sql` (calendar-day semantics,
-close-out, retention, GDPR). It exits non-zero if any assertion fails.
+GitHub Actions runs the same `check.sh`, `npm audit` and the browser suite
+on every push and pull request (`.github/workflows/check.yml`). Turn on branch
+protection for `main` requiring the `check` job, so nothing reaches Render —
+which deploys `main` — without passing it.
+
+Both suites build their cluster as a **non-superuser role that owns the
+database**, which is what Render gives you. That is deliberate and load-bearing:
+a superuser can `SET ROLE` to anything and bypasses row-level security, so a
+suite running as one passes against privileges production does not have. See
+item 17 in `docs/KNOWN-ISSUES.md` for the deploy that cost.
+
+`sql.sh` starts a throwaway PostgreSQL cluster, builds it **with the real
+migration runner** — not by piping SQL into psql, so the deploy path is
+exercised on every test run — and runs two suites: `01_acceptance.sql` (the
+authorisation model) and `02_compliance.sql` (calendar-day semantics,
+close-out, retention, GDPR). Both exit non-zero if any assertion fails.
+
+Note what changed when the app left Supabase: the suite used to apply a
+thirty-line *stub* of the Supabase objects the schema depends on. That stub is
+now `001_platform.sql` — the real file, the one Render applies. The suite is no
+longer testing an approximation of production, it is testing production.
+
+`./test/e2e.sh` is optional and not part of `check.sh`: it drives the offline
+path in a real Chromium — cut the network, record, reload, reconnect, sync —
+which neither suite above can reach. It needs Playwright, installed with
+`npm install --no-save playwright` so the app's three dependencies stay three.
+
+`api.sh` builds the same cluster, boots the service against it, and drives it
+over HTTP the way a browser does. That suite exists because replacing PostgREST
+and GoTrue with four hundred lines of our own is the largest new risk in this
+system, and the risk is not "does the database refuse things" — the SQL suite
+already answers that — but "does the web tier in front of it offer a way
+around". It asserts that `withIdentity()` really does reach `auth.uid()`, that
+one guard's identity cannot leak into the next request through a pooled
+connection, that no endpoint answers without a session, that deactivating an
+account or changing a password ends existing sessions immediately, that nothing
+outside `public/` is reachable, and that the security headers and the CSP
+script hashes are actually sent.
 
 It exists because RLS fails *quietly*, and compliance math fails *plausibly*.
 A policy that blocks too much returns zero rows instead of an error; a policy
@@ -329,58 +849,26 @@ for a human to eyeball — that discipline caught five real defects during the
 build that a printed report would likely have let through unnoticed. Keep new
 tests written that way; do not add a test that just prints a result.
 
----
+`001_platform.sql` grants `anon` and `authenticated` **full table privileges on
+the public schema**, which looks alarming and is deliberate: it is what a
+Supabase project does, and keeping it means row-level security is carrying the
+whole security model rather than a missing `GRANT` quietly doing the work. If
+the grants were absent, the policies would look effective under test and would
+fail open the first time someone granted a table for an unrelated reason.
 
-## Not being locked into Supabase
-
-Supabase supplies exactly one thing this app cannot supply itself:
-**authentication** — proving that whoever is at the keyboard is a particular
-guard. Everything else, all of the authorisation, lives in `schema.sql` as
-row-level security policies and belongs to you.
-
-`supabase/portable-auth.sql` is the replacement for that one thing. Apply it
-to any plain PostgreSQL database (Render, Neon, a box you rent) *before*
-`schema.sql`, and `schema.sql` then applies **completely unchanged** — no
-edited foreign keys, no rewritten policies.
-
-```bash
-./supabase/tests/run.sh --portable
-```
-
-runs the identical suite against it: the same 84 assertions, plus 23 more
-covering `auth.resolve_user()`, the one piece of new logic it introduces.
-`./check.sh` runs both modes, so the exit route is proven to still work rather
-than assumed to.
-
-What the shim does **not** do is authenticate anybody. You bring an external
-provider — Clerk, Logto, Zitadel, Auth0, Keycloak — and a small backend that,
-per request:
-
-1. verifies the provider's token (signature, issuer, audience, expiry),
-2. maps its `sub` claim to a local uuid via `auth.resolve_user()`, once per
-   login,
-3. opens a transaction, runs `SET LOCAL request.jwt.claim.sub = '<uuid>'`, and
-   issues the query **as the `authenticated` role**.
-
-Two of those steps are load-bearing in a way that is easy to get wrong.
-Connecting as the database owner bypasses RLS entirely and silently disables
-every protection in `schema.sql`. And `SET LOCAL` rather than `SET` is what
-stops a pooled connection carrying one guard's identity into the next
-request's query. The file documents both at the point they apply.
-
-Note that this is a bigger job than it looks: you would be taking on a backend
-service that does not exist today, and its correctness is the whole security
-model. `docs/TECH-STACK.md` covers when that trade is worth making.
-
-It reproduces Supabase's **default table grants** to `anon` and `authenticated`
-deliberately. Testing without them would make RLS look effective when a missing
-`GRANT` was really doing the work — and that grant exists on every real
-Supabase project.
-
-Requires the PostgreSQL server binaries (`postgresql-16` on Debian/Ubuntu). It
-never touches a real project.
+Requires the PostgreSQL server binaries (`postgresql-16` on Debian/Ubuntu) and
+Node 22+. Neither suite touches the deployed database.
 
 ---
+
+## Procedures, backups, and the paperwork
+
+`docs/procedures/` holds the operational side: the paper fallback for a long
+outage, incident response, joiners and leavers with the quarterly access
+review, backup and restore with its rehearsal log, and the risk register.
+`tools/backup.sh` takes an encrypted off-provider `pg_dump` kept for 35 days;
+`tools/restore-rehearsal.sh` proves one restores. `docs/GDPR.md` says what is
+held and for how long, against the schema as it is.
 
 ## Notes for whoever maintains this
 
@@ -413,27 +901,112 @@ was still under 18.
 
 **Two taps inside 60 seconds record one event.** Touchscreens double-fire.
 
-**Timezones.** The gate app's Log tab date filter uses the browser's local day
-boundaries, so "today" means what the guard on shift thinks it means, and DST
-is handled by the platform. Everything compliance-related — the day boundary
-in `daily_compliance`, `due_today`/`expected`, close-out — uses
-`app_settings.local_timezone` instead, because it is computed server-side and
-has to be one definition of "today" regardless of which browser is open. Keep
-that setting matched to the site; on a terminal set to the wrong zone the two
-can disagree about what day it is.
+**Timezones — now one definition, not two.** Everything is computed from
+`app_settings.local_timezone`: the day boundary in `daily_compliance`,
+`due_today`/`expected`, close-out, the 30-day strip, and — since the move —
+the gate app's Log tab. That last one used to build its date range from the
+browser's clock, which meant a terminal with a mis-set timezone could disagree
+with the register about what day it was. It is computed server-side now, so
+there is a single answer to "what is today" and it is the site's. Keep
+`local_timezone` matched to the site.
+
+**The web tier owns authentication; the database still owns authorisation.**
+Every request runs through `withIdentity()` in `database.js`, which opens a
+transaction, drops to the `authenticated` role, and sets
+`request.jwt.claim.sub` — so `auth.uid()`, every policy and every `is_staff()`
+check behave exactly as they did under Supabase. Resist the temptation to
+"simplify" a handler by checking a role in JavaScript instead: the point of
+this design is that `routes.js` could be wrong about who may do what and the
+database would still refuse. Two rules keep that true — never use `withOwner()`
+to serve resident data, and never use a bare `SET` where `SET LOCAL` is
+written, because a session-level setting outlives the transaction and would
+hand one guard's identity to the next request on that pooled connection.
+
+**Editing an inline `<script>` changes the CSP.** `server.js` hashes
+every inline block at boot and lists the hashes in `script-src`, which is what
+lets the policy drop `'unsafe-inline'` entirely. The hashes are computed from
+the files on disk at startup, so a deploy recomputes them — but a file edited
+while the server is running is blocked until restart. `check.sh` asserts the
+served CSP matches the served HTML.
 
 ### Not built, and why
 
 - **Notifying residents that they are due.** Sending SMS or email would add a
   processor, a new category of contact data, and a delivery-failure mode that
-  looks like non-compliance. The check-in app has the Attention tab; the
-  escalation procedure is an operational matter.
+  looks like non-compliance. Admin → Absences lists who is near a threshold;
+  the escalation procedure is an operational matter.
 - **Photos on the register.** Would make visual verification stronger, and would
   also turn this into a system holding biometric-adjacent data. Worth doing
   deliberately, with a DPIA, not by default.
-- **Offline queueing.** A hut with flaky wifi would benefit, but it means
-  holding resident names in `localStorage` on a shared terminal. If you add it,
-  encrypt the queue and clear it on logout.
+- **Offline login.** The pages load and record with no connection (see
+  "Working offline"), but logging IN needs the server: a password is verified
+  there and nowhere else. A terminal that was not signed in when the link
+  dropped waits for it to return.
+
+### Working offline
+
+The centre's internet drops for minutes to hours at a time, and a guard at
+the door cannot wait for it. Both pages therefore keep working through an
+outage and catch up when it ends. In plain terms:
+
+1. **The pages themselves load with no connection.** `public/sw.js` is a
+   service worker, a small script the browser keeps that serves the two HTML
+   files, the stylesheet and the scripts from its own cache when the network
+   fails. It caches nothing else: every request to `/api` is left alone, which
+   is also how the page notices it is offline.
+2. **The register is still on screen.** Each time a page loads the full list
+   while online, `public/offline.js` keeps an encrypted copy on the terminal.
+   Offline, search runs against that copy (plain name matching; the server's
+   typo tolerance needs the server).
+3. **Sign-ins, sign-outs and check-ins are queued, not lost.** A tap made
+   while offline is stored on the terminal with the time it happened and a
+   random reference, and the card shows *Queued*. The header pill turns amber
+   and counts what is waiting.
+4. **When the link returns, the queue is sent** to `POST /api/sync`, which
+   records each event through `record_check_late()` or
+   `record_checkin_late()` (`migrations/010_offline_sync.sql`). Those date the
+   event to when it happened — a check-in at 23:50 that syncs at 00:10
+   satisfies *yesterday*, not today — mark it `late_entry = true` with the
+   server time in `recorded_at`, and treat a repeated reference as already
+   done, so a retry can never double-record. The gate log and the resident
+   export show which events were synced later.
+
+**What is stored on the terminal, and how.** The register copy and the queue
+are AES-GCM ciphertext in the browser's IndexedDB. The key is held in
+`sessionStorage`, which survives a reload and is discarded when the tab is
+closed — so a browser profile lifted off a stolen terminal holds ciphertext
+and no key. The register copy is cleared on logout. The queue is cleared once
+everything in it has been sent; if something is still waiting at logout it is
+deliberately kept, encrypted, and the login screen says so.
+
+**The limits, stated plainly:**
+
+- **Keep the tab open during an outage.** Closing it discards the key, so
+  anything still queued becomes unreadable on that terminal. The header pill
+  says so while anything is waiting, and the app then shows what was lost so
+  it can be recorded from the paper sheet. Do not reboot a terminal mid-outage.
+- **The session must still be valid when the queue is sent.** Sessions last
+  12 hours; an outage longer than the rest of the shift means the guard logs
+  in again and the queue is sent then. Only the guard who recorded an event
+  can send it — the terminal will not hand one guard's events to another's
+  login, and the server would attribute them to the session regardless.
+- **A reload during an outage** carries on with the profile the tab last
+  saw. A tab that was never signed in cannot log in until the link returns.
+- **Terminals cannot see each other's queued events.** Two doors both offline
+  show two different pictures until both sync. The header counts come from
+  the server, and the copy kept for an outage is only as fresh as the last
+  load.
+- **The terminal's clock is trusted for a late entry, within bounds.** The
+  server refuses anything dated in the future or older than
+  `app_settings.late_entry_window_hours` (default 48). Keep terminal clocks
+  set automatically.
+- **A rejected event is never silently dropped.** If the server refuses one
+  for good — the resident departed meanwhile, the window passed — it stays on
+  screen with the reason until somebody dismisses it.
+
+For an outage that outlasts these limits, the fallback is the paper sheet and
+a supervisor entering it afterwards. That path, and a 4G failover router, are
+in `docs/SECURITY-ROADMAP.md`.
 
 **Backdated departures.** `required` is written once per day by close-out and
 nothing recomputes it. If a supervisor learns on Friday that a resident left

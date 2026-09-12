@@ -1,16 +1,64 @@
+  /* Two palettes, one set of names. Dark is the default — a night terminal
+     in a hut — and the device's own preference switches to light, which is
+     the one a phone in daylight at a gate can actually read. Every colour
+     below is a token; the light set keeps the same meanings at a contrast
+     that passes on white. */
   :root {
     --bg:        #0e1116;
     --surface:   #161b23;
     --surface-2: #1e2530;
     --line:      #2b3441;
+    --line-hover:#3b4757;
     --text:      #e8edf4;
     --muted:     #8d9bb0;
     --accent:    #4c8dff;
+    --on-accent: #041025;
     --ok:        #35c88a;
+    --on-ok:     #06231a;
     --warn:      #f0b429;
+    --on-warn:   #2b1d00;
+    --warn-text: #ffe9b3;
     --bad:       #f2604e;
+    --bad-text:  #ffd9d3;
     --exempt:    #7b8798;
     --radius:    14px;
+    --shadow:    rgba(0, 0, 0, .5);
+    /* The bottom sheet sits on a raised surface with a dimmed page behind it,
+       so on a dark phone the list does not read as part of the sheet. */
+    --surface-raised: #1c2331;
+    --scrim:     rgba(3, 6, 12, .64);
+    /* Depth: a hairline shadow under cards and tiles in daylight; none at
+       night, where the border does the work. */
+    --lift:      none;
+    --ring:      rgba(76, 141, 255, .28);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:        #f3f5f8;
+      --surface:   #ffffff;
+      --surface-2: #eaeef3;
+      --line:      #d2d9e3;
+      --line-hover:#aeb9c8;
+      --text:      #101828;
+      --muted:     #4f5d73;
+      --accent:    #1d4ed8;
+      --on-accent: #ffffff;
+      --ok:        #15803d;
+      --on-ok:     #ffffff;
+      --warn:      #b45309;
+      --on-warn:   #ffffff;
+      --warn-text: #5a2d00;
+      --bad:       #c2410c;
+      --bad-text:  #6b1a05;
+      --exempt:    #6b7280;
+      --shadow:    rgba(16, 24, 40, .18);
+      --surface-raised: #ffffff;
+      --scrim:     rgba(16, 24, 40, .38);
+      --lift:      0 1px 2px rgba(16, 24, 40, .06), 0 1px 1px rgba(16, 24, 40, .03);
+      --ring:      rgba(29, 78, 216, .22);
+      color-scheme: light;
+    }
   }
 
   * { box-sizing: border-box; }
@@ -27,7 +75,7 @@
   body { padding-bottom: env(safe-area-inset-bottom); }
 
   button, input, select { font: inherit; color: inherit; }
-  button { cursor: pointer; }
+  button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
 
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
@@ -43,39 +91,221 @@
     max-width: 760px; margin: 0 auto; padding: 12px 16px;
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   }
-  .brand { font-weight: 650; letter-spacing: -0.01em; margin-right: auto; }
+  .brand { font-weight: 650; letter-spacing: -0.01em; margin-right: auto; display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .brand > div { min-width: 0; }
+  /* The mark: a rounded square in the accent with a tick. One source, drawn
+     by mountBrand(); 26px in the header, 40px on the login screen. */
+  .mark { width: 26px; height: 26px; flex: none; display: block; }
+  .mark rect { fill: var(--accent); }
+  .mark path { fill: none; stroke: var(--on-accent); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+  .login h1 { display: flex; align-items: center; gap: 10px; }
+  .login h1 .mark { width: 40px; height: 40px; }
+  .login h1 span { font-weight: 500; color: var(--muted); }
+  /* The way to the guide, on every screen: a round "?" beside Log out. */
+  .bar .help {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface); border: 1px solid var(--line); color: var(--muted);
+    font-weight: 700; font-size: 15px; text-decoration: none;
+  }
+  .bar .help:hover { border-color: var(--line-hover); color: var(--text); }
+  .bar .help:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
-  .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
+  .brand small b { font-weight: 600; color: var(--text); }
+  /* ---- history (a resident's movements and check-ins over a range) ---- */
+  .meta .away { color: var(--warn-text); font-weight: 600; }
+  .chooser .always { margin-top: 14px; font-size: 14px; color: var(--muted); }
+  .roster { margin: 2px 0 6px; }
+  .roster .chips { margin-top: 6px; }
+  .roster .chips button { color: var(--text); }
+  .roster .chips button small { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .history { margin-top: 16px; }
+  .history .hrange { gap: 8px; margin: 0 0 8px; }
+  .history .hrange .field { padding: 10px 10px; font-size: 14px; }
+  .history .hrange .btn.sm { padding: 10px 14px; flex: none; }
+  /* Which register: both, In & out, or the check-ins; and, for a supervisor,
+     the export. Segments, the pressed one in the accent. */
+  .history .hkind { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .history .hkind button {
+    padding: 8px 12px; border-radius: 999px; font-size: 13px; font-weight: 650;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+  }
+  .history .hkind button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .history .hkind button.hexport { margin-left: auto; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: transparent; }
+  .history .hkind button.hexport[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+  .history .hkind button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .history .hexportform { margin-top: 8px; }
+  .history .hexportform .btn.sm { padding: 10px 14px; flex: none; }
+  /* Date inputs refuse to shrink below their intrinsic width on a phone, which
+     pushes the third control off the edge. Let them give way. */
+  .row input[type="date"].grow { flex: 1 1 0; min-width: 0; width: 0; padding: 10px 8px; font-size: 14px; }
+  .row > .btn { flex: none; }
+  .history .logrow time { min-width: 118px; }
+  .history .chips, #logPresets { margin: 8px 0 10px; gap: 6px; }
+  .history .chips button, #logPresets button { padding: 6px 10px; font-size: 13px; }
+  .logrow .dir.chk { color: var(--ok); }
+  .stripTitle { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
 
+  /* ---- select several (the gate) ---- */
+  /* In selecting mode every card grows a box at its left edge; a tap
+     toggles it; a bar at the bottom carries the action. Swiping is off. */
+  body.selecting button.card::before {
+    content: ""; flex: none; width: 22px; height: 22px; border-radius: 6px;
+    border: 2px solid var(--line-hover); background: var(--surface); margin-right: 2px;
+  }
+  body.selecting button.card.selected::before {
+    content: "✓"; display: inline-flex; align-items: center; justify-content: center;
+    background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700;
+  }
+  body.selecting button.card.selected { border-color: var(--accent); }
+  .multibar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+    max-width: 760px; margin: 0 auto; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface-raised); border-top: 1px solid var(--line-hover); box-shadow: 0 -10px 30px var(--shadow);
+  }
+  .multibar b { flex: 1; font-size: 13px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .multibar .btn.sm { padding: 10px 10px; font-size: 14px; white-space: nowrap; flex: none; }
+
+  /* ---- tips ---- */
+  /* A "?" beside a label opens one sentence; a tile or a tab shows its
+     sentence on a long press (and on hover, where there is a mouse). */
+  .tip {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; margin-left: 6px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--line-hover); background: var(--surface-2); color: var(--muted);
+    font-size: 12px; font-weight: 700; line-height: 1; vertical-align: middle; flex: none;
+  }
+  .tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #tipPop {
+    position: absolute; z-index: 60; max-width: min(320px, calc(100vw - 24px));
+    padding: 10px 12px; border-radius: 10px;
+    background: var(--surface-raised); border: 1px solid var(--line-hover); box-shadow: 0 10px 30px var(--shadow);
+    color: var(--text); font-size: 13px; line-height: 1.4;
+  }
+  /* The coach card: the first visit's three sentences. */
+  .coach {
+    margin-top: 12px; padding: 12px 14px; border-radius: 12px;
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    box-shadow: var(--lift);
+  }
+  body.app-register .coach { background: color-mix(in srgb, var(--ok) 9%, var(--surface)); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+  .coach b { display: block; font-size: 15px; }
+  .coach ul { margin: 6px 0 10px; padding-left: 18px; font-size: 13.5px; line-height: 1.45; color: var(--text); }
+  .coach li + li { margin-top: 3px; }
+  .coach .row { display: flex; gap: 8px; align-items: center; }
+  .coach .btn.sm { padding: 9px 14px; font-size: 14px; text-decoration: none; }
+
+  /* ---- filter chips ---- */
+  .chips { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .chips button {
+    padding: 8px 14px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--line);
+    color: var(--muted); font-weight: 550; font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .chips button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Which app is this terminal showing — the gate or the daily register?
+     Both apps share this header and used to look identical, so a guard (or an
+     admin walking between terminals) had no way to tell them apart. The
+     current view is a non-link, the other is one tap away; the session cookie
+     is shared, so switching never asks for a login. */
+  .viewswitch {
+    display: flex; gap: 5px; padding: 5px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    font-size: 15px;
+  }
+  .viewswitch a, .viewswitch span {
+    padding: 9px 16px; border-radius: 9px; text-decoration: none;
+    font-weight: 650; white-space: nowrap;
+  }
+  /* The current view is filled with the accent — readable across the hut at a
+     glance — and the other view reads as a real button, not a stray link. */
+  .viewswitch span[aria-current="page"] { background: var(--accent); color: var(--on-accent); }
+  /* The register is green, the gate is blue, everywhere the two are named:
+     the switch, the primary action, the swipe strip. A guard who has learnt
+     "green is the daily check-in" never signs someone in by mistake. */
+  body.app-register .viewswitch span[aria-current="page"] { background: var(--ok); color: var(--on-ok); }
+
+  /* The job line: one sentence under the search box saying which of the two
+     acts this screen records, and where the other one lives. */
+  /* The label runs into the sentence so wrapped lines and the hint beneath
+     share one left edge; a flex row left the text hanging past the label. */
+  .jobline { margin: 8px 2px 0; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
+  .jobline b { color: var(--text); white-space: nowrap; margin-right: 6px; }
+  .jobline b.gate     { color: var(--accent); }
+  .jobline b.register { color: var(--ok); }
+
+  /* The chooser: shown once per session, before either list. */
+  .chooser {
+    position: fixed; inset: 0; z-index: 40; background: var(--bg);
+    display: flex; flex-direction: column; justify-content: center; padding: 24px 18px; gap: 12px;
+    overflow-y: auto;
+  }
+  .chooser h2 { margin: 0 0 4px; font-size: 22px; }
+  .chooser p.hint { margin: 0 0 10px; }
+  .choice {
+    display: flex; flex-direction: column; gap: 6px; text-align: left;
+    padding: 18px 18px; border-radius: var(--radius); border: 2px solid var(--line);
+    background: var(--surface); color: var(--text); font: inherit; cursor: pointer; text-decoration: none;
+  }
+  .choice b { font-size: 20px; }
+  .choice span { color: var(--muted); font-size: 14px; line-height: 1.4; }
+  .choice.gate     { border-color: var(--accent); }
+  .choice.register { border-color: var(--ok); }
+  .choice.gate b     { color: var(--accent); }
+  .choice.register b { color: var(--ok); }
+  .choice.admin { border-style: dashed; }
+  .choice:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .viewswitch a { color: var(--text); background: var(--surface-2); border: 1px solid var(--line); }
+  .viewswitch a:hover { border-color: var(--accent); }
+  .viewswitch a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* The tiles sit just below the sticky header and scroll with the page:
+     pinning them too cost a third of a phone screen while scrolling a list
+     of two hundred people. */
   .stats {
-    max-width: 760px; margin: 0 auto; padding: 0 16px 12px;
+    max-width: 760px; margin: 12px auto 0; padding: 0 16px;
     display: flex; gap: 8px; flex-wrap: wrap;
   }
   .stat {
     flex: 1 1 0; min-width: 84px;
     background: var(--surface); border: 1px solid var(--line);
     border-radius: 10px; padding: 8px 10px;
+    box-shadow: var(--lift);
   }
   .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.15; }
   .stat span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
   .stat.bad  b { color: var(--bad); }
   .stat.warn b { color: var(--warn); }
   .stat.ok   b { color: var(--ok); }
+  /* On the register the tiles are buttons that filter the list. Same box,
+     same type; the pressed one is ringed in the accent so the list below is
+     visibly "these residents". */
+  button.stat { text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  button.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.stat[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 
   /* ---- tabs ---- */
+  /* Views within an app are underlined text, deliberately unlike the
+     filled pill of the app switch above them: two levels of navigation, two
+     shapes, so a new guard can tell "which app" from "which view". */
   nav.tabs {
-    display: flex; gap: 6px; margin: 16px 0;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: 12px; padding: 5px;
+    display: flex; gap: 4px; margin: 14px 0 12px;
+    border-bottom: 1px solid var(--line);
   }
   nav.tabs button {
-    flex: 1; padding: 11px 8px; border: 0; border-radius: 8px;
-    background: transparent; color: var(--muted); font-weight: 550;
+    flex: 1; padding: 11px 8px 10px; border: 0; border-bottom: 3px solid transparent;
+    margin-bottom: -1px; background: transparent; color: var(--muted); font-weight: 600;
   }
-  nav.tabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); }
+  nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  nav.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
   nav.tabs .pip {
     display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 5px;
-    border-radius: 999px; background: var(--bad); color: #fff;
+    border-radius: 999px; background: var(--bad); color: #fff;   /* white on the bad red passes in both themes */
     font-size: 12px; font-weight: 700; vertical-align: 1px;
   }
 
@@ -85,19 +315,59 @@
     background: var(--surface); color: var(--text);
     border: 1px solid var(--line); border-radius: 12px;
   }
-  .field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+  /* One ring, not two: the border takes the accent and a soft halo says
+     "this is where you are typing". The old outline-plus-border read as a
+     double frame. */
+  .field:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
   input[type="search"]::-webkit-search-cancel-button { filter: invert(.6); }
 
   /* ---- resident cards ---- */
   .list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  /* Letter separators in the full register: a landmark every few cards, so
+     a scroll through two hundred names is a jump rather than a hunt. */
+  .list .letter {
+    font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); padding: 10px 4px 0; margin-bottom: -4px;
+  }
+  /* What a swipe will do is written on a coloured strip BEHIND the card, so
+     dragging the card aside reveals it: "Check in" / "Sign in" on the right
+     swipe, "Sign out" on the left. --reveal-right / --reveal-left are set
+     from the drag distance by mountCardSwipe(). */
+  /* overflow-x: clip (not hidden) so the sliding card is cut at the edge
+     without the wrapper becoming a scroll container. */
+  .swipe { position: relative; overflow-x: clip; overflow-clip-margin: 4px; }
+  .swipe > button.card, .swipe > .rollrow { position: relative; z-index: 1; }
+  .swipe-bg {
+    position: absolute; inset: 0; border-radius: var(--radius);
+    display: flex; align-items: center; padding: 0 18px;
+    font-weight: 700; font-size: 14px; letter-spacing: .02em;
+    pointer-events: none;
+  }
+  .swipe-bg.right { justify-content: flex-start; background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); opacity: var(--reveal-right, 0); }
+  .swipe-bg.left  { justify-content: flex-end;   background: color-mix(in srgb, var(--accent) 26%, var(--surface)); color: var(--accent); opacity: var(--reveal-left, 0); }
+
+  /* The nudge: on the first few loads of each app the first card slides
+     aside far enough to read the strip behind it, then settles — a
+     demonstration of the gesture rather than a wobble. */
+  @keyframes nudge   { 0%, 100% { transform: translateX(0); } 25%, 45% { transform: translateX(96px); } 65% { transform: translateX(0); } 80% { transform: translateX(28px); } }
+  @keyframes nudgebg { 0%, 100% { opacity: 0; } 20%, 50% { opacity: 1; } 65% { opacity: 0; } 80% { opacity: .6; } }
+  button.card.nudge { animation: nudge 2.2s ease-in-out 0.6s 1; }
+  .swipe.nudge .swipe-bg.right { animation: nudgebg 2.2s ease-in-out 0.6s 1; }
+  @media (prefers-reduced-motion: reduce) { .swipe.nudge .swipe-bg.right { animation: none; } }
+  /* The action that matches the current state stays tappable (a repeat
+     sign-in is a legitimate correction) but reads as the secondary one. */
+  .actions .btn.current { opacity: .55; }
+
+  @media (prefers-reduced-motion: reduce) { button.card.nudge { animation: none; } }
 
   .card {
     width: 100%; text-align: left;
     background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--radius); padding: 14px 16px;
     display: flex; align-items: center; gap: 12px;
+    box-shadow: var(--lift);
   }
-  button.card:hover { border-color: #3b4757; }
+  button.card:hover { border-color: var(--line-hover); }
   button.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* The three lines are spans in the markup, so they need explicit block
@@ -115,6 +385,54 @@
   .pill.in   { background: color-mix(in srgb, var(--ok) 18%, transparent);   color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
   .pill.out  { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
 
+  /* ---- the card with its controls ---- */
+  /* On In & out and the register the visible card is .cardrow: the box at
+     the left, the name and pill in the middle, and the act at the right,
+     one bordered surface. The name part is still a <button class="card">
+     (it opens the sheet, and it is what slides on a swipe — the strip that
+     says what the swipe does lies behind it, inside .swipe) but drawn flat,
+     so the three read as one card. A <button> cannot hold a <button>, which
+     is why the box and the act are siblings rather than children. */
+  .cardrow {
+    display: flex; align-items: center; gap: 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--lift); padding-right: 10px;
+  }
+  .cardrow:hover { border-color: var(--line-hover); }
+  .cardrow > .swipe { flex: 1; min-width: 0; }
+  .cardrow > .swipe > button.card { background: transparent; border: 0; box-shadow: none; border-radius: 0; padding-left: 6px; }
+  .cardrow > .swipe > button.card:hover { border-color: transparent; }
+  .cardrow > .swipe > .swipe-bg { border-radius: 0; }
+  /* The act, in the roll call's "Safe" style: a plain button whose label is
+     what the tap does — "Sign in", "Sign out", "Check in" — flipping to the
+     opposite act once recorded; a day already satisfied is filled in green,
+     like a row marked safe. Hidden while selecting several (admin). */
+  .cardrow .btn.tick { flex: none; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
+  .cardrow .btn.tick.in  { color: var(--ok); }
+  body.app-gate .cardrow .btn.tick.in { color: var(--accent); }
+  .cardrow .btn.tick.out { color: var(--warn-text); }
+  .cardrow .btn.tick.done { background: var(--ok); color: var(--on-ok); border-color: transparent; }
+  .cardrow .btn.tick.queued { color: var(--muted); }
+  body.selecting .tick { display: none; }
+  /* The box at the left, always there: tick two or more and the bar at the
+     bottom offers to sign them all in or out. One box on its own does
+     nothing — the button on the card is the single-person act. */
+  .pick {
+    flex: none; align-self: stretch; width: 48px; border: 0; background: transparent; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; border-radius: var(--radius) 0 0 var(--radius);
+  }
+  .pick::before {
+    content: ""; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--line-hover); background: var(--surface);
+    display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; line-height: 1;
+  }
+  .pick:hover::before { border-color: var(--accent); }
+  .pick[aria-checked="true"]::before { content: "✓"; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+  .cardrow.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent), var(--lift); }
+  /* The register's state stripe moves from the inner card to the row. */
+  .cardrow.overdue, .cardrow.never { border-left: 4px solid var(--bad); }
+  .cardrow.due_soon, .cardrow.due_today { border-left: 4px solid var(--warn); }
+
   .badge { font-size: 12px; font-weight: 600; }
   .badge.ok       { color: var(--ok); }
   .badge.due_soon { color: var(--warn); }
@@ -122,14 +440,64 @@
   .badge.never    { color: var(--bad); }
   .badge.exempt   { color: var(--exempt); }
 
+  /* ---- swipe to act ---- */
+  /* pan-y keeps vertical scrolling native while horizontal drags reach the
+     pointer handlers in mountCardSwipe(). The armed state colours the card by
+     what releasing will do: green for the positive action (check in, sign in),
+     accent for signing out. */
+  button.card, .swipe > .rollrow { touch-action: pan-y; will-change: transform; }
+  button.card.swipe-arm {
+    background: color-mix(in srgb, var(--ok) 18%, var(--surface));
+    border-color: var(--ok);
+  }
+  button.card.swipe-arm-out {
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    border-color: var(--accent);
+  }
+
   .card.overdue, .card.never { border-left: 4px solid var(--bad); }
   .card.due_soon { border-left: 4px solid var(--warn); }
 
   /* ---- detail panel ---- */
+  /* A fixed bottom sheet, not a block at the end of the list: with the whole
+     register on screen the old in-flow panel sat below hundreds of cards, so
+     opening it meant scrolling to the bottom and back for every resident.
+     Fixed, it appears instantly wherever the guard is in the list. */
   .detail {
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 18px; margin-top: 14px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    max-width: 760px; margin: 0 auto;
+    max-height: 72vh; overflow-y: auto;
+    background: var(--surface-raised); border: 1px solid var(--line-hover); border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 0 18px calc(18px + env(safe-area-inset-bottom));
+    /* The second shadow is the scrim: a spread the size of the screen dims
+       everything behind the sheet without another element to manage. */
+    box-shadow: 0 -14px 44px var(--shadow), 0 0 0 100vmax var(--scrim);
   }
+  /* The bar along the top of the sheet: the grab handle, so it reads as a
+     sheet over the list, and a ✕. It sticks to the top edge while the sheet
+     scrolls, so the way out is always on screen (see sheetBar() and
+     mountSheetDismiss() in app-common.js). The sheet has no top padding of
+     its own — the bar is the top edge — because a sticky element is held
+     inside its parent's content box: pulled up into padding with a
+     negative margin it would be pushed straight back down, over the name. */
+  .sheetbar {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; justify-content: flex-end; align-items: center; min-height: 48px;
+    margin: 0 -18px 6px; padding: 4px 8px 0;
+    background: var(--surface-raised); border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .sheetbar::before {
+    content: ""; position: absolute; left: 50%; top: 10px; width: 44px; height: 5px;
+    margin-left: -22px; border-radius: 3px; background: var(--line-hover);
+  }
+  .sheetbar .x {
+    width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--text); font-size: 18px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .sheetbar .x:hover { border-color: var(--line-hover); }
+  .sheetbar .x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .detail h2 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
   .detail .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
   .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
@@ -145,8 +513,16 @@
   }
   .btn:disabled { opacity: .5; cursor: not-allowed; }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .btn.primary-in  { background: var(--ok);  color: #06231a; border-color: transparent; }
-  .btn.primary-out { background: var(--warn); color: #2b1d00; border-color: transparent; }
+  .btn.primary-in  { background: var(--ok);  color: var(--on-ok); border-color: transparent; }
+  body.app-gate .btn.primary-in { background: var(--accent); color: var(--on-accent); }
+  body.app-gate .swipe-bg.right { background: color-mix(in srgb, var(--accent) 26%, var(--surface)); color: var(--accent); }
+  body.app-gate button.card.swipe-arm { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border-color: var(--accent); }
+  body.app-gate .swipe-bg.left  { background: color-mix(in srgb, var(--warn) 26%, var(--surface)); color: var(--warn-text); }
+  /* The register records one act whichever way the card goes. */
+  body.app-register .swipe-bg.left { justify-content: flex-end; background: color-mix(in srgb, var(--ok) 26%, var(--surface)); color: var(--ok); }
+  body.app-register button.card.swipe-arm-out { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); border-color: var(--ok); }
+  body.app-gate button.card.swipe-arm-out { background: color-mix(in srgb, var(--warn) 18%, var(--surface)); border-color: var(--warn); }
+  .btn.primary-out { background: var(--warn); color: var(--on-warn); border-color: transparent; }
   .btn.wide { grid-column: 1 / -1; }
   .btn.ghost { background: transparent; color: var(--muted); padding: 13px; font-size: 15px; font-weight: 500; }
 
@@ -164,20 +540,151 @@
   .logrow .by { display: block; font-size: 12px; color: var(--muted); }
 
   .row { display: flex; gap: 10px; align-items: center; }
+
+  /* ---- connectivity (offline.js) ---- */
+  /* Amber, not red, when offline: the terminal is still recording, to itself.
+     The one thing a guard must not do during an outage is close the tab, and
+     the pill says so while anything is queued. */
+  .net {
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+    padding: 6px 10px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--line); color: var(--muted);
+  }
+  .net.off     { background: var(--warn); border-color: transparent; color: var(--on-warn); }
+  .net.syncing { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .pill.queued {
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  }
+  .alert.warn {
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+    color: var(--warn-text);
+  }
+  .synclist { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .synclist .row { justify-content: space-between; align-items: flex-start; font-size: 13px; color: var(--text); }
+  .synclist .btn.ghost { padding: 8px 10px; font-size: 13px; flex: none; }
   .empty { text-align: center; color: var(--muted); padding: 36px 16px; }
   .hint { color: var(--muted); font-size: 13px; }
+  /* "Showing 93 on site · Show everyone" under the search box when a tile
+     is pressed. Shared by the gate and the register. */
+  .filterline { margin: 8px 2px 0; display: flex; align-items: center; gap: 10px; color: var(--text); }
+  .filterline .linkish { padding: 0; }
+  /* Spacing variants, so no element needs a style="" attribute and the
+     CSP can refuse inline styles altogether (style-src 'self'). */
+  .hint.tight  { margin: 6px 2px 0; font-size: 12px; }
+  .hint.under  { margin: 4px 2px 0; }
+  .hint.flush  { margin: 0; }
+  .hint.lead   { margin: 0 2px 10px; }
+  .hint.centre { margin: 12px 2px 0; text-align: center; }
+  .hint a      { color: var(--accent); }
+  .btn.sm      { padding: 8px 12px; }
+  /* A button that reads as a link: "Show everyone", "remove". */
+  .linkish {
+    background: none; border: 0; padding: 0 0 0 8px;
+    color: var(--accent); font-size: 13px; font-weight: 600; text-decoration: underline; cursor: pointer;
+  }
+  .linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  /* "Select several": a checkbox with a label rather than a link, so it
+     reads as the thing it does. Pressed, the box fills with a tick, the
+     same tick that then appears on every card. */
+  .selectbtn {
+    display: inline-flex; align-items: center; gap: 7px; vertical-align: middle; margin-left: 8px;
+    padding: 4px 9px 4px 5px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .selectbtn .box {
+    width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--line-hover); background: var(--surface);
+    display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; line-height: 1;
+  }
+  .selectbtn[aria-pressed="true"] { border-color: var(--accent); }
+  .selectbtn[aria-pressed="true"] .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .selectbtn[aria-pressed="true"] .box::before { content: "✓"; }
+  .selectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* "Select all shown" above the register, heading the column of ticks.
+     It is the same control as .selectbtn, but laid out as a column header
+     rather than a chip: no border, and its box centred in the same 48px slot
+     .pick occupies on every card below it, so the two line up down the page.
+     22px to match .pick::before; (48 - 22) / 2 = 13px either side. */
+  /* padding-left is the card's own 1px border: .pick starts inside it, so
+     without this the header's box sits a pixel left of the column it heads. */
+  .selectall { display: flex; align-items: center; margin: 10px 0 6px; padding-left: 1px; }
+  .selectall .selectbtn {
+    margin-left: 0; padding: 4px 10px 4px 0; gap: 0;
+    border-color: transparent; background: transparent;
+  }
+  .selectall .selectbtn .box { width: 22px; height: 22px; border-radius: 6px; margin: 0 13px; flex: none; }
+  .selectall .selectbtn .lbl { padding-left: 6px; }   /* where a card's name starts */
+  .selectall .selectbtn:hover .box { border-color: var(--accent); }
+  .selectall .selectbtn[aria-pressed="true"] { border-color: transparent; }
+  .selectall .selectbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+  .selectall .selectbtn[disabled] { opacity: .45; cursor: default; }
+  .selectall .selectbtn[disabled]:hover .box { border-color: var(--line-hover); }
+  .grow        { flex: 1; }
+  .mt6  { margin-top: 6px; }
+  .mt8  { margin-top: 8px; }
+  .mt14 { margin-top: 14px; }
+  .field.compact { width: auto; padding: 8px 10px; }
 
   /* ---- login ---- */
-  .login { max-width: 380px; margin: 12vh auto; padding: 0 20px; }
-  .login h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
-  .login p  { color: var(--muted); margin: 0 0 22px; font-size: 14px; }
-  .login .field { margin-bottom: 10px; }
-  .login .btn { width: 100%; background: var(--accent); color: #041025; border-color: transparent; }
+  /* ---- sign in ----
+     The first screen a new trial sees after clicking the link in their email,
+     and the screen a guard meets at three in the morning. It sits on a card
+     rather than bare on the background: on a dark phone the old version was
+     text floating in space with no edge to it, and nothing said where the
+     form began.
+
+     Centred with min-height rather than a fixed 12vh top margin, so a short
+     phone in landscape does not push the button off the bottom. */
+  .login {
+    max-width: 400px; margin: 0 auto; padding: 24px 20px 40px;
+    min-height: 100svh; display: flex; flex-direction: column; justify-content: center;
+  }
+  .logincard {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--lift);
+    padding: 26px 24px 24px;
+  }
+  .login h1 { font-size: 25px; margin: 0; letter-spacing: -0.02em; }
+  /* The screen's name, under the wordmark and aligned to it rather than to
+     the card: the mark is 40px plus a 10px gap. */
+  .loginwhich {
+    margin: 2px 0 0 50px; font-size: 14px; font-weight: 600;
+    color: var(--accent); letter-spacing: .01em;
+  }
+  body.app-register .loginwhich { color: var(--ok); }
+  .loginlede { color: var(--muted); margin: 16px 0 20px; font-size: 13.5px; line-height: 1.55; }
+  .login .lbl {
+    display: block; font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; margin: 0 0 5px;
+  }
+  .login .field { margin-bottom: 14px; width: 100%; }
+  .login .btn {
+    width: 100%; margin-top: 4px;
+    background: var(--accent); color: var(--on-accent); border-color: transparent;
+    font-weight: 650;
+  }
+  .login .alert { margin-bottom: 16px; }
+  /* The two links under the card: one row, not two stacked centred lines. */
+  .loginfoot {
+    margin: 18px 0 0; text-align: center; font-size: 13px; color: var(--muted);
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  }
+  .loginfoot a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+  .loginfoot a:hover { color: var(--text); }
+  /* The panels mountResetUI() and showMfa() insert live inside the card. */
+  .logincard #resetPanel .btn, .logincard #newPassPanel .btn, .logincard #mfaPanel .btn { width: 100%; }
+  /* "Forgot your password?" and "Start again" sit directly under the primary
+     button. In the accent they compete with it for the same glance, so they
+     read as quiet text until hovered. */
+  .logincard .hint.centre { margin: 14px 0 0; }
+  .logincard .hint.centre a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+  .logincard .hint.centre a:hover { color: var(--text); }
 
   .alert {
     background: color-mix(in srgb, var(--bad) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
-    color: #ffd9d3; border-radius: 10px; padding: 11px 13px; font-size: 14px; margin-bottom: 12px;
+    color: var(--bad-text); border-radius: 10px; padding: 11px 13px; font-size: 14px; margin-bottom: 12px;
   }
 
   /* ---- toast ---- */
@@ -185,7 +692,7 @@
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120%);
     background: var(--surface-2); border: 1px solid var(--line);
     padding: 13px 18px; border-radius: 12px; font-weight: 600;
-    box-shadow: 0 10px 34px rgb(0 0 0 / .5);
+    box-shadow: 0 10px 34px var(--shadow);
     transition: transform .22s ease; z-index: 60; max-width: calc(100vw - 32px);
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
@@ -193,3 +700,137 @@
   #toast.err { border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
 
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* ---- phones ---- */
+  /* The header is sticky, so on a phone every pixel of it is a pixel of the
+     list a guard cannot see. Three changes: the top bar becomes a grid so
+     Log out and the connection pill share the brand's row instead of
+     wrapping under it; the view switcher takes a full row of its own with
+     two equal halves; and the tiles and cards lose a little padding. Touch
+     targets stay at 44px or more throughout. */
+  @media (max-width: 600px) {
+    .bar {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      grid-template-areas:
+        "brand net help logout"
+        "switch switch switch switch";
+      gap: 6px 8px;
+      padding: 8px 12px;
+    }
+    .brand { font-size: 15px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .brand small { font-size: 11px; }
+    #logoutBtn { padding: 7px 10px !important; font-size: 14px; }
+    .net { padding: 5px 9px; font-size: 11px; }
+    .brand { grid-area: brand; margin-right: 0; min-width: 0; }
+    .brand small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #netState { grid-area: net; }
+    #logoutBtn { grid-area: logout; }
+    .bar .help { grid-area: help; width: 32px; height: 32px; }
+    .viewswitch { grid-area: switch; width: 100%; padding: 4px; }
+    .viewswitch a, .viewswitch span { flex: 1; text-align: center; padding: 9px 8px; font-size: 14px; }
+
+    /* Equal thirds (or halves), whatever the labels' lengths. */
+    .stats { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin-top: 10px; padding: 0 12px; gap: 8px; }
+    .stat { padding: 7px 10px; min-width: 0; }
+    .stat b { font-size: 20px; }
+    .stat span { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+
+    .wrap { padding: 0 12px 48px; }
+    /* The admin page can have six tabs: the row scrolls sideways rather
+       than squeezing them unreadable or hiding the last one. */
+    nav.tabs { margin: 12px 0; overflow-x: auto; scrollbar-width: none; }
+    nav.tabs::-webkit-scrollbar { display: none; }
+    nav.tabs button { padding: 10px 6px; flex: 1 0 auto; white-space: nowrap; }
+    .field { padding: 13px 14px; }
+    /* One row that scrolls sideways rather than wrapping into two — the
+       usual phone pattern, bled to the screen edge so a half-visible chip
+       is the cue that there is more. */
+    .chips {
+      flex-wrap: nowrap; overflow-x: auto; gap: 6px; margin: 8px -12px 0; padding: 0 12px 2px;
+      scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    }
+    .chips::-webkit-scrollbar { display: none; }
+    .chips button { flex: none; padding: 7px 12px; font-size: 13px; }
+
+    .list { gap: 8px; margin-top: 12px; }
+    /* The search box stays put under the pinned bar while the list scrolls;
+       --header-h is set by app-common.js from the bar's real height. */
+    #q.pinned {
+      position: sticky; top: calc(var(--header-h, 0px) + 6px); z-index: 15;
+      /* A solid band of page background around the box, so the cards that
+         scroll under it never show through the gap below the header. */
+      box-shadow: 0 0 0 8px var(--bg), 0 -6px 0 8px var(--bg), 0 10px 16px -6px var(--shadow);
+    }
+    /* Two buttons side by side on a 390px screen: a label like "Save
+       settings" must fit on one line rather than folding into two. */
+    .actions .btn { padding: 16px 10px; font-size: 15px; white-space: nowrap; }
+    .card { padding: 11px 13px; gap: 10px; }
+    .pick { width: 44px; }
+    .card .name { font-size: 16px; }
+    .card .meta { font-size: 12px; margin-top: 1px; }
+  }
+
+/* Idle-while-offline cover. Opaque, above everything, and it must not be
+   possible to read the register through or around it — so it paints a solid
+   background from the theme rather than a translucent scrim. */
+#privacyScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--bg, #fff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+#privacyScreen .ps-inner { max-width: 30rem; }
+#privacyScreen h2 { margin: 0 0 8px; }
+#privacyScreen p { margin: 0 0 20px; color: var(--muted, #555); }
+
+/* Work in progress: the toast held open, with a bar that fills and a sheen
+   travelling across it. Two separate signals on purpose — the bar answers "how
+   far", the sheen answers "is it alive". A bar alone looks identical to a bar
+   that has stopped, which is the thing a guard is actually worried about. */
+#toast.busy {
+  border-color: color-mix(in srgb, var(--accent, #6aa9d8) 55%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: min(22rem, 82vw);
+}
+#toast.busy .ps-text { display: block; }
+#toast.busy .ps-bar {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #6aa9d8) 18%, transparent);
+  overflow: hidden;
+}
+#toast.busy .ps-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent, #6aa9d8);
+  /* The width jumps per resident; the transition makes it travel instead. */
+  transition: width .28s cubic-bezier(.4, 0, .2, 1);
+  position: relative;
+  overflow: hidden;
+}
+#toast.busy .ps-bar i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in srgb, #fff 55%, transparent) 50%,
+    transparent 100%);
+  animation: toastSheen 1.1s linear infinite;
+}
+@keyframes toastSheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  #toast.busy .ps-bar i { transition: none; }
+  #toast.busy .ps-bar i::after { animation: none; opacity: .35; }
+}

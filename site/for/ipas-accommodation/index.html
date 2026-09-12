@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en-IE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CheckSteady for IPAS accommodation centres</title>
+<meta name="description" content="A daily resident register, door log and roll call built with accommodation centre managers: append-only records, TRC and IRP handling, families, contracted beds and EU hosting.">
+<link rel="canonical" href="https://checksteady.com/for/ipas-accommodation/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#1d4ed8">
+<meta property="og:title" content="CheckSteady for IPAS accommodation centres">
+<meta property="og:description" content="A daily resident register, door log and roll call built with accommodation centre managers: append-only records, TRC and IRP handling, families, contracted beds and EU hosting.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://checksteady.com/for/ipas-accommodation/">
+<meta property="og:site_name" content="CheckSteady">
+<meta property="og:locale" content="en_IE">
+<meta property="og:image" content="https://checksteady.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CheckSteady — the daily register, showing residents seen, due and needing attention.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="CheckSteady for IPAS accommodation centres">
+<meta name="twitter:description" content="A daily resident register, door log and roll call built with accommodation centre managers: append-only records, TRC and IRP handling, families, contracted beds and EU hosting.">
+<meta name="twitter:image" content="https://checksteady.com/og.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preload" href="/fonts/plusjakartasans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CheckSteady","applicationCategory":"BusinessApplication","operatingSystem":"Web browser, iOS, Android","url":"https://checksteady.com/","description":"The daily welfare register, door log and roll call for hostels, supported housing, student residences and care settings.","offers":{"@type":"Offer","priceCurrency":"EUR","price":"0","description":"Free trial, no card required"},"publisher":{"@type":"Organization","name":"Tenzing Digital","url":"https://www.tenzing.ie"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Does it record TRC and IRP numbers?","acceptedAnswer":{"@type":"Answer","text":"Yes. A resident's identity document is recorded as either a TRC or an IRP with the number as printed on the card. The number is never shown in a list \u2014 only on the resident's own record, opened deliberately, and every opening is logged."}},{"@type":"Question","name":"Can we show an inspector what happened on a given day?","acceptedAnswer":{"@type":"Answer","text":"Yes. The register for any date, the movement log for any range, occupancy, drills and marked-safe lists all print or export as spreadsheets. Because records are append-only, what you show is what was recorded at the time."}},{"@type":"Question","name":"Does it decide that a resident has breached house rules?","acceptedAnswer":{"@type":"Answer","text":"No. It counts consecutive missed nights and days absent in your window, and shows each count beside the figure in your settings. The judgement and the letter stay with the manager, and any notice issued is recorded against the resident so a second one is not sent for the same run."}},{"@type":"Question","name":"Can residents be away with permission without it counting against them?","acceptedAnswer":{"@type":"Answer","text":"Yes. An authorised absence is recorded with a return date. While it runs the register shows the resident as away rather than missing, and the absence is excluded from the missed-night counts."}},{"@type":"Question","name":"Where is the data held?","acceptedAnswer":{"@type":"Answer","text":"In the European Union \u2014 Frankfurt \u2014 encrypted in transit and at rest. Each centre's records live in their own separate database schema, so one centre's staff cannot reach another's data even by accident."}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://checksteady.com/"},{"@type":"ListItem","position":2,"name":"IPAS accommodation","item":"https://checksteady.com/for/ipas-accommodation/"}]}</script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "764f40ae8a8b4ba4a51c618d89701a94"}'></script>
+</head>
+<body>
+<div class="topbanner">
+  <div class="wrap">
+    <span>A <strong>Tenzing Digital</strong> product — AI and automation house</span>
+    <a href="https://www.tenzing.ie" target="_blank" rel="noopener">tenzing.ie&nbsp;&rarr;</a>
+  </div>
+</div>
+<header class="sitenav">
+  <div class="wrap">
+    <a class="brand" href="/"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#1d4ed8"/><path d="M18 33l10 10 18-20" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>CheckSteady</a>
+    <nav aria-label="Sections">
+      <a href="/features/daily-register/">Daily register</a>
+      <a href="/features/roll-call/">Roll call</a>
+      <a href="/security-and-gdpr/">Security &amp; GDPR</a>
+      <a href="/pricing/">Pricing</a>
+      <a href="https://app.checksteady.com/help.html">Help</a>
+    </nav>
+    <a class="nav-signin" href="https://app.checksteady.com/">Sign in</a>
+    <a class="nav-cta" href="/trial/">Start a free trial</a>
+  </div>
+</header>
+<a class="skip" href="#main">Skip to content</a>
+<main id="main">
+<div class="wrap"><p class="crumb"><a href="/">Home</a><span>/</span><a href="/for/ipas-accommodation/">IPAS accommodation</a></p></div>
+<section class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">Who it's for</p>
+    <h1>For IPAS accommodation centres</h1>
+    <p class="lede">A daily register you can stand over at inspection, a door log with a name on every movement, and a roll call that works when the wifi does not.</p>
+  </div>
+</section><section class="section">
+  <div class="wrap">
+    <h2>Built around what a centre actually does</h2>
+    <p>CheckSteady was built with accommodation centre managers, and the vocabulary is theirs. Residents check in once a day; the day closes itself at local midnight; missed nights are counted against the figure your contract or your house rules use, not against one we invented.</p>
+    <div class="pairs">
+      <div><h3>Identity documents, minimally</h3><p>TRC or IRP, recorded as printed. Never shown in a list, never in an export that does not need it, and every time a record is opened it is logged.</p></div>
+      <div><h3>Families kept together</h3><p>Households group parents and children. A family stays together on the roll call with children marked, and a room reads as a family rather than four unrelated names.</p></div>
+      <div><h3>House rules, counted not judged</h3><p>Consecutive nights and days absent in a window, each beside the figure in your settings. Breach notices issued are recorded so nobody sends two.</p></div>
+      <div><h3>Rooms and contracted beds</h3><p>Buildings, floors and rooms, with physical beds and contracted beds held separately, plus the bed set-up and a vacancies report for what you can actually offer.</p></div>
+    </div>
+    <h2>What an inspection asks for</h2>
+    <p>Every record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident.</p>
+  </div>
+</section><section class="section tint">
+  <div class="wrap">
+    <h2>Getting started without a project</h2>
+    <p>Import the spreadsheet you already keep — names, dates of birth, rooms, ID numbers, evacuation needs — and see a verdict for every line before anything is written. Turn on only the parts you use: rooms, families, visitors, evacuation needs and breach reports are each a switch, and a centre that leaves one off never sees it.</p>
+  </div>
+</section><section class="section">
+  <div class="wrap">
+    <h2>Common questions</h2>
+  <div class="faq">
+    <details>
+      <summary>Does it record TRC and IRP numbers?</summary>
+      <p>Yes. A resident's identity document is recorded as either a TRC or an IRP with the number as printed on the card. The number is never shown in a list — only on the resident's own record, opened deliberately, and every opening is logged.</p>
+    </details>
+    <details>
+      <summary>Can we show an inspector what happened on a given day?</summary>
+      <p>Yes. The register for any date, the movement log for any range, occupancy, drills and marked-safe lists all print or export as spreadsheets. Because records are append-only, what you show is what was recorded at the time.</p>
+    </details>
+    <details>
+      <summary>Does it decide that a resident has breached house rules?</summary>
+      <p>No. It counts consecutive missed nights and days absent in your window, and shows each count beside the figure in your settings. The judgement and the letter stay with the manager, and any notice issued is recorded against the resident so a second one is not sent for the same run.</p>
+    </details>
+    <details>
+      <summary>Can residents be away with permission without it counting against them?</summary>
+      <p>Yes. An authorised absence is recorded with a return date. While it runs the register shows the resident as away rather than missing, and the absence is excluded from the missed-night counts.</p>
+    </details>
+    <details>
+      <summary>Where is the data held?</summary>
+      <p>In the European Union — Frankfurt — encrypted in transit and at rest. Each centre's records live in their own separate database schema, so one centre's staff cannot reach another's data even by accident.</p>
+    </details>
+  </div>
+  </div>
+</section><section class="section">
+  <div class="wrap">
+    <h2>Try it on your own site</h2>
+    <p>Start a free trial and have a look around — with sample residents to explore, or empty and ready for your own list. No card, and nothing to install.</p>
+    <p><a class="cta" href="/trial/">Start a free trial</a><a class="cta-secondary" href="mailto:aimee@tenzing.ie?subject=CheckSteady%20demo">Book a demo instead</a></p>
+  </div>
+</section><section class="section tint">
+  <div class="wrap">
+    <h2>Read next</h2>
+    <div class="nextlinks">
+    <a href="/security-and-gdpr/"><b>Security and GDPR</b><span>Append-only records, subject access, scheduled erasure, EU hosting.</span></a>
+    <a href="/features/roll-call/"><b>Roll call</b><span>Drills and evacuations on every warden's phone at once.</span></a>
+    <a href="/pricing/"><b>Pricing</b><span>Per site, per month, every feature included.</span></a>
+    </div>
+  </div>
+</section>
+</main>
+<footer class="sitefoot">
+  <div class="regstrip" aria-hidden="true">
+    <i></i><i></i><i></i><i class="na"></i><i></i><i></i><i></i><i></i><i class="miss"></i><i></i><i></i><i></i><i></i><i class="na"></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="na"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+  </div>
+  <div class="wrap footgrid">
+    <div class="footcol footcol-brand">
+      <span class="footmark">CheckSteady</span>
+      <p>The daily welfare register and door log for residential sites — hostels, supported accommodation, care settings. One site or a group.</p>
+      <p class="footdomain">checksteady.com</p>
+    </div>
+    <nav class="footcol" aria-label="Product">
+      <h2>Product</h2>
+      <a href="/features/daily-register/">Daily register</a>
+      <a href="/features/in-and-out/">In &amp; out</a>
+      <a href="/features/roll-call/">Roll call</a>
+      <a href="/pricing/">Pricing</a>
+      <a href="/security-and-gdpr/">Security &amp; GDPR</a>
+    </nav>
+    <nav class="footcol" aria-label="Who it is for">
+      <h2>Who it's for</h2>
+      <a href="/for/ipas-accommodation/">IPAS accommodation</a>
+      <a href="/for/homeless-hostels/">Homeless hostels</a>
+      <a href="/for/student-residences/">Student residences</a>
+      <a href="https://app.checksteady.com/help.html">Help and guide</a>
+    </nav>
+    <div class="footcol">
+      <h2>Get started</h2>
+      <a class="footsignin" href="/trial/">Start a free trial&nbsp;&rarr;</a>
+      <a class="footalt" href="mailto:aimee@tenzing.ie?subject=CheckSteady%20demo">Book a demo</a>
+      <a class="footalt" href="https://app.checksteady.com/">Sign in</a>
+    </div>
+  </div>
+  <div class="footbar">
+    <div class="wrap">
+      <span>&copy; 2026 Tenzing Digital</span>
+      <span>Also from Tenzing: <a href="https://www.staffsteady.com" target="_blank" rel="noopener">StaffSteady</a>, rotas, HR and clock-in.</span>
+      <span>Built by <a href="https://www.tenzing.ie" target="_blank" rel="noopener">Tenzing Digital</a>, an AI and automation house.</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

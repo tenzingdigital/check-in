@@ -4,20 +4,21 @@
 #
 #   ./check.sh
 #
-# Four layers, cheapest first, so it fails fast:
-#   1. Deploy configs agree about security headers across both hosts
-#   2. Both front ends and the shared JS parse
-#   3. The database suite — authorisation model and calendar-day compliance
-#   4. The same suite again on plain PostgreSQL, via supabase/portable-auth.sql
+# Three layers, cheapest first, so it fails fast:
+#   1. Every JavaScript file parses — the two front ends and the service
+#   2. The database suite — authorisation model and calendar-day compliance
+#   3. The HTTP suite — the web tier that replaced PostgREST and GoTrue
+#   4. The self-serve trial suite — the one unauthenticated write there is
 #
-# Layer 4 is what keeps the exit route open. The portable shim is not the
-# deployed path today, so nothing else would notice it rotting; by the time it
-# mattered — mid-migration — it would be too late to find out.
-#
-# Layers 3 and 4 need the PostgreSQL server binaries (Debian/Ubuntu:
+# Layers 2 and 3 need the PostgreSQL server binaries (Debian/Ubuntu:
 # postgresql-16). If they are missing both are skipped with a warning rather
-# than a failure, so the first two layers still give you something on a machine
-# without Postgres.
+# than a failure, so layer 1 still gives you something on a machine without
+# Postgres.
+#
+# The old first layer compared vercel.json against render.yaml, because the
+# security headers were declared twice and could drift. There is one copy now
+# — server/index.js — and layer 3 asserts the running server actually sends
+# it, which is a stronger check than two files agreeing with each other.
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -25,50 +26,106 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 fail=0
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
-step "Deploy configs (vercel.json vs render.yaml)"
-python3 scripts/check-deploy-headers.py || fail=1
-
-step "Front ends parse"
+step "JavaScript parses"
 node -e "
 const fs=require('fs'),vm=require('vm');
-for (const f of ['public/index.html','public/checkin.html']) {
+for (const f of ['public/index.html','public/checkin.html','public/admin.html']) {
   const h=fs.readFileSync(f,'utf8');
-  [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
-    .forEach((m,i)=>new vm.Script(m[1],{filename:f+':'+i}));
+  const inline=[...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)];
+  if (!inline.length) throw new Error(f+' has no inline script — the CSP hashes would be empty');
+  inline.forEach((m,i)=>new vm.Script(m[1],{filename:f+':'+i}));
+  // The CSP allows script-src 'self' and a list of hashes, nothing else. A
+  // <script src> pointing off-origin would be blocked in the browser but
+  // would look fine here, so catch it now rather than at the hut.
+  for (const m of h.matchAll(/<script[^>]*\bsrc=[\"']([^\"']+)[\"']/g)) {
+    if (/^https?:|^\/\//.test(m[1])) throw new Error(f+' loads '+m[1]+' from a third-party origin');
+  }
 }
-new vm.Script(fs.readFileSync('public/app-common.js','utf8'));
-JSON.parse(fs.readFileSync('vercel.json','utf8'));
-console.log('public/index.html, public/checkin.html, public/app-common.js parse; vercel.json valid');
+{
+  const h=fs.readFileSync('public/checkin.html','utf8');
+  if (/data-filter=\"breach\"|statOpenBreach/.test(h)) throw new Error('public/checkin.html: the Missed days tile is back — the register answers today only; history lives on Admin → Absences (spec 2026-09-07)');
+}
+for (const f of ['public/app-common.js','public/offline.js','public/sw.js']) {
+  new vm.Script(fs.readFileSync(f,'utf8'), {filename: f});
+}
+console.log('front ends parse and load nothing from a CDN');
 " || fail=1
 
-suite() {   # suite <log> [flag...]
-  local log="$1"; shift
-  ./supabase/tests/run.sh "$@" >"$log" 2>&1
-  if [ $? -eq 0 ]; then
-    printf 'PASS — %s assertions\n' "$(grep -cE 'NOTICE:.* ok ' "$log")"
-    grep -E '^   ALLOWED' "$log" && { echo "FAIL: privilege escalation"; fail=1; }
-  else
-    echo "FAIL — full output in $log"
-    tail -20 "$log"
-    fail=1
-  fi
-}
+# node --check understands ESM from the file extension and the package type,
+# which vm.Script does not.
+for f in server.js database.js jobs.js staff.js seed-today.js seed-rooms.js lib/*.js routes/*.js tools/*.js test/*.js; do
+  node --check "$f" || { echo "FAIL: $f does not parse"; fail=1; }
+done
+[ "$fail" -eq 0 ] && echo "server, lib/, routes/ and test/ parse"
+
+step "The brochure site is consistent"
+python3 tools/check-site.py || fail=1
+
+step "The permission matrix document is current"
+node tools/gen-permissions-doc.js --check || fail=1
+
+# Needs no database or running server — lib/mail.js's send() is exercised
+# directly with a stand-in fetch(), so this runs unconditionally rather than
+# only when the PostgreSQL binaries below are present.
+step "Mail provider error logging"
+node test/mail.test.js || fail=1
+node test/xlsx.test.js || fail=1
+node test/ref.test.js || fail=1
+node test/safeguardingAlert.test.js || fail=1
 
 if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/null 2>&1; then
-  step "Database suite (Supabase)"
-  suite /tmp/hut-check-suite.log
-
-  step "Database suite (plain PostgreSQL, via supabase/portable-auth.sql)"
-  suite /tmp/hut-check-portable.log --portable
-else
   step "Database suite"
+  ./test/sql.sh >/tmp/hut-check-suite.log 2>&1
+  if [ $? -eq 0 ]; then
+    printf 'PASS — %s assertions\n' "$(grep -cE 'NOTICE:.* ok ' /tmp/hut-check-suite.log)"
+    grep -E '^   ALLOWED' /tmp/hut-check-suite.log && { echo "FAIL: privilege escalation"; fail=1; }
+  else
+    echo "FAIL — full output in /tmp/hut-check-suite.log"
+    tail -20 /tmp/hut-check-suite.log
+    fail=1
+  fi
+
+  step "HTTP suite"
+  ./test/api.sh >/tmp/hut-check-api.log 2>&1
+  if [ $? -eq 0 ]; then
+    tail -1 /tmp/hut-check-api.log
+  else
+    echo "FAIL — full output in /tmp/hut-check-api.log"
+    tail -20 /tmp/hut-check-api.log
+    fail=1
+  fi
+  step "Self-serve trial suite"
+  ./test/signup.sh >/tmp/hut-check-signup.log 2>&1
+  if [ $? -eq 0 ]; then
+    tail -2 /tmp/hut-check-signup.log | head -1
+  else
+    echo "FAIL — full output in /tmp/hut-check-signup.log"
+    tail -20 /tmp/hut-check-signup.log
+    fail=1
+  fi
+else
+  step "Database, HTTP and trial suites"
   echo "SKIPPED — PostgreSQL server binaries not found (install postgresql-16)"
+  skipped=1
 fi
 
 echo
-if [ "$fail" -eq 0 ]; then
-  echo "All checks passed."
-else
+if [ "$fail" -ne 0 ]; then
   echo "CHECKS FAILED — see above." >&2
+  exit 1
 fi
-exit "$fail"
+
+# A skip is not a pass. README says to run this before every deploy, and
+# package.json maps it to `npm test` — so on any machine without the Postgres
+# binaries (every mac, including the one this is developed on) the deploy gate
+# used to print "All checks passed" and exit 0 having compiled some JavaScript
+# and tested nothing. Exit 2 so a human notices and CI cannot go green on it.
+# ALLOW_SKIP=1 is the deliberate way to say "syntax only, I know".
+if [ "${skipped:-0}" -eq 1 ] && [ "${ALLOW_SKIP:-0}" != "1" ]; then
+  echo "INCOMPLETE — JavaScript parses, but the database, HTTP and trial suites did not run." >&2
+  echo "Install postgresql-16 and re-run, or set ALLOW_SKIP=1 to accept a syntax-only check." >&2
+  exit 2
+fi
+
+echo "All checks passed."
+exit 0

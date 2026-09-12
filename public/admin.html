@@ -1,0 +1,2062 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="CheckSteady">
+<meta name="theme-color" content="#1d4ed8">
+<title>CheckSteady — Admin</title>
+
+<!--
+  CheckSteady — the admin page. No build step, no framework, no CDN.
+
+  Organisation work, kept out of the two working apps: the register of
+  residents (add, correct, mark departed) for supervisors and admins, and
+  staff accounts for admins. Everything here is a plain form over the same
+  API the working apps use, and every write is decided by the database — the
+  residents_supervisor row policy and the admin-gated staff functions — not by
+  which tab is visible. See routes/residents.js and routes/staff.js.
+-->
+
+<link rel="stylesheet" href="/app-common.css">
+<style>
+  .formcard {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 14px 16px; margin-top: 12px; display: grid; gap: 10px;
+  }
+  .formcard h2 { margin: 0; font-size: 16px; }
+  /* A two- or three-digit number does not need a field the width of the
+     screen; the label above it still reads at full width. */
+  .formcard .field[type="number"] { max-width: 180px; }
+  .formcard { box-shadow: var(--lift); }
+  /* The role card under the Role field: two short lists, can and cannot. */
+  .rolehelp { padding: 10px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+  .rolehelp summary { cursor: pointer; font-size: 13.5px; list-style: none; display: flex; align-items: center; gap: 8px; }
+  .rolehelp summary::-webkit-details-marker { display: none; }
+  .rolehelp summary::after { content: "Show"; margin-left: auto; font-size: 12px; color: var(--accent); font-weight: 600; flex: none; }
+  .rolehelp[open] summary::after { content: "Hide"; }
+  .rolehelp b { font-size: 13.5px; }
+  .rolehelp .lists { display: grid; gap: 8px; margin-top: 10px; }
+  .rolehelp ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; color: var(--text); }
+  .rolehelp .no { color: var(--muted); }
+  .rolehelp .no li::marker { color: var(--muted); }
+  @media (min-width: 520px) { .rolehelp .lists { grid-template-columns: 1fr 1fr; } }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .selfend { align-self: end; margin-top: 0; }
+  .grid3 { display: grid; grid-template-columns: 1fr 2fr 80px; gap: 8px; }
+  /* Buildings tab */
+  .bld { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .bldhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .bldhead b { font-size: 16px; }
+  .bldhead .linkish { margin-left: auto; font-weight: 500; }
+  .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  @media (max-width: 600px) { .rooms { grid-template-columns: 1fr; } }
+  .room { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .room.over { border-color: var(--warn); }
+  .roomhead { display: flex; align-items: baseline; gap: 6px; }
+  .roomhead b { font-size: 14px; white-space: nowrap; }
+  .roomhead .linkish { margin-left: auto; font-size: 12px; font-weight: 500; }
+  .occ { display: flex; flex-wrap: wrap; gap: 4px; }
+  .occ .pill { font-size: 11px; padding: 3px 8px; text-transform: none; letter-spacing: 0; }
+  .person {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 5px 10px 5px 8px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+    color: var(--text); font: inherit; font-size: 13px; font-weight: 550; line-height: 1.2; text-align: left; cursor: pointer;
+  }
+  .person:hover { border-color: var(--line-hover); background: var(--surface-2); }
+  .person:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .person .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; border: 2px solid var(--muted); background: transparent; }
+  .person.in .dot { background: var(--ok); border-color: var(--ok); }
+  .person.current { border-color: var(--accent); }
+  .person .tag { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .person .need { margin-left: 2px; white-space: nowrap; }
+  .abslist { display: flex; flex-direction: column; gap: 6px; }
+  /* Two lines: when and the badge, then what and who. A long date span
+     must not squeeze the words into a column. */
+  .abslist .logrow { flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .abslist .logrow time { min-width: 0; }
+  .abslist .logrow .body { flex: 1 1 100%; }
+  .abslist .linkish { font-size: 13px; font-weight: 600; margin-top: 2px; }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 4px 0 8px; }
+  .legend .nowrap { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  .legend .person { min-height: 26px; padding: 2px 8px 2px 6px; font-size: 12px; cursor: default; border-color: transparent; background: transparent; }
+  .legend .person:hover { background: transparent; border-color: transparent; }
+  .roomsForm .actions { margin-top: 0; }
+  .roomEdit { border-top: 1px dashed var(--line); padding-top: 8px; }
+  .roomEdit .lbl { margin-top: 0; }
+  .roomEdit .actions { margin-top: 6px; }
+  .archivedRooms summary { cursor: pointer; }
+  .archivedRooms .pill .linkish { font-size: 11px; margin-left: 4px; }
+  @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); }
+  .check input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
+  .check b { color: var(--text); }
+  .need { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn-text); }
+  /* Reports tab */
+  .report { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .report b { display: block; }
+  .report .hint { font-size: 12px; }
+  .report .row { flex: none; }
+  .rphead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 0; }
+  .rphead h2 { margin: 0; font-size: 18px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  #rpTable, #impTable, #absTable { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #rpTable th, #rpTable td, #impTable th, #impTable td, #absTable th, #absTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  #rpTable th, #impTable th, #absTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  #absTable td.at { color: var(--bad); font-weight: 600; }
+  #absTable td.num { font-variant-numeric: tabular-nums; }
+  #impTable td.st-error { color: var(--bad); white-space: normal; }
+  #impTable td.st-exists { color: var(--muted); }
+  /* Amber, not red: a line that matched more than one person is a question
+     for the importer, not a broken row. */
+  #impTable td.st-ambiguous { color: var(--warn-text, var(--warn)); white-space: normal; }
+  #impTable td.st-ready, #impTable td.st-added { color: var(--ok); }
+  #importPanel .tablewrap { max-height: 50vh; overflow: auto; margin-top: 10px; }
+  /* The Weekly Register Update, laid out like the hand-written version it
+     replaces: a heading per section, a bullet per line, and a flagged
+     (unapproved) absence picked out the way it used to be highlighted by
+     hand. */
+  .weeklyDoc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+  .weeklyDoc .wkTitle { margin: 0 0 2px; font-size: 17px; }
+  .weeklyDoc .wkPeriod { margin: 0 0 18px; text-decoration: underline; color: var(--muted); font-size: 13px; }
+  .weeklyDoc h3 { margin: 16px 0 4px; font-size: 14px; text-decoration: underline; }
+  .weeklyDoc h3:first-of-type { margin-top: 0; }
+  .weeklyDoc ul { margin: 0 0 4px; padding-left: 20px; }
+  .weeklyDoc li { margin: 4px 0; line-height: 1.45; }
+  .weeklyDoc li.flag { background: color-mix(in srgb, var(--warn) 26%, var(--surface)); color: var(--warn-text); border-radius: 4px; padding: 2px 6px; margin-left: -6px; list-style-position: inside; }
+  @media print {
+    body.printing header, body.printing nav.tabs, body.printing #reportActions, body.printing .rphead .row,
+    body.printing #panelResidents, body.printing #panelAbsences, body.printing #panelBuildings, body.printing #panelStaff, body.printing #panelSettings,
+    body.printing #toast, body.printing #detail, body.printing #notForYou { display: none !important; }
+    body.printing .tablewrap { border: 0; overflow: visible; }
+    body.printing #rpTable th, body.printing #rpTable td { white-space: normal; border-color: #999; }
+    /* Column headings repeat on every page — a table that runs to page three
+       is unreadable without them — and a resident's row is never split
+       across a break. */
+    body.printing #rpTable thead { display: table-header-group; }
+    body.printing #rpTable tr { break-inside: avoid; }
+    /* The screen palette is dark. Printed as-is it is a page of ink and the
+       text is unreadable on white, so the report prints black on white. */
+    body.printing, body.printing #rpTable, body.printing #rpTable th,
+    body.printing #rpTable td, body.printing .rphead, body.printing #rpTitle,
+    body.printing #rpSub, body.printing .weeklyDoc, body.printing .weeklyDoc h3,
+    body.printing .weeklyDoc .wkPeriod { background: #fff !important; color: #000 !important; }
+    body.printing #rpTable th { position: static; }
+    body.printing #rpSub { font-size: 9pt; }
+    body.printing .weeklyDoc { border: 0; padding: 0; }
+    body.printing .weeklyDoc li.flag { background: #fff3a3 !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  @page { margin: 14mm; }
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; padding: 11px 8px; border-radius: 10px;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-weight: 650;
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #041025; }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  label.lbl { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px 2px; }
+  input.field.upper { text-transform: uppercase; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .toolbar .field { flex: 1; }
+  .btn.small { padding: 12px 14px; font-size: 15px; flex: none; }
+  .danger { color: var(--bad); }
+  .btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
+  /* The sample-data notice on a trial. Amber, because it is a thing to do
+     before going live, not an error. */
+  .demobar {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin: 10px 0; padding: 12px 14px; border-radius: var(--radius);
+    background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  }
+  .demobar > div { flex: 1; min-width: 15rem; display: flex; flex-direction: column; gap: 2px; }
+  .demobar b { font-size: 15px; }
+  .demobar span { font-size: 13px; color: var(--muted); }
+  .demobar .btn { flex: none; }
+
+  .pill.departed { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
+  .notice { padding: 14px 16px; }
+  .card.staff .who .check { margin-top: 6px; font-size: 13px; }
+  /* Staff cards on a phone: the actions get a row of their own. */
+  @media (max-width: 600px) {
+    .card.staff { flex-wrap: wrap; }
+    .card.staff .who { flex: 1 1 60%; }
+    .card.staff .actions-row { flex: 1 1 100%; display: flex; gap: 6px; }
+    .card.staff .actions-row .btn.ghost { flex: 1; padding: 10px 8px; font-size: 14px; }
+    .card.staff .actions-row select { flex: 1; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ========================= LOGIN ========================= -->
+<section id="login" class="login" hidden>
+  <div class="logincard">
+    <!-- mountBrand() puts the mark inside the h1. The screen's name is its own
+         line rather than a span inside the heading: at 380px "Daily register"
+         wrapped under the wordmark and left the mark stranded beside it. -->
+    <h1>CheckSteady</h1>
+    <p class="loginwhich">Admin</p>
+    <p class="loginlede">Supervisor or administrator sign-in required.</p>
+    <div id="loginError" class="alert" hidden></div>
+    <form id="loginForm" autocomplete="on">
+      <label class="lbl" for="email">Email</label>
+      <input id="email" class="field" type="email" autocomplete="username"
+             autocapitalize="off" spellcheck="false" enterkeyhint="next" required>
+      <label class="lbl" for="password">Password</label>
+      <input id="password" class="field" type="password" autocomplete="current-password"
+             enterkeyhint="go" required>
+      <button id="loginBtn" class="btn" type="submit">Log in</button>
+    </form>
+    <!-- mountResetUI() inserts "Forgot your password?" and its panels after
+         the form; showMfa() inserts the code panel in the same place. -->
+  </div>
+  <p class="loginfoot">
+    <a href="/help.html">New here? How CheckSteady works</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://checksteady.com/">checksteady.com</a>
+  </p>
+</section>
+
+<!-- ========================= APP ========================= -->
+<div id="app" hidden>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <div>
+          <span>CheckSteady</span>
+          <small><b id="siteName"></b> <span id="guardName">&nbsp;</span></small>
+        </div>
+      </div>
+      <nav class="viewswitch" aria-label="App view">
+        <a href="/index.html">In &amp; out</a>
+        <a href="/checkin.html">Daily register</a>
+        <span aria-current="page">Admin</span>
+        <a href="/org.html" id="orgLink" hidden>Organisation</a>
+      </nav>
+      <span id="netState" class="net" hidden></span>
+<a class="help" href="/help.html" aria-label="Help and guide" title="Help">?</a>
+      <button class="btn ghost sm" id="logoutBtn">Log out</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="appError" class="alert" hidden></div>
+    <div id="syncNotice" class="alert warn" hidden></div>
+
+    <!-- A guard has nothing to do here; say so rather than show empty panels. -->
+    <div id="notForYou" class="formcard notice" hidden>
+      <h2>This area is for supervisors and administrators.</h2>
+      <p class="hint flush">Residents are managed by supervisors; staff accounts by administrators.
+        <a href="/checkin.html">Back to the daily register</a>.</p>
+    </div>
+
+    <nav class="tabs" role="tablist" id="adminTabs" hidden>
+      <button role="tab" id="tabResidents" aria-selected="true"  aria-controls="panelResidents">Residents</button>
+      <button role="tab" id="tabAbsences"  aria-selected="false" aria-controls="panelAbsences">Absences</button>
+      <button role="tab" id="tabBuildings" aria-selected="false" aria-controls="panelBuildings">Buildings</button>
+      <button role="tab" id="tabReports"   aria-selected="false" aria-controls="panelReports">Reports</button>
+      <button role="tab" id="tabStaff"     aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
+      <button role="tab" id="tabSettings"  aria-selected="false" aria-controls="panelSettings" hidden>Settings</button>
+    </nav>
+
+    <!-- ---- residents (supervisors and admins) ---- -->
+    <section id="panelResidents" role="tabpanel" aria-labelledby="tabResidents" hidden>
+      <div class="toolbar">
+        <input id="q" class="field" type="search" placeholder="Find a resident…"
+               autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+        <button class="btn small primary-in" id="showAdd" type="button">Add</button>
+        <button class="btn small ghost" id="showImport" type="button">Import</button>
+      </div>
+      <nav class="chips" id="statusFilter" aria-label="Filter by status">
+        <button type="button" data-status="active"   aria-pressed="true">Active</button>
+        <button type="button" data-status="departed" aria-pressed="false">Departed</button>
+      </nav>
+      <p class="hint tight" id="famHint">Tap a name to open the record. <button class="selectbtn" type="button" id="famToggle" aria-pressed="false" data-tip="Tick several people, then act on them all: make them a family, or mark them departed on one date. A child in a family appears with a parent on the roll call; if one of them is already in a family, the others join it."><span class="box" aria-hidden="true"></span><span class="lbl">Select several</span></button></p>
+      <!-- Sample data. Shown only to a trial that started with it, and only
+           to an administrator, because clearing it deletes residents. The
+           promise made on the trial page is kept here: a centre can turn a
+           demo into its own register without fabricated people staying in it. -->
+      <div id="demoBar" class="demobar" hidden>
+        <div>
+          <b>This site opened with sample residents.</b>
+          <span id="demoCount">Fictional people, so every screen had something in it.</span>
+          <span>Clear them before you record anyone real — nothing you added yourself is touched.</span>
+        </div>
+        <button class="btn ghost sm danger-ghost" type="button" id="demoClear">Remove the sample residents</button>
+      </div>
+      <div id="famBar" class="multibar" hidden>
+        <b id="famCount">0 selected</b>
+        <button class="btn primary-in sm" type="button" id="famMake" hidden>Family</button>
+        <button class="btn ghost sm danger-ghost" type="button" id="famDepart">Departed</button>
+        <button class="btn ghost sm" type="button" id="famCancel" aria-label="Stop selecting" title="Stop selecting">✕</button>
+      </div>
+
+      <form id="addForm" class="formcard" autocomplete="off" hidden>
+        <h2>Add a resident</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="afFirst">First name</label><input id="afFirst" class="field" type="text" required maxlength="80"></div>
+          <div><label class="lbl" for="afLast">Last name</label><input id="afLast" class="field" type="text" required maxlength="80"></div>
+        </div>
+        <div>
+          <label class="lbl" for="afDob">Date of birth</label>
+          <input id="afDob" class="field" type="date" required>
+          <p class="hint under">Used only to apply the adult rule. Never shown to guards.</p>
+        </div>
+        <div>
+          <label class="lbl">ID card (optional)</label>
+          <div class="seg" role="group" aria-label="ID type">
+            <button type="button" data-type="" aria-pressed="true">None yet</button>
+            <button type="button" data-type="TRC" aria-pressed="false">TRC</button>
+            <button type="button" data-type="IRP" aria-pressed="false">IRP</button>
+          </div>
+          <input id="afNumber" class="field upper mt8" type="text" placeholder="Number as printed on the card" maxlength="40" hidden>
+        </div>
+        <div id="afRoomWrap" hidden>
+          <label class="lbl" for="afRoom">Room</label>
+          <select id="afRoom" class="field"></select>
+        </div>
+        <div id="afEvacWrap" hidden>
+          <label class="lbl" for="afEvac">Evacuation assistance</label>
+          <select id="afEvac" class="field">
+            <option value="none">None needed</option>
+            <option value="mobility">Needs help to move</option>
+            <option value="hearing">Needs help to hear the alarm</option>
+            <option value="sight">Needs help to find the way</option>
+            <option value="carer">Infant or carer</option>
+            <option value="other">Needs help (no detail held)</option>
+          </select>
+          <p class="hint under">One code, no notes. Shown on the roll call and the evacuation list only.</p>
+        </div>
+        <div class="actions">
+          <button class="btn primary-in" id="afSave" type="submit">Add to register</button>
+          <button class="btn ghost" id="afCancel" type="button">Cancel</button>
+        </div>
+      </form>
+
+      <section id="importPanel" class="formcard" hidden>
+        <h2>Import residents from a spreadsheet</h2>
+        <p class="hint">Save the sheet as a CSV file with these column headings, in any order:
+          <b>First name, Last name, Date of birth</b> (DD/MM/YYYY), and optionally
+          <b>ID type</b> (TRC or IRP), <b>ID number, Building, Floor, Room, Evacuation need</b>.
+          <a href="/resident-import-template.csv" download>Download the template</a>.
+          Anyone already on the register with the same name and date of birth is skipped,
+          so a sheet can be imported again after fixing the lines that failed.</p>
+        <input id="impFile" class="field" type="file" accept=".csv,text/csv">
+        <p id="impColumns" class="hint under" hidden></p>
+        <div id="impPreview" hidden>
+          <p id="impSummary" class="hint"></p>
+          <div class="tablewrap"><table id="impTable"></table></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary-in" id="impGo" type="button" disabled>Import</button>
+          <button class="btn ghost" id="impCancel" type="button">Cancel</button>
+        </div>
+      </section>
+
+      <div id="residentList" class="list"></div>
+    </section>
+
+    <!-- ---- absences (supervisors and admins): the list a manager reads
+         before writing a letter. Numbers the register already computes,
+         beside the figures in Settings. ---- -->
+    <section id="panelAbsences" role="tabpanel" aria-labelledby="tabAbsences" hidden>
+      <p class="hint flush" id="absIntro"></p>
+      <input id="absQ" class="field mt8" type="search" placeholder="Name or room…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Filter by name or room">
+      <div class="tablewrap mt14"><table id="absTable"></table></div>
+    </section>
+
+    <!-- ---- buildings and rooms (supervisors and admins) ---- -->
+    <section id="panelBuildings" role="tabpanel" aria-labelledby="tabBuildings" hidden>
+      <p class="hint flush">Describe the centre once: each building and the rooms in it. A resident's room is set on their record and shows on every card. Occupancy here is live from the gate.</p>
+      <form id="bldForm" class="formcard mt14" autocomplete="off">
+        <h2>Add a building</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="bfName">Building name</label><input id="bfName" class="field" type="text" required maxlength="60" placeholder="e.g. Castle"></div>
+          <div class="actions selfend"><button class="btn primary-in" id="bfSave" type="submit">Add building</button></div>
+        </div>
+      </form>
+      <p class="hint tight legend" id="occLegend" hidden><span class="person in"><i class="dot"></i>on site</span> <span class="person out"><i class="dot"></i>off site</span> <span class="tag">child</span> <span class="nowrap"><span class="need">help</span> evacuation need</span> <span class="nowrap">Tap a name to open their record.</span></p>
+      <div id="buildingList" class="list"></div>
+    </section>
+
+    <!-- ---- reports (supervisors and admins) ---- -->
+    <section id="panelReports" role="tabpanel" aria-labelledby="tabReports" hidden>
+      <div id="reportActions">
+        <p class="hint flush">For an inspection or the file. Every export is on the record with your name, the range and the reason.</p>
+        <form id="reportForm" class="formcard mt14" autocomplete="off">
+          <div class="grid2">
+            <div><label class="lbl" for="rpFrom">From</label><input id="rpFrom" class="field" type="date" required></div>
+            <div><label class="lbl" for="rpTo">To</label><input id="rpTo" class="field" type="date" required></div>
+          </div>
+          <div><label class="lbl" for="rpReason">Reason for the export <button class="tip" type="button" data-tip="Every export is written to the audit record with this reason and the date range. An inspector or a data-protection request can ask why a report was run, so say what it was for." aria-label="Why a reason is needed">?</button></label><input id="rpReason" class="field" type="text" maxlength="200" required placeholder="e.g. HIQA inspection 12 September"></div>
+          <div id="reportList" class="list"></div>
+        </form>
+      </div>
+      <div id="reportView" hidden>
+        <div class="rphead">
+          <div><h2 id="rpTitle"></h2><p class="hint flush" id="rpSub"></p></div>
+          <div class="row"><button class="btn sm" type="button" id="rpPrint">Print</button><button class="btn ghost sm" type="button" id="rpClose">Close</button></div>
+        </div>
+        <div id="rpTableWrap" class="tablewrap"><table id="rpTable"></table></div>
+        <div id="rpNarrative" class="weeklyDoc" hidden></div>
+      </div>
+    </section>
+
+    <!-- ---- staff (admins only; the database refuses every operation below
+         for a non-admin regardless of what is visible) ---- -->
+    <section id="panelStaff" role="tabpanel" aria-labelledby="tabStaff" hidden>
+      <div class="formcard" id="rosterCard">
+        <h2>Site staff list <button class="tip" type="button" data-tip="The centre's own staff: kitchen, cleaning, maintenance, anyone who is on site but does not use this app. On the Visitors tab, under Staff, each name is one tap to sign in, and the roll call names them. A name and a job title, nothing more." aria-label="About the staff list">?</button></h2>
+        <p class="hint flush">One per line, the job title after a comma: <span class="mono">Mary Byrne, Kitchen</span>. People already listed are skipped.</p>
+        <textarea id="rosterText" class="field mt8" rows="4" placeholder="Mary Byrne, Kitchen&#10;Tom Walsh, Maintenance"></textarea>
+        <div class="actions"><button class="btn sm" type="button" id="rosterAdd">Add to the list</button><label class="check"><input id="rosterShowAll" type="checkbox"> <span>Show archived</span></label></div>
+        <div id="rosterList" class="hint flush mt8">Loading…</div>
+      </div>
+      <div id="accountsOnly">
+      <form id="staffForm" class="formcard" autocomplete="off">
+        <h2>Add a staff account</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="sfName">Full name</label><input id="sfName" class="field" type="text" required></div>
+          <div><label class="lbl" for="sfRole">Role <button class="tip" type="button" data-tip="Guard: records at the gate and on the register. Supervisor: also manages residents, buildings and reports. Admin: also manages staff and settings, exports and erases records, and reads the access log." aria-label="What each role can do">?</button></label>
+            <select id="sfRole" class="field">
+              <option value="guard">Guard</option>
+              <option value="supervisor">Supervisor</option>
+              <option value="admin">Admin</option>
+            </select></div>
+        </div>
+        <!-- What the chosen role can and cannot do, in words, before the
+             invitation goes: the most common question when adding someone. -->
+        <details id="sfRoleHelp" class="rolehelp"></details>
+        <div><label class="lbl" for="sfEmail">Email</label><input id="sfEmail" class="field" type="email" required></div>
+        <div class="actions">
+          <button class="btn primary-in" id="sfAdd" type="submit">Add and send login link</button>
+        </div>
+        <p class="hint flush">
+          No password is typed here. The new colleague gets a one-day link by email to choose their own;
+          nobody else ever sees it. A role can be changed later from the list below.
+          <a href="/help.html#roles">Compare all three roles</a>.
+        </p>
+      </form>
+      <div id="linkNotice" class="alert warn" hidden></div>
+      <div id="safeguardingNotice" class="alert warn" hidden></div>
+      <div id="staffList" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ---- settings (admins only; app_settings_write is the admin policy) ---- -->
+    <section id="panelSettings" role="tabpanel" aria-labelledby="tabSettings" hidden>
+      <form id="settingsForm" class="formcard" autocomplete="off">
+        <h2>Site</h2>
+        <div><label class="lbl" for="stSite">Site name</label><input id="stSite" class="field" type="text" maxlength="80" required></div>
+        <div><label class="lbl" for="stTz">Timezone</label><input id="stTz" class="field" type="text" placeholder="Europe/Dublin" required>
+          <p class="hint under">Defines "today" for the whole register. Keep it matched to the site.</p></div>
+
+        <h2 class="mt6">The daily rule</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="stAdult">Applies from age</label><input id="stAdult" class="field" type="number" min="1" max="30" required></div>
+          <div><label class="lbl" for="stDue">Flag "not seen" after (hour, 0–23)</label><input id="stDue" class="field" type="number" min="0" max="23" required></div>
+        </div>
+
+        <h2 class="mt6">House Rules thresholds</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="stWarn">Consecutive nights → warning letter</label><input id="stWarn" class="field" type="number" min="1" max="90" required></div>
+          <div><label class="lbl" for="stWinLimit">Days absent in the window</label><input id="stWinLimit" class="field" type="number" min="1" max="365" required></div>
+        </div>
+        <div class="grid2">
+          <div><label class="lbl" for="stWinDays">Rolling window (days)</label><input id="stWinDays" class="field" type="number" min="7" max="365" required></div>
+          <div><label class="lbl" for="stHoliday">Longest holiday (consecutive days)</label><input id="stHoliday" class="field" type="number" min="1" max="90" required></div>
+        </div>
+        <p class="hint flush">Reported on the register as facts against these numbers. The app never decides that a threshold was met.</p>
+
+        <h2 class="mt6">Security</h2>
+        <div><label class="lbl" for="stHome">Home countries <button class="tip" type="button" data-tip="Two-letter codes, comma-separated. A supervisor or admin logging in from anywhere else is refused; a guard is asked for an emailed code." aria-label="What home countries do">?</button></label><input id="stHome" class="field" type="text" required pattern="[A-Za-z]{2}(,[A-Za-z]{2})*" placeholder="IE">
+          <p class="hint under">Two-letter codes, comma-separated. A supervisor or administrator logging in from anywhere else is refused; a guard from elsewhere must type an emailed code. Unknown addresses are not treated as abroad.</p></div>
+        <label class="check"><input id="stNotify" type="checkbox"> <span><b>Nightly House Rules reminder by email.</b> After close-out, supervisors and administrators are emailed the residents at or over the consecutive-nights or rolling-window figure, on the nights there is anyone to list. Authorised absences are left out. Needs email configured on the service.</span></label>
+        <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login. Needs email configured on the service.</span></label>
+
+        <h2 class="mt6">Weekly register update</h2>
+        <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> Early Sunday morning, after Saturday night's snapshot, the staff ticked to receive it are emailed a count for resident absences, weekend updates, removals and room updates, and a link into the app — no resident names, rooms or dates. Needs email configured on the service.</span></label>
+        <p class="hint flush">Recipients are chosen on the staff record: tick "Gets the Sunday report" for a supervisor or admin under Staff. <button class="linkish" type="button" id="stWeeklySend">Send last week's now</button> to check what arrives. A manual send is on the audit record.</p>
+
+        <h2 class="mt6">Permitted absence periods <button class="tip" type="button" data-tip="The dates IPAS notifies: Christmas, Ramadan, Easter, the summer school holiday. A holiday authorised outside these periods still goes through; the screen says so." aria-label="About permitted absence periods">?</button></h2>
+        <div id="awList" class="list"></div>
+        <div class="grid3">
+          <input id="awName" class="field" type="text" maxlength="60" placeholder="Name, e.g. Summer 2026" aria-label="Period name">
+          <input id="awFrom" class="field" type="date" aria-label="First day">
+          <input id="awTo" class="field" type="date" aria-label="Last day">
+        </div>
+        <div class="actions"><button class="btn sm" type="button" id="awAdd">Add period</button></div>
+
+        <h2 class="mt6">Features for this site <button class="tip" type="button" data-tip="Each switch is off until you turn it on here, so a centre sees only what it uses. Turning one off hides the screens; nothing already recorded is deleted." aria-label="About feature switches">?</button></h2>
+        <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
+        <label class="check"><input id="stFeatHouseholds" type="checkbox"> <span><b>Households.</b> Link family members so a child appears with a parent on the roll call and a room's occupants read as a family. Holds only which residents share a household.</span></label>
+        <label class="check"><input id="stFeatVisitors" type="checkbox"> <span><b>Visitors.</b> A Visitors tab on the gate: staff, visitors, contractors and suppliers signed in on arrival and out when they leave, and listed on the roll call while on site. Holds a kind, a name and an optional company; kept as long as the movement log.</span></label>
+        <label class="check"><input id="stFeatDoorCheckin" type="checkbox"> <span><b>An In &amp; out sign-in counts as check-in.</b> A sign IN at In &amp; out (never a sign OUT) also records today's check-in for that resident, marked as such. Off, the two acts stay separate and a resident must present at the register themselves. Leave this off where the policy makes the resident responsible for their own check-in.</span></label>
+        <label class="check"><input id="stFeatEvac" type="checkbox"> <span><b>Evacuation.</b> An evacuation-need code on each record (fixed list, no free text) and a Roll call tab on the gate. Turning this on means the site holds a special-category field: record it in the DPIA.</span></label>
+
+        <h2 class="mt6">Retention</h2>
+        <div class="grid2">
+          <div><label class="lbl" for="stEventDays">Movement log (days)</label><input id="stEventDays" class="field" type="number" min="1" max="3650" required></div>
+          <div><label class="lbl" for="stCompDays">Daily register (days)</label><input id="stCompDays" class="field" type="number" min="1" max="36500" required></div>
+        </div>
+        <div class="grid2">
+          <div><label class="lbl" for="stLate">Offline sync window (hours)</label><input id="stLate" class="field" type="number" min="1" max="168" required></div>
+          <div><label class="lbl" for="stIdle">Lock screen after (minutes idle)</label><input id="stIdle" class="field" type="number" min="1" max="720" required></div>
+        </div>
+        <p class="hint flush">The IPAS verification policy says sign-in sheets are held six months (180 days). Shortening retention deletes records at the next nightly run.</p>
+
+        <div class="actions">
+          <button class="btn primary-in" id="stSave" type="submit">Save settings</button>
+          <button class="btn ghost" id="stReload" type="button">Discard changes</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ---- resident edit sheet ---- -->
+    <div id="detail" class="detail" hidden></div>
+  </main>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/app-common.js"></script>
+<script src="/offline.js"></script>
+
+<script>
+"use strict";
+
+/* ========================================================================
+   State
+   ====================================================================== */
+const state = {
+  profile:  null,
+  userId:   null,
+  settings: null,
+  tab:      "residents",
+  status:   "active",    // Active | Departed view
+  rows:     new Map(),
+  selected: null,
+  addType:  "",
+  buildings: [],        // GET /api/buildings, for the room selectors and the Buildings tab,
+  famSelecting: false,
+  famIds: new Set(),
+};
+
+const canResidents = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
+const canStaff = () => !!state.profile && state.profile.role === "admin";
+
+function todayISODate() {
+  const n = new Date();
+  const p = (v) => String(v).padStart(2, "0");
+  return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+}
+
+/* ========================================================================
+   Residents
+   ====================================================================== */
+
+// Lists never carry a date of birth (Tao 3 / data minimisation): the card
+// shows age and the ID, and the date is fetched into the edit sheet only.
+const EVAC_LABEL = { none: "None needed", mobility: "Needs help to move", hearing: "Needs help to hear the alarm", sight: "Needs help to find the way", carer: "Infant or carer", other: "Needs help (no detail held)" };
+// The same needs as one word each, for a chip; the long form is in the
+// spoken label and on the evacuation list.
+const NEED_SHORT = { mobility: "mobility", hearing: "hearing", sight: "sight", carer: "carer", other: "help" };
+
+function residentCard(r) {
+  const bits = [`age ${r.age_years}`];
+  if (r.room_label && featureOn("feature_buildings")) bits.push(esc(r.room_label));
+  if (r.household_label && featureOn("feature_households")) bits.push(esc(r.household_label));
+  bits.push(r.has_id ? "ID recorded" : "no ID recorded");
+  const departed = r.status === "departed";
+  return `
+    <button class="card" data-id="${esc(r.id)}" type="button">
+      <span class="who">
+        <span class="name">${esc(r.full_name)}</span>
+        <span class="meta">${bits.join(" · ")}</span>
+      </span>
+      <span class="pill ${departed ? "departed" : "in"}">${departed ? "Departed" : "Active"}</span>
+    </button>`;
+}
+
+// One person as a chip: a dot for presence (the words are in the legend),
+// the name, "child" where they are under the adult age, and the evacuation
+// need where the feature is on. A button, so it opens the record.
+function personChip(p, opts = {}) {
+  const need = featureOn("feature_evacuation") && p.evac_need && p.evac_need !== "none" ? EVAC_LABEL[p.evac_need] : "";
+  const bits = [p.presence === "in" ? "on site" : "off site"];
+  if (p.is_adult === false) bits.push("child");
+  if (need) bits.push(need);
+  return `<button class="person ${p.presence === "in" ? "in" : "out"} ${opts.current ? "current" : ""}" type="button" data-open="${esc(p.id)}" aria-label="${esc(p.full_name)}, ${esc(bits.join(", "))}">
+      <i class="dot"></i>${esc(p.full_name)}${p.is_adult === false ? '<span class="tag">child</span>' : ""}${need ? `<span class="need">${esc(NEED_SHORT[p.evac_need] || "help")}</span>` : ""}${opts.current ? '<span class="tag">this record</span>' : ""}
+    </button>`;
+}
+
+/* ---- make a family: tick people on the list, one button ---- */
+function setFamilySelecting(on) {
+  state.famSelecting = on;
+  state.famIds = new Set();
+  document.body.classList.toggle("selecting", on);
+  $("famBar").hidden = !on;
+  $("famToggle").querySelector(".lbl").textContent = on ? "Stop selecting" : "Select several";
+  $("famToggle").setAttribute("aria-pressed", String(on));
+  $("famMake").hidden = !featureOn("feature_households");
+  $("residentList").querySelectorAll("button.card.selected").forEach((c) => c.classList.remove("selected"));
+  if (on) renderDetail(null);
+  updateFamilyBar();
+}
+function updateFamilyBar() {
+  const n = state.famIds.size;
+  $("famCount").textContent = `${n} selected`;
+  $("famMake").disabled = n < 2;
+  $("famDepart").disabled = n < 1;
+}
+// Mark everyone ticked as departed on one date (the centres depart in
+// bulk, not one at a time). Each person still gets their own record change.
+async function departMany() {
+  const ids = [...state.famIds];
+  if (!ids.length) return;
+  const on = prompt(`Last day on site for ${ids.length} resident${ids.length === 1 ? "" : "s"} (YYYY-MM-DD)`, todayISODate());
+  if (on === null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) return toast("Give the date as YYYY-MM-DD", "err");
+  $("famDepart").disabled = true;
+  let done = 0;
+  const failed = [];
+  for (const [i, id] of ids.entries()) {
+    progress(`Departing ${i + 1} of ${ids.length}${state.rows.get(id)?.full_name ? ` — ${state.rows.get(id).full_name}` : ""}`, i, ids.length);
+    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { status: "departed", departed_on: on }), (err) => failed.push(`${state.rows.get(id)?.full_name || "One person"}: ${err.message}`));
+    if (out) done += 1;
+  }
+  toast(failed.length
+    ? `${done} marked as departed from ${on}. Not changed: ${failed.join("; ")}`
+    : `${done} marked as departed from ${on}`, failed.length ? "err" : "ok");
+  setFamilySelecting(false);
+  loadResidents();
+}
+async function makeFamily() {
+  const ids = [...state.famIds];
+  if (ids.length < 2) return toast("Tick at least two people", "err");
+  // Join an existing family when one of them is already in one; otherwise
+  // the first ticked person anchors the new one.
+  const anchor = ids.find((id) => state.rows.get(id)?.household_id) || ids[0];
+  $("famMake").disabled = true;
+  let done = 0;
+  const failed = [];
+  for (const [i, id] of ids.entries()) {
+    if (id === anchor) continue;
+    progress(`Linking ${i + 1} of ${ids.length}${state.rows.get(id)?.full_name ? ` — ${state.rows.get(id).full_name}` : ""}`, i, ids.length);
+    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { household_with: anchor }), (err) => failed.push(`${state.rows.get(id)?.full_name || "One person"}: ${err.message}`));
+    if (out) done += 1;
+  }
+  toast(failed.length
+    ? `${done ? `Family of ${done + 1} made. ` : "No family made. "}Not added: ${failed.join("; ")}`
+    : (done ? `Family of ${done + 1} made` : "No family made"), failed.length ? "err" : "ok");
+  setFamilySelecting(false);
+  loadResidents();
+}
+
+let searchToken = 0;
+// Sample data: ask once per load of the Residents tab whether any is left.
+// A centre that never had it, and every centre after it is cleared, sees
+// nothing — so this costs one cheap request and no screen space.
+async function refreshDemoBar() {
+  const bar = $("demoBar");
+  if (!canStaff()) { bar.hidden = true; return; }   // admins only; clearing deletes people
+  const out = await guarded(() => apiGet("/api/settings/demo-data"), () => {});
+  const n = out && out.residents;
+  bar.hidden = !n;
+  if (n) {
+    $("demoCount").textContent =
+      `${n} fictional ${n === 1 ? "person" : "people"}, so every screen had something in it.`;
+  }
+}
+
+$("demoClear").addEventListener("click", async () => {
+  const btn = $("demoClear");
+  if (btn.dataset.armed !== "1") {
+    // One deliberate second tap, the same shape as every other destructive
+    // act here: this removes residents and everything recorded against them.
+    btn.dataset.armed = "1";
+    btn.textContent = "Tap again to remove them";
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove the sample residents"; }, 5000);
+    return;
+  }
+  btn.dataset.armed = "";
+  btn.disabled = true;
+  const out = await guarded(
+    () => apiDelete("/api/settings/demo-data"),
+    (err) => { btn.disabled = false; btn.textContent = "Remove the sample residents"; toast("Not cleared: " + err.message, "err"); },
+  );
+  btn.disabled = false;
+  btn.textContent = "Remove the sample residents";
+  if (!out) return;
+  toast(out.keptRooms
+    ? `Sample residents removed. The rooms stayed — somebody real is in them.`
+    : `Sample residents removed.`, "ok");
+  refreshDemoBar();
+  loadResidents();
+  loadBuildings();
+});
+
+async function loadResidents() {
+  const token = ++searchToken;
+  const q = $("q").value.trim();
+  const box = $("residentList");
+  if (!box.querySelector("button.card")) box.innerHTML = '<p class="empty">Loading the register…</p>';
+
+  const rows = await guarded(
+    () => apiGet(`/api/residents?q=${encodeURIComponent(q)}&limit=1000&departed=1`),
+    (err) => { Offline.noteFailure(err); showError("Could not load residents: " + err.message); },
+  );
+  if (token !== searchToken || !rows) return;
+  showError("");
+
+  state.rows.clear();
+  rows.forEach((r) => state.rows.set(r.id, r));
+  const shown = rows.filter((r) => (state.status === "departed") === (r.status === "departed"));
+  const counts = { active: rows.filter((r) => r.status !== "departed").length, departed: rows.filter((r) => r.status === "departed").length };
+  document.querySelectorAll("#statusFilter button").forEach((b) => {
+    const st = b.dataset.status;
+    b.textContent = `${st === "active" ? "Active" : "Departed"} (${counts[st]})`;
+    b.setAttribute("aria-pressed", String(st === state.status));
+  });
+  box.innerHTML = shown.length
+    ? shown.map(residentCard).join("")
+    : `<p class="empty">${q ? `No resident matching “${esc(q)}”.` : state.status === "departed" ? "Nobody has departed." : "No residents on the register yet. Tap Add."}</p>`;
+}
+
+/* ========================================================================
+   Absences (supervisors and admins)
+   ====================================================================== */
+
+// Active residents with a run of missed nights or a missed day inside the
+// rolling window, worst first. Everything here is already on the list row
+// (v_resident_compliance via /api/residents?compliance=1); this tab only
+// puts the counts beside the figures in Settings. Residents whose only
+// misses are older than the window are not listed — their total is on the
+// register's detail sheet.
+async function loadAbsences() {
+  $("absIntro").textContent = "Loading…";
+  const rows = await guarded(
+    () => apiGet("/api/residents?q=&limit=1000&compliance=1"),
+    (err) => { Offline.noteFailure(err); showError("Could not load absences: " + err.message); },
+  );
+  if (!rows) return;
+  showError("");
+  renderAbsences(rows);
+}
+
+function renderAbsences(rows) {
+  if (!rows.length) {
+    $("absIntro").textContent = "No residents on the register yet.";
+    $("absTable").innerHTML = "";
+    return;
+  }
+  const s = state.settings || {};
+  const src = rows[0] || {};
+  const nightLimit = src.warn_after_consecutive_nights ?? s.warn_after_consecutive_nights ?? 3;
+  const winLimit = src.absence_window_limit ?? s.absence_window_limit ?? 10;
+  const winDays = src.absence_window_days ?? s.absence_window_days ?? 28;
+  const withRooms = !!s.feature_buildings;
+
+  const q = ($("absQ").value || "").trim().toLowerCase();
+  const listed = rows
+    .filter((r) => r.status === "active" && ((r.consecutive_missed || 0) > 0 || (r.absent_in_window || 0) > 0))
+    .filter((r) => !q || String(r.full_name).toLowerCase().includes(q) || String(r.room_label || "").toLowerCase().includes(q) || String(r.room || "").toLowerCase() === q)
+    .sort((a, b) =>
+      (b.consecutive_missed || 0) - (a.consecutive_missed || 0) ||
+      (b.absent_in_window || 0) - (a.absent_in_window || 0) ||
+      String(a.full_name).localeCompare(String(b.full_name)));
+
+  $("absIntro").textContent =
+    `Facts against the figures in Settings: ${nightLimit} consecutive nights, ${winLimit} days in ${winDays}. ` +
+    `The app never decides that a threshold was met; the decision, and the letter, are the manager's.`;
+
+  if (!listed.length) {
+    $("absTable").innerHTML = `<tbody><tr><td class="hint">Nobody has a run of missed nights or a missed day in the last ${winDays} days.</td></tr></tbody>`;
+    return;
+  }
+
+  const lastSeen = (r) => r.seen_today ? "Today" : (r.last_seen_on || "Never");
+  const head = ["Name", ...(withRooms ? ["Room"] : []), "Consecutive nights", `Absent in ${winDays} days`, "Last seen", "Today", "Breach report"];
+  const KIND_SHORT = { house_rules: "house rules", misuse: "misuse" };
+  $("absTable").innerHTML =
+    `<thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>` +
+    `<tbody>${listed.map((r) => {
+      const n = r.consecutive_missed || 0, w = r.absent_in_window || 0;
+      return `<tr>` +
+        `<td>${esc(r.full_name)}</td>` +
+        (withRooms ? `<td>${esc(r.room_label || "")}</td>` : "") +
+        `<td class="num${n >= nightLimit ? " at" : ""}">${n} of ${nightLimit}</td>` +
+        `<td class="num${w >= winLimit ? " at" : ""}">${w} of ${winLimit}</td>` +
+        `<td>${esc(lastSeen(r))}</td>` +
+        `<td>${r.away ? `Away until ${esc(dayLabel(r.away.until))}` : r.seen_today ? "Checked in" : "Not yet checked in"}</td>` +
+        `<td>${r.last_breach ? `${esc(KIND_SHORT[r.last_breach.kind] || r.last_breach.kind)} · ${esc(dayLabel(r.last_breach.issued_on))}` : "—"}</td>` +
+      `</tr>`;
+    }).join("")}</tbody>`;
+}
+
+/* ---- add ---- */
+function setAddType(t) {
+  state.addType = t;
+  document.querySelectorAll("#addForm .seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.type === t)));
+  $("afNumber").hidden = !t;
+  if (t) $("afNumber").focus();
+}
+
+$("showAdd").addEventListener("click", () => {
+  $("addForm").hidden = false;
+  renderDetail(null);
+  $("afDob").max = todayISODate();
+  $("afFirst").focus();
+});
+$("afCancel").addEventListener("click", () => { $("addForm").reset(); setAddType(""); $("addForm").hidden = true; });
+document.querySelectorAll("#addForm .seg button").forEach((b) => b.addEventListener("click", () => setAddType(b.dataset.type)));
+
+$("addForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    first_name: $("afFirst").value.trim(),
+    last_name:  $("afLast").value.trim(),
+    date_of_birth: $("afDob").value,
+  };
+  if (state.addType) { body.id_type = state.addType; body.id_number = $("afNumber").value.trim().toUpperCase(); }
+  if (featureOn("feature_buildings") && state.buildings.length) body.room_id = $("afRoom").value || null;
+  if (featureOn("feature_evacuation")) body.evac_need = $("afEvac").value;
+  $("afSave").disabled = true;
+  const out = await guarded(() => apiPost("/api/residents", body), (err) => toast("Not added: " + err.message, "err"));
+  $("afSave").disabled = false;
+  if (!out) return;
+  toast(`${body.first_name} ${body.last_name} added to the register`, "ok");
+  $("addForm").reset(); setAddType(""); $("addForm").hidden = true;
+  state.status = "active";
+  loadResidents();
+});
+
+/* ---- import from a spreadsheet ---- */
+// A small CSV reader: quotes, doubled quotes, commas and newlines inside
+// quotes, CRLF, a BOM. Excel and Numbers both produce this shape.
+function parseCsv(text) {
+  const rows = []; let row = []; let cell = ""; let quoted = false;
+  const src = text.replace(/^\ufeff/, "");
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') { if (src[i + 1] === '"') { cell += '"'; i += 1; } else quoted = false; }
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && src[i + 1] === "\n") i += 1;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += ch;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+}
+
+// Column headings as people write them, mapped to the fields the server takes.
+const IMPORT_COLUMNS = [
+  ["first_name", /^(first|firstname|givenname|forename|given)$/],
+  ["last_name", /^(last|lastname|surname|familyname|family)$/],
+  ["date_of_birth", /^(dateofbirth|dob|birthdate|born|birthday)$/],
+  ["id_type", /^(idtype|type|cardtype|documenttype)$/],
+  ["id_number", /^(idnumber|id|number|idno|cardnumber|trcirp|trc|irp|documentnumber)$/],
+  ["building", /^(building|block|house)$/],
+  ["floor", /^(floor|level|storey)$/],
+  ["room", /^(room|roomnumber|roomno|bed)$/],
+  ["evac_need", /^(evacuation|evacuationneed|evacuationassistance|evac|assistance|peep|needshelp|need)$/],
+];
+function mapHeader(h) {
+  const key = String(h || "").toLowerCase().replace(/[^a-z]/g, "");
+  const hit = IMPORT_COLUMNS.find(([, re]) => re.test(key));
+  return hit ? hit[0] : null;
+}
+
+const imp = { rows: [], ready: [], last: [] };
+function resetImport() {
+  imp.rows = []; imp.ready = []; imp.last = [];
+  $("impFile").value = ""; $("impColumns").hidden = true; $("impPreview").hidden = true;
+  $("impGo").disabled = true; $("impGo").textContent = "Import";
+}
+$("showImport").addEventListener("click", () => {
+  resetImport();
+  $("addForm").hidden = true; $("importPanel").hidden = false; renderDetail(null);
+  $("impFile").focus();
+});
+$("impCancel").addEventListener("click", () => { resetImport(); $("importPanel").hidden = true; });
+
+// Send in batches the server's limit allows; a 200-row sheet is one request.
+async function importBatches(rows, dryRun) {
+  const results = [];
+  for (let i = 0; i < rows.length; i += 200) {
+    const out = await guarded(() => apiPost("/api/residents/import", { rows: rows.slice(i, i + 200), dry_run: dryRun }), (err) => toast("Import failed: " + err.message, "err"));
+    if (!out) return null;
+    results.push(...out.results);
+  }
+  return results;
+}
+
+function renderImportPreview(results) {
+  const byLine = new Map(results.map((r) => [r.line, r]));
+  const counts = { ready: 0, exists: 0, error: 0, added: 0 };
+  for (const r of results) counts[r.status] = (counts[r.status] || 0) + 1;
+  const parts = [];
+  if (counts.added) parts.push(`${counts.added} added`);
+  if (counts.ready) parts.push(`${counts.ready} ready to add`);
+  if (counts.exists) parts.push(`${counts.exists} already on the register`);
+  if (counts.ambiguous) parts.push(`${counts.ambiguous} needing a reference to say which resident`);
+  if (counts.error) parts.push(`${counts.error} with a problem to fix`);
+  $("impSummary").textContent = `${imp.rows.length} line${imp.rows.length === 1 ? "" : "s"}: ${parts.join(", ")}.`;
+  const head = ["Line", "Name", "Date of birth", "Room", "Result"];
+  const label = { ready: "Ready", exists: "Already here", error: "Problem", added: "Added", ambiguous: "Which one?" };
+  $("impTable").innerHTML = `<thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${
+    imp.rows.map((r) => {
+      const res = byLine.get(r.line) || { status: "error", message: "No answer for this line" };
+      const room = [r.building, r.floor, r.room].filter(Boolean).join(" · ");
+      return `<tr><td>${r.line}</td><td>${esc(`${r.first_name || ""} ${r.last_name || ""}`.trim())}</td><td>${esc(r.date_of_birth || "")}</td><td>${esc(room)}</td><td class="st-${esc(res.status)}"><b>${label[res.status] || res.status}</b>${res.message && res.status !== "ready" ? ` — ${esc(res.message)}` : ""}</td></tr>`;
+    }).join("")}</tbody>`;
+  $("impPreview").hidden = false;
+  imp.last = results;
+  imp.ready = imp.rows.filter((r) => (byLine.get(r.line) || {}).status === "ready");
+  $("impGo").disabled = imp.ready.length === 0;
+  $("impGo").textContent = imp.ready.length ? `Import ${imp.ready.length} resident${imp.ready.length === 1 ? "" : "s"}` : "Nothing to import";
+}
+
+$("impFile").addEventListener("change", async () => {
+  const file = $("impFile").files[0];
+  if (!file) return;
+  const text = await file.text();
+  const table = parseCsv(text);
+  if (table.length < 2) { toast("The file has a heading row but no residents", "err"); return; }
+  const fields = table[0].map(mapHeader);
+  const known = fields.filter(Boolean);
+  const ignored = table[0].filter((h, i) => !fields[i] && String(h).trim());
+  const missing = ["first_name", "last_name", "date_of_birth"].filter((f) => !known.includes(f));
+  $("impColumns").hidden = false;
+  $("impColumns").textContent = `Columns recognised: ${known.map((k) => k.replace(/_/g, " ")).join(", ") || "none"}.${ignored.length ? ` Ignored: ${ignored.join(", ")}.` : ""}`;
+  if (missing.length) { toast(`The sheet needs columns for ${missing.map((m) => m.replace(/_/g, " ")).join(", ")}`, "err"); return; }
+  imp.rows = table.slice(1).map((cells, i) => {
+    const row = { line: i + 2 };
+    fields.forEach((f, j) => { if (f) row[f] = String(cells[j] || "").trim(); });
+    return row;
+  });
+  const results = await importBatches(imp.rows, true);
+  if (results) renderImportPreview(results);
+});
+
+$("impGo").addEventListener("click", async () => {
+  if (!imp.ready.length) return;
+  $("impGo").disabled = true;
+  const results = await importBatches(imp.ready, false);
+  if (!results) { $("impGo").disabled = false; return; }
+  const added = results.filter((r) => r.status === "added").length;
+  toast(`${added} resident${added === 1 ? "" : "s"} added to the register`, "ok");
+  // Show the final state of every line (the lines that were skipped or
+  // failed keep their preview verdict), then refresh the list behind.
+  const fresh = new Map(results.map((r) => [r.line, r]));
+  renderImportPreview(imp.last.map((r) => fresh.get(r.line) || r));
+  $("impGo").disabled = true; $("impGo").textContent = "Done";
+  state.status = "active";
+  loadResidents();
+});
+
+/* ---- edit sheet ---- */
+async function openResident(id) {
+  const summary = state.rows.get(id);
+  const rec = await guarded(() => apiGet(`/api/residents/${id}/record`), (err) => toast("Could not open: " + err.message, "err"));
+  if (!rec) return;
+  renderDetail(rec, summary);
+}
+
+function renderDetail(rec, summary) {
+  state.selected = rec;
+  const el = $("detail");
+  if (!rec) { el.hidden = true; el.innerHTML = ""; return; }
+  $("addForm").hidden = true;
+  const departed = rec.status === "departed";
+  const type = rec.id_type || "";
+
+  el.innerHTML = `
+    ${sheetBar()}
+    <h2>${esc(rec.first_name)} ${esc(rec.last_name)}</h2>
+    <div class="sub">${rec.ref ? `<b>${esc(refLabel(rec.ref))}</b> · ` : ""}${departed ? `Departed ${esc(rec.departed_on)}` : "Active"} · on the register since ${esc(String(rec.registered_at).slice(0, 10))}</div>
+
+    <form id="editForm" class="formcard mt14" autocomplete="off">
+      <div class="grid2">
+        <div><label class="lbl" for="efFirst">First name</label><input id="efFirst" class="field" type="text" required maxlength="80" value="${esc(rec.first_name)}"></div>
+        <div><label class="lbl" for="efLast">Last name</label><input id="efLast" class="field" type="text" required maxlength="80" value="${esc(rec.last_name)}"></div>
+      </div>
+      <div>
+        <label class="lbl" for="efDob">Date of birth</label>
+        <input id="efDob" class="field" type="date" required value="${esc(rec.date_of_birth)}" max="${todayISODate()}">
+      </div>
+      <div>
+        <label class="lbl">ID card</label>
+        <div class="seg" role="group" aria-label="ID type">
+          <button type="button" data-type="" aria-pressed="${type === ""}">None</button>
+          <button type="button" data-type="TRC" aria-pressed="${type === "TRC"}">TRC</button>
+          <button type="button" data-type="IRP" aria-pressed="${type === "IRP"}">IRP</button>
+        </div>
+        <input id="efNumber" class="field upper mt8" type="text" placeholder="Number as printed on the card" maxlength="40"
+               value="${esc(rec.id_number || "")}" ${type ? "" : "hidden"}>
+      </div>
+      <div ${featureOn("feature_buildings") && state.buildings.length ? "" : "hidden"}>
+        <label class="lbl" for="efRoom">Room</label>
+        <select id="efRoom" class="field">${roomOptions(rec.room_id)}</select>
+      </div>
+      <div ${featureOn("feature_evacuation") ? "" : "hidden"}>
+        <label class="lbl" for="efEvac">Evacuation assistance</label>
+        <select id="efEvac" class="field">${["none","mobility","hearing","sight","carer","other"].map((v) => `<option value="${v}" ${rec.evac_need === v ? "selected" : ""}>${esc(EVAC_LABEL[v])}</option>`).join("")}</select>
+      </div>
+      <div class="actions">
+        <button class="btn primary-in" id="efSave" type="submit">Save changes</button>
+        <button class="btn ghost" id="closeDetail" type="button">Close</button>
+      </div>
+    </form>
+
+    ${featureOn("feature_households") && !departed ? `
+    <div class="formcard" id="hhCard">
+      <h2>Household</h2>
+      <div id="hhMembers" class="hint flush">Loading…</div>
+      <div class="row">
+        <select id="hhWith" class="field grow" aria-label="Add to the family of">
+          <option value="">Add to the family of…</option>
+          ${[...state.rows.values()].filter((r) => r.id !== rec.id && r.status !== "departed").sort((a, b) => String(a.full_name).localeCompare(String(b.full_name))).map((r) => `<option value="${esc(r.id)}">${esc(r.full_name)}${r.household_label ? ` — ${esc(r.household_label)}` : ""}</option>`).join("")}
+        </select>
+        <button class="btn sm" type="button" id="hhJoin">Join</button>
+      </div>
+      <p class="hint flush">Holds only which residents share a household. Nothing else about the family is recorded.</p>
+    </div>` : ""}
+
+    ${!departed ? `
+    <div class="formcard" id="absCard">
+      <h2>Authorised absence <button class="tip" type="button" data-tip="Days ${esc(rec.first_name)} is away with the centre's agreement: a holiday, a family matter, hospital. The daily rule does not apply on those days, so they never count as missed. A reason from the list, no notes." aria-label="About authorised absences">?</button></h2>
+      <div id="absList" class="hint flush">Loading…</div>
+      <form id="absForm" class="mt8" autocomplete="off">
+        <div class="grid2">
+          <div><label class="lbl" for="abFrom">First day away</label><input id="abFrom" class="field" type="date" required value="${todayISODate()}"></div>
+          <div><label class="lbl" for="abTo">Last day away</label><input id="abTo" class="field" type="date" required value="${todayISODate()}"></div>
+        </div>
+        <label class="lbl" for="abReason">Reason</label>
+        <select id="abReason" class="field">
+          <option value="holiday">Holiday</option><option value="family">Family</option><option value="medical">Medical</option><option value="interview">IPO interview</option>
+          <option value="education">Education</option><option value="work">Work</option><option value="other">Other</option>
+        </select>
+        <label class="check mt8" id="abGuardianWrap" ${((summary && summary.age_years) ?? 99) < (state.settings?.adult_age_years ?? 18) ? "" : "hidden"}><input id="abGuardian" type="checkbox"> <span><b>A parent or guardian agreed.</b> Required for a child.</span></label>
+        <div class="actions"><button class="btn sm" type="submit" id="abSave">Record absence</button></div>
+      </form>
+    </div>` : ""}
+
+    <div class="formcard" id="brCard">
+      <h2>Breach reports <button class="tip" type="button" data-tip="The app flags the thresholds; the decision and the report to IPAS are the manager's. Record here that a report was issued, which kind, on what day and its reference, so the register shows it." aria-label="About breach reports">?</button></h2>
+      <div id="brList" class="hint flush">Loading…</div>
+      <form id="brForm" class="mt8" autocomplete="off">
+        <div class="grid2">
+          <div><label class="lbl" for="brKind">Kind</label>
+            <select id="brKind" class="field"><option value="house_rules">Breach of house rules</option><option value="misuse">Misuse of the verification system</option></select></div>
+          <div><label class="lbl" for="brOn">Issued on</label><input id="brOn" class="field" type="date" required value="${todayISODate()}" max="${todayISODate()}"></div>
+        </div>
+        <label class="lbl" for="brRef">Reference (optional)</label>
+        <input id="brRef" class="field" type="text" maxlength="60" placeholder="e.g. IPAS ref or file number">
+        <div class="actions"><button class="btn sm" type="submit" id="brSave">Record report issued</button></div>
+      </form>
+    </div>
+
+    ${featureOn("feature_buildings") ? `
+    <div class="formcard">
+      <h2>Rooms so far</h2>
+      <div id="roomHist" class="hint flush">Loading…</div>
+    </div>` : ""}
+
+    <div id="detailHistory"></div>
+
+    ${canStaff() ? `
+    <div class="formcard">
+      <h2>Their record</h2>
+      <p class="hint flush">Everything held about ${esc(rec.first_name)}: their details, every movement and check-in,
+        the daily register and every change made to their record. The reason is kept with the export.</p>
+      <label class="lbl" for="exReason">Reason for the export</label>
+      <input id="exReason" class="field" type="text" maxlength="200" placeholder="e.g. subject access request received 4 Sep">
+      <div class="actions"><button class="btn wide" id="exportBtn" type="button">Download record (JSON)</button></div>
+    </div>
+    <div class="formcard">
+      <h2 class="danger">Erase ${esc(rec.first_name)}'s record</h2>
+      <p class="hint flush">Removes the person and their entire history. Cannot be undone. A non-identifying proof that
+        an erasure happened is kept. If the daily register is a legal obligation, the request may be refusable — decide first.</p>
+      <label class="lbl" for="erReason">Reason</label>
+      <input id="erReason" class="field" type="text" maxlength="200" placeholder="e.g. erasure request, agreed by manager">
+      <label class="lbl" for="erName">Type the full name to confirm</label>
+      <input id="erName" class="field" type="text" placeholder="${esc(rec.first_name)} ${esc(rec.last_name)}" autocomplete="off">
+      <div class="actions"><button class="btn wide danger-ghost" id="eraseBtn" type="button">Erase permanently</button></div>
+    </div>` : ""}
+
+    <div class="formcard">
+      ${departed ? `
+        <h2>Reactivate</h2>
+        <p class="hint flush">Puts ${esc(rec.first_name)} back on the daily register from today.</p>
+        <div class="actions"><button class="btn wide" id="reactivate" type="button">Reactivate</button></div>
+      ` : `
+        <h2 class="danger">Mark as departed</h2>
+        <p class="hint flush">The daily rule stops applying after the date given. Set it before the next
+          nightly close-out, or the days after it are recorded as missed.</p>
+        <label class="lbl" for="efDeparted">Last day on site</label>
+        <input id="efDeparted" class="field" type="date" value="${todayISODate()}" max="${todayISODate()}">
+        <div class="actions"><button class="btn wide danger-ghost" id="depart" type="button">Mark as departed</button></div>
+      `}
+    </div>`;
+  el.hidden = false;
+  mountHistory($("detailHistory"), rec.id, { canExport: true }); // everyone on this page is a supervisor or admin
+
+  let idType = type;
+  el.querySelectorAll("#editForm .seg button").forEach((b) => b.addEventListener("click", () => {
+    idType = b.dataset.type;
+    el.querySelectorAll("#editForm .seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    $("efNumber").hidden = !idType;
+    if (idType) $("efNumber").focus();
+  }));
+  $("closeDetail").onclick = () => renderDetail(null);
+
+  if ($("hhCard")) {
+    const renderMembers = async () => {
+      const members = await guarded(() => apiGet(`/api/residents/${rec.id}/household`), () => {});
+      const box = $("hhMembers");
+      if (!box) return; // the sheet closed while the request was out
+      if (!members || !members.length) { box.innerHTML = "Not linked to a family."; return; }
+      box.innerHTML = `<div class="occ">${members.map((m) => personChip(m, { current: m.id === rec.id })).join("")}</div>
+        <p class="hint tight"><button class="linkish" type="button" id="hhLeave">Remove ${esc(rec.first_name)} from this family</button></p>`;
+      $("hhLeave").onclick = async () => {
+        const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { household_id: null }), (err) => toast("Not changed: " + err.message, "err"));
+        if (!out) return;
+        toast("Removed from the family", "ok"); renderMembers(); loadResidents();
+      };
+    };
+    renderMembers();
+    $("hhJoin").addEventListener("click", async () => {
+      const withId = $("hhWith").value;
+      if (!withId) return toast("Choose whose family to join", "err");
+      const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { household_with: withId }), (err) => toast("Not changed: " + err.message, "err"));
+      if (!out) return;
+      toast("Added to the family", "ok"); $("hhWith").value = ""; renderMembers(); loadResidents();
+    });
+  }
+
+  if ($("absCard")) {
+    const REASON = { holiday: "Holiday", family: "Family", medical: "Medical", interview: "IPO interview", education: "Education", work: "Work", other: "Other" };
+    const renderAbs = async () => {
+      const rows = await guarded(() => apiGet(`/api/residents/${rec.id}/absences`), () => {});
+      const box = $("absList");
+      if (!box) return; // the sheet closed while the request was out
+      if (!rows) return;
+      if (!rows.length) { box.innerHTML = "None recorded."; return; }
+      const today = todayISODate();
+      box.innerHTML = `<div class="abslist">${rows.map((a) => {
+        const until = a.ended_on || a.to_date;
+        const live = a.from_date <= today && until >= today;
+        const future = a.from_date > today;
+        return `<div class="logrow wide">
+          <time>${esc(dayLabel(a.from_date))} – ${esc(dayLabel(until))}</time>
+          <span class="dir ${live ? "out" : "chk"}">${live ? "AWAY" : future ? "PLANNED" : "PAST"}</span>
+          <span class="body">${esc(REASON[a.reason] || a.reason)}${a.guardian_agreed ? " · guardian agreed" : ""}${a.ended_on && a.ended_on < a.to_date ? ` · cut short (planned to ${esc(dayLabel(a.to_date))})` : ""}
+            <span class="by">recorded by ${esc(a.approved_by || "—")}</span>
+            ${live || future ? `<button class="linkish" type="button" data-end="${a.id}">${live ? "Back early: end today" : "Cancel"}</button>` : ""}</span>
+        </div>`; }).join("")}</div>`;
+      box.querySelectorAll("button[data-end]").forEach((b) => b.addEventListener("click", async () => {
+        const a = rows.find((x) => String(x.id) === b.dataset.end);
+        const last = a.from_date > today ? "1900-01-01" : today;
+        const out = await guarded(() => apiPost(`/api/residents/${rec.id}/absences/${a.id}/end`, { last_day: last }), (err) => toast("Not changed: " + err.message, "err"));
+        if (!out) return;
+        toast(out.cancelled ? "Absence cancelled" : "Absence ended; from tomorrow the daily rule applies", "ok");
+        renderAbs(); loadResidents();
+      }));
+    };
+    renderAbs();
+    $("absForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("abSave").disabled = true;
+      const out = await guarded(() => apiPost(`/api/residents/${rec.id}/absences`, {
+        from_date: $("abFrom").value, to_date: $("abTo").value, reason: $("abReason").value, guardian_agreed: $("abGuardian").checked,
+      }), (err) => toast("Not recorded: " + err.message, "err"));
+      $("abSave").disabled = false;
+      if (!out) return;
+      toast(out.warning ? `Absence recorded. ${out.warning}` : "Absence recorded", "ok");
+      renderAbs(); loadResidents();
+    });
+  }
+  if ($("brCard")) {
+    const KIND = { house_rules: "Breach of house rules", misuse: "Misuse of the verification system" };
+    const renderBr = async () => {
+      const rows = await guarded(() => apiGet(`/api/residents/${rec.id}/breaches`), () => {});
+      const box = $("brList"); if (!box || !rows) return; // the sheet may have closed meanwhile
+      if (!rows.length) { box.innerHTML = "None issued."; return; }
+      box.innerHTML = `<div class="abslist">${rows.map((b) => `<div class="logrow wide">
+          <time>${esc(dayLabel(b.issued_on))}</time>
+          <span class="body">${esc(KIND[b.kind] || b.kind)}${b.reference ? ` · ${esc(b.reference)}` : ""}<span class="by">recorded by ${esc(b.issued_by || "—")}</span></span>
+        </div>`).join("")}</div>`;
+    };
+    renderBr();
+    $("brForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("brSave").disabled = true;
+      const out = await guarded(() => apiPost(`/api/residents/${rec.id}/breaches`, { kind: $("brKind").value, issued_on: $("brOn").value, reference: $("brRef").value }), (err) => toast("Not recorded: " + err.message, "err"));
+      $("brSave").disabled = false;
+      if (!out) return;
+      toast("Breach report recorded", "ok"); $("brRef").value = "";
+      renderBr(); loadResidents();
+    });
+  }
+  if ($("roomHist")) {
+    guarded(() => apiGet(`/api/residents/${rec.id}/rooms`), () => {}).then((rows) => {
+      const box = $("roomHist"); if (!box || !rows) return; // the sheet may have closed meanwhile
+      if (!rows.length) { box.innerHTML = "No room recorded yet."; return; }
+      box.innerHTML = `<div class="abslist">${rows.map((r) => `<div class="logrow wide">
+          <time>${esc(dayTime(r.from_at))}${r.to_at ? ` – ${esc(dayTime(r.to_at))}` : " – now"}</time>
+          <span class="body">${esc(r.room_label)}<span class="by">moved by ${esc(r.changed_by || "—")}</span></span>
+        </div>`).join("")}</div>`;
+    });
+  }
+
+  $("editForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+      first_name: $("efFirst").value.trim(),
+      last_name:  $("efLast").value.trim(),
+      date_of_birth: $("efDob").value,
+      id_type: idType || null,
+      id_number: idType ? $("efNumber").value.trim().toUpperCase() : null,
+    };
+    if (featureOn("feature_buildings") && state.buildings.length) body.room_id = $("efRoom").value || null;
+    if (featureOn("feature_evacuation")) body.evac_need = $("efEvac").value;
+    $("efSave").disabled = true;
+    const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, body), (err) => toast("Not saved: " + err.message, "err"));
+    $("efSave").disabled = false;
+    if (!out) return;
+    toast("Saved", "ok");
+    renderDetail(null);
+    loadResidents();
+  });
+
+  const depart = $("depart");
+  if (depart) depart.onclick = async () => {
+    const on = $("efDeparted").value;
+    if (!on) { toast("Enter the last day on site", "err"); return; }
+    if (!confirm(`Mark ${rec.first_name} ${rec.last_name} as departed on ${on}? The daily rule stops applying after that date.`)) return;
+    const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { status: "departed", departed_on: on }), (err) => toast("Not changed: " + err.message, "err"));
+    if (!out) return;
+    toast(`${rec.first_name} ${rec.last_name} marked as departed`, "ok");
+    renderDetail(null);
+    state.status = "departed";
+    loadResidents();
+  };
+  const exportBtn = $("exportBtn");
+  if (exportBtn) exportBtn.onclick = () => {
+    const reason = $("exReason").value.trim();
+    if (!reason) { toast("Give the reason for the export", "err"); $("exReason").focus(); return; }
+    if (!Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
+    // A plain navigation: the server answers with Content-Disposition:
+    // attachment, so the browser saves the file and the page stays put.
+    window.location.href = `/api/residents/${rec.id}/export?reason=${encodeURIComponent(reason)}`;
+    toast("Export recorded and downloading", "ok");
+  };
+  const eraseBtn = $("eraseBtn");
+  if (eraseBtn) eraseBtn.onclick = async () => {
+    const reason = $("erReason").value.trim();
+    const typed = $("erName").value.trim();
+    if (!reason) { toast("Give the reason for the erasure", "err"); $("erReason").focus(); return; }
+    if (!typed) { toast("Type the full name to confirm", "err"); $("erName").focus(); return; }
+    if (!confirm(`Erase ${rec.first_name} ${rec.last_name} and their entire history? This cannot be undone.`)) return;
+    const out = await guarded(
+      () => api(`/api/residents/${rec.id}`, { method: "DELETE", body: { reason, confirm_name: typed } }),
+      (err) => toast("Not erased: " + err.message, "err"),
+    );
+    if (!out) return;
+    toast(`Erased. ${out.events_removed} movement${out.events_removed === 1 ? "" : "s"} and ${out.register_rows_removed} register day${out.register_rows_removed === 1 ? "" : "s"} removed.`, "ok");
+    renderDetail(null);
+    loadResidents();
+  };
+  const react = $("reactivate");
+  if (react) react.onclick = async () => {
+    const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { status: "active" }), (err) => toast("Not changed: " + err.message, "err"));
+    if (!out) return;
+    toast(`${rec.first_name} ${rec.last_name} is active again`, "ok");
+    renderDetail(null);
+    state.status = "active";
+    loadResidents();
+  };
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/* ========================================================================
+   Staff (admins only)
+   ====================================================================== */
+
+// Visibility is presentation, not security: every operation below is
+// refused by the database for anyone but an admin — the create/reset
+// functions re-check is_admin() themselves, and the profiles_admin_all
+// policy makes a non-admin's update match no rows.
+const staffRows = new Map();
+
+function staffCard(s) {
+  const meta = [
+    esc(s.email),
+    s.last_sign_in_at ? `last login ${ago(s.last_sign_in_at)}` : "never logged in",
+  ].join(" · ");
+  const roleOptions = ["guard", "supervisor", "admin"]
+    .map((r) => `<option value="${r}" ${r === s.role ? "selected" : ""}>${r}</option>`)
+    .join("");
+  // Only a supervisor or an admin may run the report the Sunday email
+  // summarises, so the tick is offered only for those roles (migration 037).
+  const weeklyReport = s.role === "guard" ? "" : `
+        <label class="check"><input type="checkbox" class="sWk" data-sid="${esc(s.id)}" ${s.weekly_report ? "checked" : ""}> <span>Gets the Sunday report</span></label>`;
+  // A separate tick from the Sunday report, deliberately: a designated
+  // safeguarding person may want the nightly alert and not the weekly return
+  // to head office, or the reverse (migration 041). Same role rule — the
+  // alert points at a report a guard cannot run.
+  const safeguarding = s.role === "guard" ? "" : `
+        <label class="check"><input type="checkbox" class="sSg" data-sid="${esc(s.id)}" ${s.safeguarding_alert ? "checked" : ""}> <span>Gets the nightly safeguarding alert</span></label>`;
+  return `
+    <div class="card staff">
+      <span class="who">
+        <span class="name">${esc(s.full_name)}</span>
+        <span class="meta">${meta}</span>${weeklyReport}${safeguarding}
+      </span>
+      <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
+      <span class="actions-row">
+        <select class="field sRole compact" data-sid="${esc(s.id)}" aria-label="Role for ${esc(s.full_name)}">${roleOptions}</select>
+        <button class="btn ghost sPw"  data-sid="${esc(s.id)}" type="button">Send&nbsp;login&nbsp;link</button>
+        <button class="btn ghost sTgl" data-sid="${esc(s.id)}" type="button">${s.active ? "Disable" : "Enable"}</button>
+      </span>
+    </div>`;
+}
+
+/* ---- the site staff list (migration 030) ---- */
+async function loadRoster() {
+  const all = $("rosterShowAll").checked;
+  const rows = await guarded(() => apiGet(`/api/roster${all ? "?all=1" : ""}`), (err) => showError("Could not load the staff list: " + err.message));
+  if (!rows) return;
+  const box = $("rosterList");
+  if (!rows.length) { box.innerHTML = "Nobody on the list yet."; return; }
+  box.innerHTML = `<div class="abslist">${rows.map((r) => `<div class="logrow wide ${r.active ? "" : "gone"}">
+      <span class="body"><b>${esc(r.name)}</b>${r.role ? ` · ${esc(r.role)}` : ""}${r.visit_id ? ' <span class="pill in">On site</span>' : ""}${r.active ? "" : ' <span class="pill departed">Archived</span>'}
+        <span class="by"><button class="linkish" type="button" data-roster-toggle="${esc(r.id)}" data-active="${r.active ? "1" : "0"}">${r.active ? "Archive" : "Restore"}</button></span></span>
+    </div>`).join("")}</div>`;
+}
+$("rosterAdd").addEventListener("click", async () => {
+  const rows = $("rosterText").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [name, ...rest] = l.split(",");
+    return { name: name.trim(), role: rest.join(",").trim() };
+  });
+  if (!rows.length) return toast("Type at least one name", "err");
+  $("rosterAdd").disabled = true;
+  const out = await guarded(() => apiPost("/api/roster/import", { rows }), (err) => toast("Not added: " + err.message, "err"));
+  $("rosterAdd").disabled = false;
+  if (!out) return;
+  toast(`${out.added} added${out.skipped ? `, ${out.skipped} already listed` : ""}`, "ok");
+  $("rosterText").value = "";
+  loadRoster();
+});
+$("rosterShowAll").addEventListener("change", loadRoster);
+$("rosterList").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-roster-toggle]");
+  if (!b) return;
+  const out = await guarded(() => apiPatch(`/api/roster/${b.dataset.rosterToggle}`, { active: b.dataset.active !== "1" }), (err) => toast("Not changed: " + err.message, "err"));
+  if (!out) return;
+  toast(out.active ? "Back on the list" : "Archived", "ok");
+  loadRoster();
+});
+
+async function loadStaff() {
+  const rows = await guarded(
+    () => apiGet("/api/staff"),
+    (err) => showError("Could not load staff: " + err.message),
+  );
+  if (!rows) return;
+  showError("");
+  staffRows.clear();
+  rows.forEach((s) => staffRows.set(s.id, s));
+  $("staffList").innerHTML = rows.length
+    ? rows.map(staffCard).join("")
+    : `<p class="empty">No staff accounts.</p>`;
+
+  // A guard terminal already says this in red (public/checkin.html) when
+  // nobody is signed up for the nightly safeguarding alert, but that is not
+  // where the fix happens — this tab is. Checked here rather than polled, so
+  // it settles the moment a box below is ticked and this list reloads.
+  const health = await guarded(() => apiGet("/api/session/health"), () => null);
+  const sg = $("safeguardingNotice");
+  if (health && health.safeguarding_alert_unset) {
+    sg.innerHTML = `<b>Nobody receives the nightly safeguarding alert.</b> Tick "Gets the nightly safeguarding alert" for at least one supervisor or admin below.`;
+    sg.hidden = false;
+  } else {
+    sg.hidden = true;
+  }
+}
+
+// What the administrator needs to know after a link is (or is not) sent.
+function showLinkResult(out, who) {
+  const box = $("linkNotice");
+  if (out.delivered) {
+    toast(`Login link emailed to ${out.email}`, "ok");
+    box.hidden = true; box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = `<b>Email is not configured on this service.</b> The link for ${esc(who)} was not sent.
+    Pass it on yourself — it works once and expires in 24 hours:<br>
+    <input class="field mt8" id="linkOut" readonly value="${esc(out.link)}">`;
+  box.hidden = false;
+  // A tap selects the whole link for copying. (An onclick="" attribute would
+  // be refused by the CSP, which admits scripts by hash only.)
+  $("linkOut").addEventListener("focus", (e) => e.target.select());
+  $("linkOut").addEventListener("click", (e) => e.target.select());
+}
+
+// What each role can and cannot do, shown as the role is chosen. The
+// authoritative list is test/permissions.js (docs/PERMISSIONS.md); this is
+// the same thing in the words a manager uses.
+const ROLE_HELP = {
+  guard: {
+    title: "A guard records at In & out and on the register.",
+    can: ["Sign residents in and out at the gate", "Record the daily check-in", "Open a resident's sheet: name, age, ID number (each opening is logged)", "Run a roll call and mark people safe", "Sign visitors and contractors in and out", "Read the day's movement log"],
+    cannot: ["See a date of birth", "Add, edit or remove residents", "Export a report or a record", "Change settings or turn features on", "Manage staff accounts"],
+  },
+  supervisor: {
+    title: "A supervisor manages the register as well as recording on it.",
+    can: ["Everything a guard can", "Add, edit and depart residents; import a spreadsheet", "Buildings and rooms; assign rooms, evacuation needs and families", "Export reports (a reason is required and logged)", "Add or change a resident's ID number"],
+    cannot: ["Manage staff accounts", "Change settings or feature switches", "Export or erase a resident's whole record", "See who viewed a record", "Log in from outside the home countries"],
+  },
+  admin: {
+    title: "An admin runs the site: people, settings and residents' rights.",
+    can: ["Everything a supervisor can", "Invite, disable and re-role staff", "Site settings, retention and feature switches", "Export or erase a resident's whole record (Art. 15 and 17)", "The 'Who viewed which record' report"],
+    cannot: ["Disable or demote their own account", "Log in from outside the home countries", "See another centre's residents"],
+  },
+};
+function renderRoleHelp() {
+  const r = ROLE_HELP[$("sfRole").value] || ROLE_HELP.guard;
+  // One line always; the lists on request, so the form stays short on a phone.
+  const wasOpen = $("sfRoleHelp").open;
+  $("sfRoleHelp").innerHTML = `
+    <summary><b>${esc(r.title)}</b></summary>
+    <div class="lists">
+      <ul>${r.can.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      <ul class="no">${r.cannot.map((x) => `<li>Cannot ${esc(x.charAt(0).toLowerCase() + x.slice(1))}</li>`).join("")}</ul>
+    </div>`;
+  $("sfRoleHelp").open = wasOpen;
+}
+$("sfRole").addEventListener("change", renderRoleHelp);
+renderRoleHelp();
+
+$("staffForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    full_name: $("sfName").value.trim(),
+    email:     $("sfEmail").value.trim(),
+    role:      $("sfRole").value,
+  };
+  $("sfAdd").disabled = true;
+  const out = await guarded(
+    () => apiPost("/api/staff", body),
+    (err) => toast("Not created: " + err.message, "err"),
+  );
+  $("sfAdd").disabled = false;
+  if (!out) return;
+  showLinkResult(out, body.full_name);
+  if (out.delivered) toast(`${body.full_name} added as ${body.role}; link emailed`, "ok");
+  $("staffForm").reset();
+  loadStaff();
+});
+
+$("staffList").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-sid]");
+  if (!btn) return;
+  const s = staffRows.get(btn.dataset.sid);
+  if (!s) return;
+
+  if (btn.classList.contains("sTgl")) {
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/active`, { active: !s.active }),
+      (err) => toast(err.message, "err"),
+    );
+    if (out) {
+      toast(`${s.full_name} ${out.active ? "enabled" : "disabled"}`, "ok");
+      loadStaff();
+    }
+  } else if (btn.classList.contains("sPw")) {
+    btn.disabled = true;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/link`, {}),
+      (err) => toast("Not sent: " + err.message, "err"),
+    );
+    btn.disabled = false;
+    if (out) showLinkResult(out, s.full_name);
+  }
+});
+
+$("staffList").addEventListener("change", async (e) => {
+  const sel = e.target.closest("select[data-sid]");
+  if (sel) {
+    const s = staffRows.get(sel.dataset.sid);
+    if (!s) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/role`, { role: sel.value }),
+      (err) => { toast(err.message, "err"); sel.value = s.role; },
+    );
+    if (out) {
+      toast(`${s.full_name} is now ${out.role}`, "ok");
+      loadStaff();
+    }
+    return;
+  }
+  const chk = e.target.closest("input.sWk[data-sid]");
+  if (chk) {
+    const s = staffRows.get(chk.dataset.sid);
+    if (!s) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/weekly-report`, { on: chk.checked }),
+      (err) => { toast(err.message, "err"); chk.checked = s.weekly_report; },
+    );
+    if (out) {
+      toast(out.weekly_report ? `${s.full_name} will get the Sunday report` : `${s.full_name} will not get the Sunday report`, "ok");
+      loadStaff();
+    }
+  }
+  const sg = e.target.closest("input.sSg[data-sid]");
+  if (sg) {
+    const s = staffRows.get(sg.dataset.sid);
+    if (!s) return;
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/safeguarding-alert`, { on: sg.checked }),
+      (err) => { toast(err.message, "err"); sg.checked = s.safeguarding_alert; },
+    );
+    if (out) {
+      toast(out.safeguarding_alert
+        ? `${s.full_name} will get the nightly safeguarding alert`
+        : `${s.full_name} will not get the nightly safeguarding alert`, "ok");
+      loadStaff();
+    }
+  }
+});
+
+/* ========================================================================
+   Buildings and rooms (supervisors and admins) — Stage 1 of the product roadmap
+   ====================================================================== */
+
+// "1-12" → 1..12; "G1, G2, 14" → those; each trimmed. Whatever the doors say.
+function expandRoomNumbers(text) {
+  const out = [];
+  for (const part of String(text || "").split(/[,\n]+/)) {
+    const p = part.trim();
+    if (!p) continue;
+    const m = p.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (m && Number(m[2]) >= Number(m[1]) && Number(m[2]) - Number(m[1]) < 200) {
+      for (let n = Number(m[1]); n <= Number(m[2]); n++) out.push(String(n));
+    } else out.push(p);
+  }
+  return out;
+}
+
+function roomOptions(selected) {
+  const opts = ['<option value="">No room</option>'];
+  for (const b of state.buildings) {
+    if (!b.rooms.length) continue;
+    opts.push(`<optgroup label="${esc(b.name)}">`);
+    for (const r of b.rooms) {
+      const label = `${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}${r.occupants ? ` (${r.occupants}/${r.contracted_capacity ?? r.capacity})` : ""}`;
+      opts.push(`<option value="${esc(r.id)}" ${r.id === selected ? "selected" : ""}>${label}</option>`);
+    }
+    opts.push("</optgroup>");
+  }
+  return opts.join("");
+}
+
+async function loadBuildings({ quiet = false } = {}) {
+  const rows = await guarded(() => apiGet("/api/buildings"), (err) => { if (!quiet) showError("Could not load buildings: " + err.message); });
+  if (!rows) return;
+  state.buildings = rows;
+  $("afRoomWrap").hidden = !featureOn("feature_buildings") || !rows.some((b) => b.rooms.length);
+  $("afRoom").innerHTML = roomOptions(null);
+  if (state.tab !== "buildings") return;
+  showError("");
+  $("occLegend").hidden = !rows.some((b) => b.rooms.some((r) => r.residents.length));
+  const box = $("buildingList");
+  if (!rows.length) { box.innerHTML = '<p class="empty">No buildings yet. Add the first one above.</p>'; return; }
+  box.innerHTML = rows.map((b) => {
+    const occ = b.rooms.reduce((n, r) => n + r.occupants, 0);
+    const cap = b.rooms.reduce((n, r) => n + r.capacity, 0);
+    const onSite = b.rooms.reduce((n, r) => n + r.on_site, 0);
+    return `
+    <div class="bld" data-bid="${esc(b.id)}">
+      <div class="bldhead">
+        <div><b>${esc(b.name)}</b><span class="hint"> · ${b.rooms.length} room${b.rooms.length === 1 ? "" : "s"} · ${occ}/${cap} beds · ${onSite} on site</span></div>
+        <button class="linkish" type="button" data-del-building="${esc(b.id)}" aria-label="Remove ${esc(b.name)}">remove building</button>
+      </div>
+      ${b.rooms.length ? `<div class="rooms">${b.rooms.map((r) => `
+        <div class="room ${r.occupants > (r.contracted_capacity ?? r.capacity) ? "over" : ""}" data-room="${esc(r.id)}">
+          <div class="roomhead">
+            <b>${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)}</b>
+            <span class="hint">${r.occupants}/${r.contracted_capacity ?? r.capacity}${r.contracted_capacity != null && r.contracted_capacity !== r.capacity ? ` (${r.capacity} beds)` : ""}${r.bed_config ? ` · ${esc(r.bed_config)}` : ""}${r.occupants ? ` · ${r.on_site} on site` : ""}</span>
+            ${r.status === "maintenance" ? `<span class="pill departed" title="${esc(r.note || "Under maintenance")}">maintenance</span>` : ""}
+            <button class="linkish" type="button" data-edit-room="${esc(r.id)}" aria-label="Edit room ${esc(r.number)}">edit</button>
+            <button class="linkish" type="button" data-del-room="${esc(r.id)}" aria-label="Archive room ${esc(r.number)}">archive</button>
+          </div>
+          <form class="roomEdit" data-rid="${esc(r.id)}" autocomplete="off" hidden>
+            <div class="grid3">
+              <div><label class="lbl">Beds</label><input class="field reCap" type="number" min="1" max="30" value="${r.capacity}" aria-label="Physical beds"></div>
+              <div><label class="lbl">Contracted</label><input class="field reContract" type="number" min="0" max="30" value="${r.contracted_capacity ?? ""}" placeholder="${r.capacity}" aria-label="Contracted beds"></div>
+              <div><label class="lbl">Bed set-up</label><input class="field reBeds" type="text" maxlength="80" value="${esc(r.bed_config || "")}" placeholder="double + bunk" aria-label="Bed configuration"></div>
+            </div>
+            <div class="grid2">
+              <div><label class="lbl">Status</label><select class="field reStatus" aria-label="Room status"><option value="open" ${r.status !== "maintenance" ? "selected" : ""}>Open</option><option value="maintenance" ${r.status === "maintenance" ? "selected" : ""}>Under maintenance</option></select></div>
+              <div><label class="lbl">Note for the weekly return</label><input class="field reNote" type="text" maxlength="120" value="${esc(r.note || "")}" placeholder="e.g. 1 bed free for a single woman" aria-label="Room note">
+              <p class="hint under">About the room, not a resident: this goes to head office in the Sunday report. Do not name anyone.</p></div>
+            </div>
+            <div class="actions"><button class="btn sm" type="submit">Save</button><button class="btn ghost sm" type="button" data-cancel-edit="${esc(r.id)}">Cancel</button></div>
+          </form>
+          ${r.residents.length ? `<div class="occ">${r.residents.map((p) => personChip(p)).join("")}</div>` : ""}
+        </div>`).join("")}</div>` : '<p class="hint flush">No rooms yet.</p>'}
+      ${b.archived_rooms && b.archived_rooms.length ? `<details class="archivedRooms"><summary class="hint">${b.archived_rooms.length} archived room${b.archived_rooms.length === 1 ? "" : "s"}</summary>
+        <div class="occ mt8">${b.archived_rooms.map((r) => `<span class="pill departed">${r.floor ? esc(r.floor) + " · " : ""}${esc(r.number)} <button class="linkish" type="button" data-restore-room="${esc(r.id)}">restore</button></span>`).join("")}</div></details>` : ""}
+      <form class="roomsForm" data-bid="${esc(b.id)}" autocomplete="off">
+        <div class="grid3">
+          <input class="field rfFloor" type="text" maxlength="20" placeholder="Floor (optional)" aria-label="Floor">
+          <input class="field rfNumbers" type="text" required placeholder="Rooms: 1-12 or G1, G2" aria-label="Room numbers">
+          <input class="field rfCap" type="number" min="1" max="30" value="2" aria-label="Beds per room" title="Beds per room">
+        </div>
+        <div class="actions"><button class="btn sm" type="submit">Add rooms</button></div>
+      </form>
+    </div>`;
+  }).join("");
+}
+
+$("bldForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("bfName").value.trim();
+  $("bfSave").disabled = true;
+  const out = await guarded(() => apiPost("/api/buildings", { name }), (err) => toast("Not added: " + err.message, "err"));
+  $("bfSave").disabled = false;
+  if (!out) return;
+  $("bldForm").reset();
+  toast(`${name} added`, "ok");
+  loadBuildings();
+});
+
+$("buildingList").addEventListener("submit", async (e) => {
+  const form = e.target.closest("form.roomsForm");
+  if (!form) return;
+  e.preventDefault();
+  const numbers = expandRoomNumbers(form.querySelector(".rfNumbers").value);
+  if (!numbers.length) return toast("Give at least one room number", "err");
+  const floor = form.querySelector(".rfFloor").value.trim();
+  const capacity = Number(form.querySelector(".rfCap").value || 1);
+  const rooms = numbers.map((number) => ({ floor, number, capacity }));
+  const out = await guarded(() => apiPost(`/api/buildings/${form.dataset.bid}/rooms`, { rooms }), (err) => toast("Not added: " + err.message, "err"));
+  if (!out) return;
+  toast(`${out.length} room${out.length === 1 ? "" : "s"} added`, "ok");
+  loadBuildings();
+});
+
+$("buildingList").addEventListener("submit", async (e) => {
+  const form = e.target.closest("form.roomEdit");
+  if (!form) return;
+  e.preventDefault();
+  const contract = form.querySelector(".reContract").value;
+  const body = { capacity: Number(form.querySelector(".reCap").value || 1), contracted_capacity: contract === "" ? null : Number(contract), bed_config: form.querySelector(".reBeds").value.trim(),
+                 status: form.querySelector(".reStatus").value, note: form.querySelector(".reNote").value.trim() };
+  const out = await guarded(() => apiPatch(`/api/rooms/${form.dataset.rid}`, body), (err) => toast("Not saved: " + err.message, "err"));
+  if (!out) return;
+  toast("Room saved", "ok");
+  loadBuildings();
+});
+$("buildingList").addEventListener("click", async (e) => {
+  const editRoom = e.target.closest("[data-edit-room]");
+  const cancelEdit = e.target.closest("[data-cancel-edit]");
+  const restore = e.target.closest("[data-restore-room]");
+  const delRoom = e.target.closest("[data-del-room]");
+  const delBld  = e.target.closest("[data-del-building]");
+  if (editRoom) {
+    const form = $("buildingList").querySelector(`form.roomEdit[data-rid="${editRoom.dataset.editRoom}"]`);
+    if (form) { form.hidden = !form.hidden; if (!form.hidden) form.querySelector(".reCap").focus(); }
+  } else if (cancelEdit) {
+    const form = $("buildingList").querySelector(`form.roomEdit[data-rid="${cancelEdit.dataset.cancelEdit}"]`);
+    if (form) form.hidden = true;
+  } else if (restore) {
+    const out = await guarded(() => apiPost(`/api/rooms/${restore.dataset.restoreRoom}/restore`, {}), (err) => toast("Not restored: " + err.message, "err"));
+    if (out) { toast("Room back in use", "ok"); loadBuildings(); }
+  } else if (delRoom) {
+    if (!confirm("Take this room out of use? A room that has been lived in is archived and keeps its history; one never used is removed. Refused while anyone lives in it.")) return;
+    const out = await guarded(() => apiDelete(`/api/rooms/${delRoom.dataset.delRoom}`), (err) => toast("Not archived: " + err.message, "err"));
+    if (out) { toast(out.archived ? "Room archived" : "Room removed", "ok"); loadBuildings(); }
+  } else if (delBld) {
+    if (!confirm("Remove this building and all its rooms? Refused while anyone lives in it.")) return;
+    const out = await guarded(() => apiDelete(`/api/buildings/${delBld.dataset.delBuilding}`), (err) => toast("Not removed: " + err.message, "err"));
+    if (out) loadBuildings();
+  }
+});
+
+/* ========================================================================
+   Reports (supervisors and admins) — Stage 4 of the product roadmap
+   ====================================================================== */
+async function loadReports() {
+  if (!$("rpFrom").value) {
+    const d = new Date(); const p = (v) => String(v).padStart(2, "0");
+    const iso = (x) => `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
+    $("rpTo").value = iso(d); d.setDate(d.getDate() - 6); $("rpFrom").value = iso(d);
+  }
+  $("reportView").hidden = true; $("reportActions").hidden = false;
+  const list = await guarded(() => apiGet("/api/reports"), (err) => showError("Could not load reports: " + err.message));
+  if (!list) return;
+  showError("");
+  $("reportList").innerHTML = list.filter((r) => !r.admin || canStaff()).map((r) => `
+    <div class="report">
+      <div><b>${esc(r.title)}</b><span class="hint">${r.ranged ? "For the dates above" : "As it stands now"}</span></div>
+      <div class="row">
+        <button class="btn ghost sm" type="button" data-view="${esc(r.name)}">View</button>
+        <button class="btn ghost sm" type="button" data-csv="${esc(r.name)}">CSV</button>
+        <button class="btn sm" type="button" data-xlsx="${esc(r.name)}">Excel</button>
+      </div>
+    </div>`).join("");
+}
+
+function reportQuery(name) {
+  const reason = $("rpReason").value.trim();
+  if (!reason) { toast("Give the reason for the export", "err"); $("rpReason").focus(); return null; }
+  return `/api/reports/${name}?from=${encodeURIComponent($("rpFrom").value)}&to=${encodeURIComponent($("rpTo").value)}&reason=${encodeURIComponent(reason)}`;
+}
+
+// The Weekly Register Update's own layout (migration 040): a heading and a
+// bullet per line for each of the five fixed sections, shown in that fixed
+// order even when a section is empty — this is the document Brighton's own
+// staff used to write out by hand every Sunday, so it keeps that shape
+// rather than the generic row-and-column table every other report gets. A
+// flagged bullet (an absence with a night not approved) is the one thing
+// that used to be picked out by hand with a highlighter; it still is.
+const WEEKLY_SECTIONS = ["Room updates", "Resident absences", "Updates from the weekend", "Resident removals", "Weekly register change"];
+
+function fmtDMY(iso) {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB");
+}
+
+function renderWeeklyDoc(out) {
+  const bySection = new Map();
+  for (const r of out.rows) {
+    if (!bySection.has(r.section)) bySection.set(r.section, []);
+    bySection.get(r.section).push(r);
+  }
+  const body = WEEKLY_SECTIONS.map((section) => {
+    const rows = bySection.get(section) || [];
+    const items = rows.map((r) => {
+      const flagged = r.status === "not approved" || r.status === "partly approved";
+      return `<li${flagged ? ' class="flag"' : ""}>${esc(r.line)}</li>`;
+    }).join("");
+    return `<h3>${esc(section)}:</h3>${items ? `<ul>${items}</ul>` : ""}`;
+  }).join("");
+  $("rpNarrative").innerHTML = `
+    <h2 class="wkTitle">${esc(state.settings?.site_name || "")} Weekly Register Updates WK Ending ${esc(fmtDMY(out.to))}</h2>
+    <p class="wkPeriod">Updates for the period between ${esc(fmtDMY(out.from))} - ${esc(fmtDMY(out.to))}</p>
+    ${body}`;
+}
+
+$("reportForm").addEventListener("submit", (e) => e.preventDefault());
+$("reportList").addEventListener("click", async (e) => {
+  const csvBtn = e.target.closest("[data-csv]");
+  const xlsxBtn = e.target.closest("[data-xlsx]");
+  const viewBtn = e.target.closest("[data-view]");
+  if (csvBtn) {
+    const q = reportQuery(csvBtn.dataset.csv); if (!q) return;
+    window.location.href = q; toast("Export recorded and downloading", "ok");
+  } else if (xlsxBtn) {
+    // Excel rather than CSV keeps a leading zero, keeps a date a date, and
+    // cannot execute a cell that begins "=". Same URL, same audit row.
+    const q = reportQuery(xlsxBtn.dataset.xlsx); if (!q) return;
+    window.location.href = q + "&format=xlsx"; toast("Export recorded and downloading", "ok");
+  } else if (viewBtn) {
+    const q = reportQuery(viewBtn.dataset.view); if (!q) return;
+    const out = await guarded(() => apiGet(q + "&format=json"), (err) => toast("Could not load: " + err.message, "err"));
+    if (!out) return;
+    $("rpTitle").textContent = out.title;
+    // Provenance, on the line that already prints. An inspector asking where
+    // a printout came from is asking exactly this, and a page that cannot
+    // answer is worth less. It does put a staff name on every sheet that
+    // leaves the building — a decision recorded in the design, not a slip.
+    $("rpSub").textContent = [
+      state.settings?.site_name || "",
+      out.from ? `${out.from} to ${out.to}` : "",
+      `${out.rows.length} row${out.rows.length === 1 ? "" : "s"}`,
+      `printed ${new Date().toLocaleString("en-IE")}`,
+      state.profile?.full_name ? `by ${state.profile.full_name}` : "",
+    ].filter(Boolean).join(" · ");
+    if (viewBtn.dataset.view === "weekly" && out.from && out.to) {
+      renderWeeklyDoc(out);
+      $("rpTableWrap").hidden = true; $("rpNarrative").hidden = false;
+    } else {
+      const cols = out.rows.length ? Object.keys(out.rows[0]) : [];
+      const head = (c) => c.replace(/_/g, " ");
+      const cell = (v) => v === null || v === undefined ? "" : typeof v === "boolean" ? (v ? "yes" : "no") : esc(String(v).replace(/T\d\d:\d\d:\d\d.*$/, ""));
+      $("rpTable").innerHTML = out.rows.length
+        ? `<thead><tr>${cols.map((c) => `<th>${esc(head(c))}</th>`).join("")}</tr></thead><tbody>${out.rows.map((r) => `<tr>${cols.map((c) => `<td>${cell(r[c])}</td>`).join("")}</tr>`).join("")}</tbody>`
+        : `<tbody><tr><td class="hint">Nothing in this range.</td></tr></tbody>`;
+      $("rpTableWrap").hidden = false; $("rpNarrative").hidden = true;
+    }
+    $("reportActions").hidden = true; $("reportView").hidden = false;
+    window.scrollTo(0, 0);
+  }
+});
+$("rpClose").addEventListener("click", () => { $("reportView").hidden = true; $("reportActions").hidden = false; });
+$("rpPrint").addEventListener("click", () => {
+  document.body.classList.add("printing"); window.print();
+  setTimeout(() => document.body.classList.remove("printing"), 500);
+});
+
+/* ========================================================================
+   Settings (admins only)
+   ====================================================================== */
+const SETTINGS_FIELDS = {
+  site_name: "stSite", local_timezone: "stTz", adult_age_years: "stAdult", due_soon_after_hour: "stDue",
+  warn_after_consecutive_nights: "stWarn", absence_window_limit: "stWinLimit", absence_window_days: "stWinDays", holiday_max_days: "stHoliday",
+  event_retention_days: "stEventDays", compliance_retention_days: "stCompDays", late_entry_window_hours: "stLate",
+  idle_lock_minutes: "stIdle", home_countries: "stHome",
+};
+
+const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify", weekly_report_email: "stWeekly" };
+
+async function loadSettings() {
+  const s = await guarded(() => apiGet("/api/settings"), (err) => showError("Could not load settings: " + err.message));
+  if (!s) return;
+  showError("");
+  for (const [col, id] of Object.entries(SETTINGS_FIELDS)) $(id).value = s[col] ?? "";
+  for (const [col, id] of Object.entries(FEATURE_FIELDS)) $(id).checked = !!s[col];
+  loadWindows();
+}
+
+const featureOn = (name) => !!(state.settings && state.settings[name]);
+function applyFeatures() {
+  $("tabBuildings").hidden = !featureOn("feature_buildings");
+  if (!featureOn("feature_buildings")) $("afRoomWrap").hidden = true;
+  $("afEvacWrap").hidden = !featureOn("feature_evacuation");
+  $("famHint").hidden = false;
+}
+
+$("settingsForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {};
+  for (const [col, id] of Object.entries(SETTINGS_FIELDS)) body[col] = $(id).value.trim();
+  for (const [col, id] of Object.entries(FEATURE_FIELDS)) body[col] = $(id).checked;
+  $("stSave").disabled = true;
+  const out = await guarded(() => apiPatch("/api/settings", body), (err) => toast("Not saved: " + err.message, "err"));
+  $("stSave").disabled = false;
+  if (!out) return;
+  // The switches take effect here at once; other tabs see them on their next load.
+  for (const col of Object.keys(FEATURE_FIELDS)) state.settings[col] = !!out[col];
+  if (out.mfa_email) toast("Codes by email are now required for supervisors and administrators", "ok");
+  applyFeatures();
+  toast("Settings saved", "ok");
+  loadSettings();
+});
+$("stReload").addEventListener("click", loadSettings);
+$("stWeeklySend").addEventListener("click", async () => {
+  $("stWeeklySend").disabled = true;
+  const out = await guarded(() => apiPost("/api/settings/weekly-report/send", {}), (err) => toast("Not sent: " + err.message, "err"));
+  $("stWeeklySend").disabled = false;
+  if (!out) return;
+  if (out.sent === 0) {
+    toast(`Nothing delivered for ${out.from} to ${out.to}: configure email (RESEND_API_KEY and MAIL_FROM) on the service`, "err");
+  } else {
+    toast(`Delivered for ${out.from} to ${out.to} to ${out.sent} of ${out.recipients} recipient${out.recipients === 1 ? "" : "s"}`, "ok");
+  }
+});
+async function loadWindows() {
+  const rows = await guarded(() => apiGet("/api/settings/absence-windows"), () => null);
+  if (!rows) return;
+  $("awList").innerHTML = rows.length ? rows.map((w) => `
+    <div class="report"><div><b>${esc(w.name)}</b><span class="hint">${esc(w.from_date)} to ${esc(w.to_date)}</span></div>
+      <button class="linkish" type="button" data-del-window="${w.id}" aria-label="Remove ${esc(w.name)}">remove</button></div>`).join("")
+    : '<p class="hint flush">No periods recorded. Holidays are never warned about until one is.</p>';
+}
+$("awAdd").addEventListener("click", async () => {
+  const body = { name: $("awName").value.trim(), from_date: $("awFrom").value, to_date: $("awTo").value };
+  const out = await guarded(() => apiPost("/api/settings/absence-windows", body), (err) => toast("Not added: " + err.message, "err"));
+  if (!out) return;
+  $("awName").value = ""; $("awFrom").value = ""; $("awTo").value = "";
+  toast("Period added", "ok"); loadWindows();
+});
+$("awList").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-del-window]"); if (!btn) return;
+  const out = await guarded(() => api(`/api/settings/absence-windows/${btn.dataset.delWindow}`, { method: "DELETE" }), (err) => toast("Not removed: " + err.message, "err"));
+  if (!out) return;
+  toast("Period removed", "ok"); loadWindows();
+});
+
+/* ========================================================================
+   Tabs, session, wiring
+   ====================================================================== */
+function selectTab(name) {
+  state.tab = name;
+  for (const t of ["residents", "absences", "buildings", "reports", "staff", "settings"]) {
+    const cap = t[0].toUpperCase() + t.slice(1);
+    $("tab" + cap).setAttribute("aria-selected", String(t === name));
+    $("panel" + cap).hidden = t !== name;
+  }
+  renderDetail(null);
+  if (name === "residents") { loadResidents(); refreshDemoBar(); }
+  if (name === "absences") loadAbsences();
+  if (name === "buildings") loadBuildings();
+  if (name === "reports") loadReports();
+  if (name === "staff") { loadRoster(); if (canStaff()) loadStaff(); }
+  if (name === "settings") loadSettings();
+}
+
+async function enterApp() {
+  if (Offline.isOnline()) await Offline.finishLogout();
+  let session;
+  try {
+    session = await apiGet("/api/session");
+    Offline.rememberSession(session);
+  } catch (err) {
+    if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
+    Offline.noteFailure(err);
+    return showLogin("The admin page needs a connection. Try again when it returns.");
+  }
+
+  const { profile, settings } = session;
+  state.profile = profile;
+  state.userId = profile.id;
+  state.settings = settings;
+  $("guardName").textContent = `· ${profile.full_name} · ${profile.role}`;
+  if (settings?.site_name) $("siteName").textContent = settings.site_name;
+
+  $("login").hidden = true;
+  $("app").hidden = false;
+  rememberView("admin");
+  idleLock.start();
+
+  if (!canResidents()) {
+    $("notForYou").hidden = false;
+    $("adminTabs").hidden = true;
+    $("panelResidents").hidden = true;
+    $("panelStaff").hidden = true;
+    return;
+  }
+  $("notForYou").hidden = true;
+  $("adminTabs").hidden = false;
+  $("tabStaff").hidden = false;                 // the site staff list is for supervisors too
+  $("accountsOnly").hidden = !canStaff();       // accounts and roles stay admin-only
+  $("tabSettings").hidden = !canStaff();
+  $("orgLink").hidden = !profile.platform_admin;
+  mountTips();
+  mountCoach({ app: "admin", title: "Admin in three lines", before: "residentList", points: [
+    "Residents: add one, or import a whole spreadsheet with a preview of every line first.",
+    "Reports need a reason and are logged. Staff are invited by email and never handed a password.",
+    "Settings: turn features on per site, set retention, and choose who needs an email code to log in.",
+  ] });
+  applyFeatures();
+  if (featureOn("feature_buildings")) loadBuildings({ quiet: true });
+  selectTab("residents");
+}
+
+function showLogin(message) {
+  idleLock.stop();
+  state.profile = null;
+  state.userId = null;
+  $("app").hidden = true;
+  $("login").hidden = false;
+  $("loginError").hidden = !message;
+  if (message) $("loginError").textContent = message;
+  $("email").focus();
+}
+
+// The admin page holds the most sensitive screens, so it locks itself after
+// the idle minutes set under Settings (default 20).
+const idleLock = mountIdleLock({
+  minutes: () => state.settings?.idle_lock_minutes,
+  onLock: async () => {
+    clearTerminalState();
+    await Offline.onLogout();
+    await logout();
+    showLogin(`Locked after ${state.settings?.idle_lock_minutes || 20} minutes without activity. Log in again.`);
+  },
+});
+
+mountLogin({ onReady: enterApp });
+
+$("logoutBtn").addEventListener("click", async () => {
+  clearTerminalState();
+  await Offline.onLogout();
+  await logout();
+  showLogin("");
+});
+
+let searchTimer;
+$("q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadResidents, 220); });
+$("statusFilter").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-status]");
+  if (!btn) return;
+  state.status = btn.dataset.status;
+  renderDetail(null);
+  loadResidents();
+});
+$("residentList").addEventListener("click", (e) => {
+  const card = e.target.closest("button.card");
+  if (!card) return;
+  if (state.famSelecting) {
+    const id = card.dataset.id;
+    if (state.famIds.has(id)) state.famIds.delete(id); else state.famIds.add(id);
+    card.classList.toggle("selected", state.famIds.has(id));
+    updateFamilyBar();
+    return;
+  }
+  openResident(card.dataset.id);
+});
+$("famToggle").addEventListener("click", () => setFamilySelecting(!state.famSelecting));
+$("famCancel").addEventListener("click", () => setFamilySelecting(false));
+$("famMake").addEventListener("click", makeFamily);
+$("famDepart").addEventListener("click", departMany);
+// A person chip anywhere (a room, a family) opens their record.
+// The ✕ on the sheet, Escape, or a tap on the page behind it — see
+// mountSheetDismiss() in app-common.js. Escape inside a field of the edit
+// form is left to the field, so a stray key never discards the changes.
+mountSheetDismiss(() => renderDetail(null));
+
+document.addEventListener("click", (e) => {
+  const chip = e.target.closest("button.person[data-open]");
+  if (!chip) return;
+  if (!state.rows.has(chip.dataset.open)) state.rows.set(chip.dataset.open, { id: chip.dataset.open });
+  openResident(chip.dataset.open);
+  $("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+$("tabResidents").addEventListener("click", () => selectTab("residents"));
+$("tabAbsences").addEventListener("click", () => selectTab("absences"));
+let absQTimer = null;
+$("absQ").addEventListener("input", () => { clearTimeout(absQTimer); absQTimer = setTimeout(loadAbsences, 200); });
+$("tabBuildings").addEventListener("click", () => selectTab("buildings"));
+$("tabReports").addEventListener("click", () => selectTab("reports"));
+$("tabStaff").addEventListener("click", () => selectTab("staff"));
+$("tabSettings").addEventListener("click", () => selectTab("settings"));
+
+// A 401 is the server saying this session is over, so it is an ending like
+// any other and gets the same teardown. It previously cleared nothing: the
+// encrypted register, its key, the remembered profile, the view choice and the
+// roll call all survived on a shared terminal after the server had already
+// refused the cookie — and a reload during a later outage walked back into the
+// revoked guard's app from the cached copy. No logout() round trip: the 401
+// already told us the cookie is dead.
+setUnauthenticatedHandler(async () => {
+  clearTerminalState();
+  try { await Offline.onLogout(); } catch (_) { /* the login screen still shows */ }
+  showLogin("Your session has ended. Log in again.");
+});
+
+Offline.registerWorker();
+Offline.mountUI({ getUserId: () => state.userId });
+
+enterApp();
+</script>
+</body>
+</html>

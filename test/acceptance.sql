@@ -1,0 +1,374 @@
+\set ON_ERROR_STOP on
+\pset pager off
+
+-- Assertion helper. RLS does not raise on SELECT, it silently filters rows to
+-- zero, so reporting on success/failure alone would call a blocked read
+-- "ALLOWED". Report the affected row count too.
+-- Assertion helper, same shape as compliance.sql's. This file had none: every
+-- value in it was PRINTED and compared by eye, including the data-minimisation
+-- check that docs/procedures/RISK-REGISTER.md R3 cites as its evidence. A
+-- regression printed a different number and the suite still exited 0.
+create or replace function pg_temp.expect(label text, actual anyelement, expected anyelement)
+returns void language plpgsql as $$
+begin
+  if actual is distinct from expected then
+    raise exception 'ASSERTION FAILED: % — expected %, got %', label, expected, actual;
+  end if;
+  raise notice '  ok  %', label;
+end;
+$$;
+
+create or replace function pg_temp.try(label text, stmt text) returns text
+language plpgsql as $$
+declare n bigint;
+begin
+  execute stmt;
+  get diagnostics n = row_count;
+  if n = 0 then
+    return format('  no-op    %s  (0 rows)', label);
+  end if;
+  return format('  ALLOWED  %s  (%s row(s))', label, n);
+exception when others then
+  return format('  blocked  %s  (%s)', label, sqlerrm);
+end $$;
+
+-- ---------------------------------------------------------------- staff
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('11111111-1111-1111-1111-111111111111', 'guard@hut.example',  '{"full_name":"Gina Guard","role":"guard"}'),
+  ('22222222-2222-2222-2222-222222222222', 'super@hut.example',  '{"full_name":"Sam Supervisor","role":"supervisor"}'),
+  ('33333333-3333-3333-3333-333333333333', 'admin@hut.example',  '{"full_name":"Ada Admin","role":"admin"}'),
+  ('44444444-4444-4444-4444-444444444444', 'nobody@hut.example', '{"full_name":"Suspended Sid"}');
+
+update public.profiles set active = false where id = '44444444-4444-4444-4444-444444444444';
+
+\echo '### profiles auto-created by the auth trigger'
+select full_name, role, active from public.profiles order by full_name;
+
+\i :seed_path
+
+-- Capture ids while still superuser. A guard cannot run
+-- "select id from public.residents" at all -- that is the whole point of the
+-- minimisation policy -- so tests must not depend on being able to.
+select id as okonkwo_id from public.residents where last_name='Okonkwo' \gset
+select id as nair_id    from public.residents where last_name='Nair'    \gset
+select id as mensah_id  from public.residents where last_name='Mensah'  \gset
+
+\echo ''
+\echo '=========== A. WHAT A GUARD SEES ==========='
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+\echo '--- A1: guard-facing view (note: no date_of_birth column exists here)'
+select full_name, age_years, is_adult, presence
+from public.v_resident_status order by last_name;
+
+\echo '--- A2: data minimisation — rows of residents.date_of_birth each role sees'
+-- Asserted, not printed. This is RISK-REGISTER R3's evidence.
+select pg_temp.expect('a guard reads 0 rows of residents (no date of birth)',
+                      (select count(*) from public.residents), 0::bigint);
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select count(*) as sup_rows from public.residents \gset
+select pg_temp.expect('a supervisor reads the register', (:sup_rows > 0), true);
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select pg_temp.expect('an admin reads the same rows as a supervisor',
+                      (select count(*) from public.residents), :sup_rows::bigint);
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('v_resident_status still shows the guard every resident',
+                      (select count(*) from public.v_resident_status), :sup_rows::bigint);
+\echo '    (the guard still sees all 10 residents through v_resident_status —'
+\echo '     just without their dates of birth)'
+
+\echo ''
+\echo '--- A3: search (typo, reversed name order, accents)'
+select 'okonkwo'              as query, full_name from public.search_residents('okonkwo')
+union all select 'brennan aoife',         full_name from public.search_residents('brennan aoife')
+union all select 'novak (typo→Nowak)',    full_name from public.search_residents('novak')
+union all select 'okonkow (typo)',        full_name from public.search_residents('okonkow')
+union all select 'suilleabhain (accents)',full_name from public.search_residents('suilleabhain')
+union all select 'fitz (prefix)',         full_name from public.search_residents('fitz')
+union all select 'zzzz (no match)',       full_name from public.search_residents('zzzz');
+
+\echo ''
+\echo '=========== B. THE SIGN-IN FLOW ==========='
+\echo '--- B1: sign Okonkwo in; RPC returns her refreshed status'
+select full_name, presence
+from public.record_check(:'okonkwo_id', 'in');
+
+\echo '--- B2: double-tap protection (two more taps inside 60s)'
+select count(*) as in_events_before from public.gate_events
+ where resident_id=:'okonkwo_id' and kind='in';
+select 1 as _ from public.record_check(:'okonkwo_id','in') limit 1;
+select 1 as _ from public.record_check(:'okonkwo_id','in') limit 1;
+select count(*) as in_events_after from public.gate_events
+ where resident_id=:'okonkwo_id' and kind='in';
+
+\echo '--- B3: attribution — every event carries the guard who did it'
+select resident_name, kind, guard_name,
+       to_char(occurred_at,'HH24:MI:SS') as at
+from public.v_check_log order by occurred_at desc limit 3;
+
+\echo ''
+\echo '=========== D. INTEGRITY OF THE AUDIT TRAIL ==========='
+select pg_temp.try('guard UPDATEs an event',
+                   'update public.gate_events set kind=''out'' where id=(select min(id) from public.gate_events)');
+select (select count(*) from public.gate_events) as events_still_present;
+select pg_temp.try('guard DELETEs all events',
+                   'delete from public.gate_events where true');
+select (select count(*) from public.gate_events) as events_still_present_after_delete;
+select pg_temp.try('guard forges attribution to the admin',
+                   'insert into public.gate_events (resident_id,guard_id,kind) values ('
+                   || quote_literal(:'okonkwo_id') || ',''33333333-3333-3333-3333-333333333333'',''in'')');
+select pg_temp.try('guard promotes self to admin',
+                   'update public.profiles set role=''admin'' where id=auth.uid()');
+select full_name, role from public.profiles where id='11111111-1111-1111-1111-111111111111';
+select pg_temp.try('guard edits a resident record',
+                   'update public.residents set last_name=''Hacked'' where true');
+select pg_temp.try('guard widens the due-soon cutoff to 23:00',
+                   'update public.app_settings set due_soon_after_hour=23');
+
+\echo ''
+\echo '=========== E. SUSPENDED ACCOUNT ==========='
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+select count(*) as rows_visible_to_suspended_account from public.v_resident_status;
+select pg_temp.try('suspended account records a check',
+                   'select public.record_check(' || quote_literal(:'okonkwo_id') || ',''in'')');
+
+\echo ''
+\echo '=========== F. GDPR OPERATIONS ==========='
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.try('guard runs an Art.15 export',
+                   'select public.export_resident_record(' || quote_literal(:'okonkwo_id') || ')');
+select pg_temp.try('guard erases a resident',
+                   'select public.erase_resident(' || quote_literal(:'okonkwo_id') || ')');
+
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+\echo '--- F1: admin Art.15 / Art.20 export'
+select jsonb_pretty(public.export_resident_record(
+         :'nair_id')) as portable_export;
+
+\echo '--- F2: admin Art.17 erasure'
+select count(*) as nair_events_before from public.gate_events
+ where resident_id=:'nair_id';
+select public.erase_resident(:'nair_id',
+                             'DSR: erasure requested 2026-08-07') as result;
+select count(*) as nair_resident_rows_after from public.residents where last_name='Nair';
+select count(*) as orphan_events_after from public.gate_events e
+ where not exists (select 1 from public.residents r where r.id=e.resident_id);
+\echo '    erasure_log keeps proof but not the person:'
+select events_removed, reason, left(resident_digest,20)||'…' as digest from public.erasure_log;
+
+\echo ''
+\echo '=========== G. RETENTION PURGE ==========='
+reset role;
+update public.app_settings set event_retention_days = 1;
+insert into public.gate_events (resident_id, guard_id, kind, occurred_at)
+values (:'mensah_id',
+        '11111111-1111-1111-1111-111111111111','in', now() - interval '10 days');
+select count(*) as before_purge from public.gate_events;
+select public.purge_expired_gate_events() as rows_purged;
+select count(*) as after_purge from public.gate_events;
+update public.app_settings set event_retention_days = 90;
+
+\echo ''
+\echo '=========== H. LOGGED-OUT (anon key only) ==========='
+reset role;
+set request.jwt.claim.sub = '';   -- logged out: auth.uid() is null
+set role anon;
+select pg_temp.try('anon reads the resident view',   'select * from public.v_resident_status');
+select pg_temp.try('anon reads the log view',        'select * from public.v_check_log');
+select pg_temp.try('anon searches residents',        'select public.search_residents(''a'')');
+select pg_temp.try('anon reads residents table',     'select * from public.residents');
+select pg_temp.try('anon inserts a check event',     'insert into public.gate_events (resident_id,guard_id,kind) values (''11111111-2222-3333-4444-555555555555'',''11111111-2222-3333-4444-555555555555'',''in'')');
+reset role;
+
+\echo ''
+\echo '=========== I. SCHEMA SHAPE ==========='
+reset role;
+select
+  to_regclass('public.gate_events')  is not null as gate_events_exists,
+  to_regclass('public.check_events') is     null as old_name_gone,
+  exists (select 1 from information_schema.columns
+          where table_name='residents' and column_name='departed_on') as residents_has_departed_on,
+  exists (select 1 from information_schema.columns
+          where table_name='app_settings' and column_name='due_soon_after_hour') as settings_has_cutoff,
+  exists (select 1 from information_schema.columns
+          where table_name='app_settings' and column_name='compliance_window_hours') = false as old_window_gone;
+
+\echo ''
+\echo '=========== J. THE ACCESS LOG (migration 023) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+\echo '--- the guard opens Okonkwo''s sheet: allowed, and it leaves a row'
+select public.note_view(:'okonkwo_id', 'register');
+select pg_temp.try('guard reads the access log',           'select * from public.resident_views');
+select pg_temp.try('guard runs the access report',         'select * from public.resident_views_between(current_date - 1, current_date + 1)');
+select pg_temp.try('guard inserts into the access log',    format('insert into public.resident_views (actor_id, resident_id, surface) values (auth.uid(), %L, %L)', :'okonkwo_id', 'admin'));
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.try('supervisor runs the access report',    'select * from public.resident_views_between(current_date - 1, current_date + 1)');
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+\echo '--- the admin reads the log and the report: the guard, the resident, the surface'
+select count(*) as rows_visible_to_admin from public.resident_views;
+select staff, resident, "where" from public.resident_views_between(current_date - 1, current_date + 1);
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon notes a view',                    format('select public.note_view(%L, %L)', :'okonkwo_id', 'register'));
+reset role;
+
+\echo ''
+\echo '=========== K. VISITORS (migration 024) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+\echo '--- the guard signs a contractor in and out: allowed'
+select kind, name, company, left_at is null as on_site from public.record_visit_arrival('contractor', ' Pat Sparks ', 'Sparks Ltd');
+select id as visit_id from public.visits where name = 'Pat Sparks' \gset
+select left_at is not null as signed_out from public.record_visit_departure(:'visit_id');
+select pg_temp.try('guard inserts a visit directly',        'insert into public.visits (kind, name) values (''visitor'', ''Direct'')');
+select pg_temp.try('guard edits a visit directly',          format('update public.visits set name = ''Someone Else'' where id = %L', :'visit_id'));
+select pg_temp.try('guard deletes a visit',                 format('delete from public.visits where id = %L', :'visit_id'));
+select pg_temp.try('guard records a visit of an unknown kind', 'select public.record_visit_arrival(''spy'', ''X'', null)');
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon reads visits',                     'select * from public.visits');
+select pg_temp.try('anon signs a visitor in',               'select public.record_visit_arrival(''visitor'', ''X'', null)');
+reset role;
+
+\echo ''
+\echo '=========== L. AUTHORISED ABSENCES AND ROOM HISTORY (migration 028) ==========='
+reset role;
+insert into public.residents (first_name, last_name, date_of_birth) values ('Kid', 'Okonkwo', current_date - interval '9 years');
+select id as kid_id from public.residents where first_name = 'Kid' and last_name = 'Okonkwo' \gset
+\echo '--- a guard may read absences but not record one, nor write either table by hand'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select count(*) as guard_can_read_absences from public.authorised_absences;
+select pg_temp.try('guard authorises an absence',           format('select public.authorise_absence(%L, current_date, current_date + 2, ''holiday'')', :'okonkwo_id'));
+select pg_temp.try('guard inserts an absence directly',     format('insert into public.authorised_absences (resident_id, from_date, to_date, reason) values (%L, current_date, current_date, ''holiday'')', :'okonkwo_id'));
+select pg_temp.try('guard inserts room history directly',   format('insert into public.room_assignments (resident_id, room_label) values (%L, ''X'')', :'okonkwo_id'));
+reset role;
+\echo '--- a supervisor records one; a child needs a guardian''s agreement; overlaps are refused'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select reason, to_date - from_date + 1 as days, approved_by is not null as approved from public.authorise_absence(:'okonkwo_id', current_date, current_date + 2, 'holiday');
+select public.absence_authorised(:'okonkwo_id', current_date + 1) as tomorrow_authorised, public.absence_authorised(:'okonkwo_id', current_date + 3) as day_after_not;
+select pg_temp.try('supervisor overlaps an absence',        format('select public.authorise_absence(%L, current_date + 1, current_date + 4, ''family'')', :'okonkwo_id'));
+select pg_temp.try('child absence without a guardian',      format('select public.authorise_absence(%L, current_date, current_date, ''family'')', :'kid_id'));
+select guardian_agreed from public.authorise_absence(:'kid_id', current_date, current_date, 'family', true);
+select pg_temp.try('an unknown reason',                     format('select public.authorise_absence(%L, current_date + 10, current_date + 10, ''skiing'')', :'okonkwo_id'));
+select pg_temp.try('a holiday longer than the cap',         format('select public.authorise_absence(%L, current_date + 10, current_date + 30, ''holiday'')', :'okonkwo_id'));
+select kind, reference from public.issue_breach(:'okonkwo_id', 'house_rules', current_date, ' IPAS/1 ');
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select count(*) as guard_can_read_breaches from public.breach_reports;
+select pg_temp.try('guard records a breach report',         format('select public.issue_breach(%L, ''misuse'')', :'okonkwo_id'));
+select pg_temp.try('guard inserts a breach report directly', format('insert into public.breach_reports (resident_id, kind, issued_on) values (%L, ''misuse'', current_date)', :'okonkwo_id'));
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon reads absences',                   'select * from public.authorised_absences');
+select pg_temp.try('anon reads room history',               'select * from public.room_assignments');
+reset role;
+
+\echo ''
+\echo '=========== M. THE SITE STAFF LIST (migration 030) ==========='
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+\echo '--- a supervisor adds to the list'
+insert into public.staff_roster (name, role) values ('Mary Byrne', 'Kitchen');
+select id as mary_id from public.staff_roster where name = 'Mary Byrne' \gset
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+\echo '--- a guard reads it and signs a listed person in, but cannot change the list'
+select count(*) as guard_sees from public.staff_roster;
+select kind, name, company, roster_id is not null as from_list from public.record_staff_arrival(:'mary_id');
+select pg_temp.try('guard signs the same listed person in twice', format('select public.record_staff_arrival(%L)', :'mary_id'));
+select pg_temp.try('guard adds to the staff list',            'insert into public.staff_roster (name) values (''Direct'')');
+select pg_temp.try('guard archives a listed person',          format('update public.staff_roster set active = false where id = %L', :'mary_id'));
+reset role;
+set request.jwt.claim.sub = '';
+set role anon;
+select pg_temp.try('anon reads the staff list',               'select * from public.staff_roster');
+reset role;
+
+\echo ''
+\echo '
+
+\echo '=========== N. THE WEEKLY REPORT FLAG (migration 037) ==========='
+-- Dedicated accounts, not the shared guard/supervisor/admin above: this
+-- section changes a role directly by SQL, and compliance.sql (run next by
+-- test/sql.sh, same database) still expects those three at the roles set up
+-- at the top of this file.
+reset role;
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('99999999-9999-9999-9999-999999999901', 'wr-guard@hut.example', '{"full_name":"Wendy Guard","role":"guard"}'),
+  ('99999999-9999-9999-9999-999999999902', 'wr-super@hut.example', '{"full_name":"Sian Supervisor","role":"supervisor"}');
+
+\echo '--- a guard can never carry the flag, not even by a direct write as the owner:'
+\echo '    the guarantee lives in a check constraint, not the route'
+select pg_temp.try('a direct UPDATE ticks the weekly report flag on a guard',
+  'update public.profiles set weekly_report = true where id = ''99999999-9999-9999-9999-999999999901''');
+
+\echo '--- demoting a ticked supervisor to guard clears the flag by trigger rather than fail'
+update public.profiles set weekly_report = true where id = '99999999-9999-9999-9999-999999999902';
+update public.profiles set role = 'guard' where id = '99999999-9999-9999-9999-999999999902';
+do $$
+declare v boolean;
+begin
+  select weekly_report into v from public.profiles where id = '99999999-9999-9999-9999-999999999902';
+  if v is distinct from false then
+    raise exception 'demoting a ticked supervisor to guard did not clear weekly_report (got %)', v;
+  end if;
+end $$;
+\echo '    weekly_report cleared on demotion — ok'
+reset role;
+\echo '=========== O. PRIVILEGES RLS CANNOT GOVERN (migration 038) ==========='
+-- These four are invisible to every policy test: TRUNCATE, referential
+-- cascades and function EXECUTE are decided by the privilege system, not by
+-- row-level security. They are asserted here so they cannot come back.
+reset role;
+set request.jwt.claim.sub = '';
+
+\echo '--- N1: no request role may TRUNCATE a ledger, the register or the audit trail'
+select pg_temp.expect(
+  format('%s cannot truncate %s', r, t),
+  has_table_privilege(r, t, 'TRUNCATE'), false)
+from unnest(array['anon','authenticated','service_role']) as g(r)
+cross join unnest(array['public.gate_events','public.checkin_events','public.daily_compliance',
+                        'public.residents','public.admin_audit','public.erasure_log']) as x(t);
+
+\echo '--- N2: DELETE on residents is admin-only, so cascades cannot bypass erase_resident()'
+select pg_temp.expect('no supervisor-level DELETE policy on residents',
+  (select count(*) from pg_policies
+    where schemaname='public' and tablename='residents' and cmd='DELETE'
+      and qual like '%is_supervisor%'), 0::bigint);
+select pg_temp.expect('exactly one admin DELETE policy on residents',
+  (select count(*) from pg_policies
+    where schemaname='public' and tablename='residents' and cmd='DELETE'
+      and qual like '%is_admin%'), 1::bigint);
+
+\echo '--- N3: erasure_log is append-only — the proof cannot be deleted by whoever wrote it'
+select pg_temp.expect('no UPDATE or DELETE policy on erasure_log',
+  (select count(*) from pg_policies
+    where schemaname='public' and tablename='erasure_log' and cmd in ('UPDATE','DELETE')), 0::bigint);
+
+\echo '--- N4: the maintenance functions are not executable by a request role'
+select pg_temp.expect(
+  format('%s cannot execute %s', r, f),
+  has_function_privilege(r, f, 'EXECUTE'), false)
+from unnest(array['anon','authenticated','service_role']) as g(r)
+cross join unnest(array['public.close_out_compliance_days(date)',
+                        'public.purge_expired_gate_events()',
+                        'public.purge_expired_checkin_events()',
+                        'public.purge_expired_compliance()']) as x(f);
+
+\echo ''
+\echo '=========== DONE ==========='
