@@ -55,6 +55,12 @@ function toast(msg, kind = "ok") {
   const el = $("toast");
   el.textContent = msg;
   el.className = "show " + kind;
+  // A toast is a passing note; it must never sit on top of the very button
+  // it is telling you about. The multi-select bar ("N selected ... Sign IN /
+  // Sign OUT") is fixed to the bottom of the screen too, so when it is on
+  // screen the toast lifts above it instead of covering it.
+  const bar = document.querySelector(".multibar:not([hidden])");
+  el.style.bottom = bar ? `${bar.offsetHeight + 12}px` : "";
   clearTimeout(toast._t);
   if (kind === "err") {
     el.setAttribute("role", "alert");
