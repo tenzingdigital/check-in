@@ -721,7 +721,13 @@ async function renderRoll() {
     && (!state.rollBuilding || ((state.settings?.feature_buildings && r.building) || "No room recorded") === state.rollBuilding);
   const rows = allRows.filter(matches);
   if (!state.visitsOnSite) { try { state.visitsOnSite = JSON.parse(localStorage.getItem("visitsOnSite") || "[]"); } catch (_) { state.visitsOnSite = []; } }
-  const visits = state.settings?.feature_visitors && !state.rollNeedOnly && !state.rollBuilding ? (state.visitsOnSite || []).filter((v) => !q || String(v.name || "").toLowerCase().includes(q)) : [];
+  // Staff, visitors and contractors have no building of their own to filter
+  // by (migration 024: visits carries no building_id), so a building chip
+  // must never hide them — it used to (state.rollBuilding zeroed this out),
+  // which silently dropped them from both the list AND the "X of Y safe"
+  // count while any building but "All" was selected. rollNeedOnly still
+  // excludes them: "needs assistance" is a resident-only flag.
+  const visits = state.settings?.feature_visitors && !state.rollNeedOnly ? (state.visitsOnSite || []).filter((v) => !q || String(v.name || "").toLowerCase().includes(q)) : [];
   const vmarks = (roll && roll.vmarks) || {};
   const vdone = roll ? visits.filter((v) => vmarks[v.id]).length : 0;
   const total = rows.length + visits.length;
