@@ -44,9 +44,16 @@ router.get('/tenants', wrap(async (req, res) => {
       `select t.id, t.name, t.slug, t.status, t.created_at, t.trial_ends_at, t.closed_at,
               (select count(*)::int from auth.users u where u.tenant_id = t.id) as logins
          from public.tenants t order by t.created_at`);
+    // A schema behind on migrations (docs/KNOWN-ISSUES.md #4) is exactly what
+    // broke "cheksteadysitetest" silently — this is where it stays visible
+    // afterwards, not just in the boot log at the moment it happened
+    // (database.js's checkTenantSchemas()).
+    const { rows: gaps } = await client.query('select schema, missing_functions from public.tenant_schema_gaps()');
+    const gapsBySchema = new Map(gaps.map((g) => [g.schema, g.missing_functions]));
     for (const t of tenants) {
       t.schema = tenancy.schemaForSlug(t.slug);
       Object.assign(t, t.status === 'closed' ? { residents: null, staff: null, last_close_out: null } : await counts(client, t.schema));
+      t.schema_gaps = t.status === 'closed' ? [] : (gapsBySchema.get(t.schema) || []);
     }
     return tenants;
   });

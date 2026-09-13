@@ -52,34 +52,45 @@ way, so no explained breach can be pushed off the list.
 
 `database.js` migrates `public` only. A `t_*` tenant schema gets
 `tenant/template.sql` once, at provisioning, and nothing revisits it after
-that. Every per-tenant migration numbered 030 or higher — most recently 035
-(the Weekly register update), 036 (permitted absence periods) and 037
-(the Sunday report's recipients moving to the staff record) — assumes its
-objects already exist in every schema that answers a request; a tenant
-schema provisioned before one of those migrations landed does not have it,
-and would 500 on the routes that need it (`GET /api/settings`,
+that. Every per-tenant migration numbered 030 or higher assumes its objects
+already exist in every schema that answers a request; a tenant schema
+provisioned before one of those migrations landed does not have it, and
+would 500 on the routes that need it (`GET /api/settings`,
 `GET /api/buildings`, authorising a holiday, ticking a supervisor or admin
-to receive the Sunday report). `docs/MULTI-TENANCY.md`
-("Migration ordering") already says boot must refuse to serve a schema that
-is behind; nothing implements that check, and nothing back-fills a schema
-that falls behind.
+to receive the Sunday report).
 
-**Before deploying any migration numbered 030 or higher for the first time,
-run this against production:**
+**This happened.** A self-serve trial, "cheksteadysitetest", was
+provisioned before migration 041 added `profiles.safeguarding_alert`, and
+sat unnoticed until the nightly `overnight-safeguarding-alert` job started
+failing on it two days later ("column p.safeguarding_alert does not
+exist") — the exact silent gap this section warned about. Closed rather
+than backfilled (migration 047; it was a test signup, confirmed with
+Aimee, not a real centre).
 
-```sql
-select nspname from pg_namespace where nspname like 't\_%';
-```
+**Migration 048 makes the gap loud, not silent, but does not close it.**
+`public.tenant_schema_gaps()` compares each `t_*` schema's functions
+against `public`'s and reports what is missing; `database.js` calls it
+right after every `migrate()` (so a fresh gap shows in the boot log the
+same deploy it appears), and `GET /api/tenants` carries it into the
+platform-admin view (`org.html`) so it stays visible afterwards too. This
+catches the problem at the next boot or the next look at that screen —
+it does not bring a behind-schema current, and does not stop a deploy from
+shipping one further behind. **Before deploying any migration numbered 030
+or higher, check `GET /api/tenants` (or query `tenant_schema_gaps()`
+directly) for any tenant already behind, and bring it current by hand
+first if there is one** — the manual check `docs/MULTI-TENANCY.md`
+("Migration ordering") already called for, now with something to check
+instead of a cold `pg_namespace` query.
 
-Empty: only the `default` tenant exists in `public`, nothing to do. Any row:
-stop and confirm with the owner whether that tenant is missing the new
-migration's objects, and bring it current, before deploying. See
-`docs/MULTI-TENANCY.md` for the full note. **The decision:** whether to
-build the second migration ledger (apply pending per-tenant migrations to
-every `t_*` schema at boot, refusing to serve a schema still behind) or to
-keep doing the pre-deploy check by hand for as long as production has no
-non-`public` tenant. Out of scope for any single feature branch; it is a
-platform change.
+**The decision that is still open:** whether to go further and build the
+second migration ledger (apply pending per-tenant migrations to every
+`t_*` schema at boot automatically, refusing to serve a schema still
+behind) — replaying a migration file against another schema needs care
+that a blind `public.` → `t_xxx.` substitution does not obviously provide
+(cross-schema references to `auth.*` and `extensions.*` must not be
+rewritten), so this remains its own platform change, out of scope for any
+single feature branch. 048 is the detection half; the healing half is not
+built.
 
 ---
 

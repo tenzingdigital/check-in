@@ -24,6 +24,7 @@
 --   signup_requests
 --   tenant_demo_rows
 --   sweep_signup_requests
+--   tenant_schema_gaps
 
 -- pg_dump sets this in its own preamble and it is not optional here either.
 -- SQL-language functions are parsed at CREATE time, and pg_dump orders

@@ -274,6 +274,25 @@ async function migrate({ withOwner: owner = withOwner, log = console.log } = {})
   });
 }
 
+// Called once, right after migrate(), so a tenant schema left behind by a
+// migration is loud in the deploy log the moment it happens (docs/KNOWN-
+// ISSUES.md #4) — not discovered days later as a cron-job failure, the way
+// "cheksteadysitetest" was on 2026-09-13. Never fatal: an instance refusing
+// to boot over another tenant's stale schema would take down every centre's
+// service over one centre's problem, which is worse than the warning it
+// replaces. Also queried live by GET /api/tenants (routes/tenants.js), so it
+// stays visible after the moment the deploy log scrolled past.
+async function checkTenantSchemas({ owner = withOwner, log = console.log } = {}) {
+  const { rows } = await owner((client) => client.query('select schema, missing_functions from public.tenant_schema_gaps()'));
+  const behind = rows.filter((r) => r.missing_functions.length > 0);
+  for (const r of behind) {
+    log(`[migrate] WARNING: ${r.schema} is behind: missing ${r.missing_functions.join(', ')}. `
+      + 'This tenant was provisioned before a later migration; it will not have what that migration added. '
+      + 'See docs/KNOWN-ISSUES.md #4.');
+  }
+  return behind;
+}
+
 async function closePool() { await pool.end(); }
 
-module.exports = { query, withTransaction, withIdentity, withOwner, withOwnerIn, migrate, closePool, pool };
+module.exports = { query, withTransaction, withIdentity, withOwner, withOwnerIn, migrate, checkTenantSchemas, closePool, pool };

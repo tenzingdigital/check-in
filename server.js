@@ -85,6 +85,7 @@ async function boot() {
   }
 
   await db.migrate();
+  await db.checkTenantSchemas();
 
   // Demo databases only: SEED_TODAY_CHECKINS=1 gives every active resident a
   // check-in today at a random time (see seed-today.js — idempotent, so a

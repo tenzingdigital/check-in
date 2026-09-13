@@ -28,7 +28,7 @@ process.env.HUT_GEO_OVERRIDE = '1'; // lib/geo.js reads x-hut-test-country inste
 process.env.PUBLIC_URL = 'https://hut-check-in.onrender.com';
 const app = require('../server');
 const auth = require('../lib/auth');
-const { closePool, withIdentity, withOwner, migrate } = require('../database');
+const { closePool, withIdentity, withOwner, migrate, checkTenantSchemas } = require('../database');
 
 const PASSWORD = "correct-horse-battery";
 const EMAIL = "gina@hut.example";
@@ -667,7 +667,7 @@ async function main() {
 
   await test("every view, function, policy and index is provisioned too", async () => {
     const count = (sql, schema) => withOwner((c) => c.query(sql, [schema]));
-    const shared = `('tenants','schema_migrations','signup_requests','tenant_demo_rows','immutable_unaccent','touch_updated_at','tenant_may_write','expire_lapsed_trials','sweep_signup_requests','handle_new_user')`;
+    const shared = `('tenants','schema_migrations','signup_requests','tenant_demo_rows','immutable_unaccent','touch_updated_at','tenant_may_write','expire_lapsed_trials','sweep_signup_requests','handle_new_user','tenant_schema_gaps')`;
 
     const views = async (s) => (await count(
       `select table_name from information_schema.views where table_schema=$1 order by 1`, s)).rows.map((r) => r.table_name);
@@ -681,6 +681,33 @@ async function main() {
     const pols = async (s) => (await count(
       `select tablename||'.'||policyname as p from pg_policies where schemaname=$1 order by 1`, s)).rows.map((r) => r.p);
     assert.deepEqual(await pols("t_verify"), await pols("public"), "row-level security policies differ");
+  });
+
+  // The gap "cheksteadysitetest" fell into (docs/KNOWN-ISSUES.md #4): a
+  // tenant provisioned before a later migration lands never catches up on
+  // its own. tenant_schema_gaps() (migration 048) is what makes that loud
+  // instead of silent — proved here by provisioning a real tenant, then
+  // deliberately dropping one function from it to stand in for "a migration
+  // this schema predates."
+  await test("tenant_schema_gaps() reports a tenant schema that has fallen behind public", async () => {
+    const tenancy = require("../lib/tenancy");
+    await withOwner(async (c) => {
+      await c.query(`drop schema if exists t_driftcheck cascade`);
+      await tenancy.provisionSchema(c, "driftcheck", { siteName: "Drift Check" });
+    });
+    const before = await withOwner((c) => c.query(
+      `select missing_functions from public.tenant_schema_gaps() where schema = 't_driftcheck'`));
+    assert.deepEqual(before.rows[0].missing_functions, [], "a freshly provisioned schema should have no gaps");
+
+    await withOwner((c) => c.query(`drop function t_driftcheck.site_today() cascade`));
+    const after = await withOwner((c) => c.query(
+      `select missing_functions from public.tenant_schema_gaps() where schema = 't_driftcheck'`));
+    assert.ok(after.rows[0].missing_functions.includes("site_today"), "the dropped function should be reported missing");
+
+    await withOwner((c) => c.query(`drop schema if exists t_driftcheck cascade`));
+    const gone = await withOwner((c) => c.query(
+      `select 1 from public.tenant_schema_gaps() where schema = 't_driftcheck'`));
+    assert.equal(gone.rowCount, 0, "a dropped tenant schema should not appear at all");
   });
 
   // The point of the whole design: a tenant's data lives in its own schema, and
@@ -910,6 +937,7 @@ async function main() {
     const harbour = list.json.find((t) => t.slug === "harbour");
     assert.equal(harbour.residents, 1);
     assert.equal(harbour.staff, 3);
+    assert.deepEqual(harbour.schema_gaps, [], "a freshly provisioned tenant should carry no gaps (migration 048)");
     assert.equal(list.json.find((t) => t.slug === "default").schema, "public");
 
     const bad = await api.fetch("/api/tenants", { method: "POST", body: { name: "X", slug: "public", admin_name: "A", admin_email: "a@b.c" } });
@@ -1731,6 +1759,24 @@ async function main() {
     // put it back so later boots in this cluster are quiet
     const real = require("crypto").createHash("sha256").update(require("fs").readFileSync(require("path").join(__dirname, "..", "migrations", "001_platform.sql"), "utf8"), "utf8").digest("hex");
     await withOwner((c) => c.query(`update public.schema_migrations set checksum = $1 where name = '001_platform.sql'`, [real]));
+  });
+
+  // The other half of docs/KNOWN-ISSUES.md #4: checkTenantSchemas() is what
+  // database.js calls right after migrate(), so a tenant left behind by a
+  // migration is loud in the deploy log the same boot it happens, not
+  // discovered days later the way "cheksteadysitetest" was.
+  await test("a tenant schema that has fallen behind is shouted about at boot", async () => {
+    const tenancy = require("../lib/tenancy");
+    await withOwner(async (c) => {
+      await c.query(`drop schema if exists t_bootcheck cascade`);
+      await tenancy.provisionSchema(c, "bootcheck", { siteName: "Boot Check" });
+      await c.query(`drop function t_bootcheck.site_today() cascade`);
+    });
+    const lines = [];
+    const behind = await checkTenantSchemas({ log: (l) => lines.push(l) });
+    assert.ok(behind.some((r) => r.schema === "t_bootcheck"), "the drifted tenant is missing from the result");
+    assert.ok(lines.some((l) => /WARNING: t_bootcheck is behind.*site_today/.test(l)), "no drift warning for the tenant");
+    await withOwner((c) => c.query(`drop schema if exists t_bootcheck cascade`));
   });
 
   console.log("\n== who was off site at midnight (migration 027) ==");

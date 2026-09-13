@@ -112,6 +112,10 @@ async function loadCentres() {
       </div>
       <p class="hint flush">${t.status === "closed" ? `Closed ${esc(String(t.closed_at).slice(0, 10))}` :
         `${t.residents ?? "?"} active residents · ${t.staff ?? "?"} active staff · ${t.logins} logins · last close-out ${t.last_close_out ? esc(String(t.last_close_out).slice(0, 16).replace("T", " ")) : "never"}`}</p>
+      ${t.schema_gaps && t.schema_gaps.length ? `<p class="alert warn mt8">
+        <b>This centre's schema is behind.</b> It was provisioned before a later update and is missing:
+        ${esc(t.schema_gaps.join(", "))}. Do not ship another migration that assumes this exists until it is brought current.
+      </p>` : ""}
     </div>`).join("") || '<p class="empty">No centres.</p>';
 }
 $("centreForm").addEventListener("submit", async (e) => {
