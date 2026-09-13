@@ -166,8 +166,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name, room number or building…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="register">Daily register:</b><span>tap Check in on the card, or swipe it either way, to record today's check-in. Movements in and out are on In &amp; out.</span></p>
-      <p class="hint tight">Verify the person first. Tap a name for detail.</p>
+      <p class="jobline"><b class="register">Daily register:</b><span>Tap or swipe a card to check someone in. Movements in and out are on In &amp; out.</span></p>
       <div id="searchResults" class="list"></div>
     </section>
 
@@ -854,11 +853,6 @@ async function enterApp() {
   $("login").hidden = true;
   $("app").hidden = false;
   mountTips();
-  mountCoach({ app: "register", title: "The daily register in three lines", before: "searchResults", points: [
-    "Tap or swipe a card to check someone in.",
-    "Shows who hasn't been seen today; search for anyone.",
-    "Tap a name for their ID and history.",
-  ] });
 
   $("q").focus();
   refreshSummary();

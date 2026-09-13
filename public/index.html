@@ -168,8 +168,7 @@
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name, room number or building…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
-      <p class="jobline"><b class="gate">In &amp; out:</b><span>tap Sign in or Sign out on the card, or swipe it right to sign IN, left to sign OUT. Today's check-in is on the Daily register.</span></p>
-      <p class="hint tight">Verify the person first. Tap a name for detail. Tick two or more to sign them in or out together.</p>
+      <p class="jobline"><b class="gate">In &amp; out:</b><span>Tap or swipe a card to sign someone in or out. Today's check-in is on the Daily register.</span></p>
       <!-- "Select all shown" heads the tick column: its box sits in the same
            48px slot as every card's, directly above them, so it reads as that
            column's own control rather than a button that happens to be nearby.
@@ -1047,11 +1046,6 @@ async function enterApp() {
   loadRoll();
   syncRoll();
   mountTips();
-  mountCoach({ app: "gate", title: "The gate in three lines", before: "searchResults", points: [
-    "Tap or swipe a card to sign someone in or out.",
-    "Tap a tile above to filter the list.",
-    "Today's check-in lives on the Daily register.",
-  ] });
 
   $("login").hidden = true;
   $("app").hidden = false;
