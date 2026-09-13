@@ -1132,6 +1132,10 @@ function renderDetail(rec, summary) {
       `}
     </div>`;
   el.hidden = false;
+  // A fresh open always starts at the top, whatever page of a previous
+  // resident's sheet was left scrolled into view — the panel is one
+  // reused element, so its scroll position otherwise carries over.
+  el.scrollTop = 0;
   mountHistory($("detailHistory"), rec.id, { canExport: true }); // everyone on this page is a supervisor or admin
 
   let idType = type;

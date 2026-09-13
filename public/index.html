@@ -355,6 +355,10 @@ function withLetters(rows, wanted) {
 
 
 function renderDetail(r) {
+  // Opening a different resident is not the same as a re-render of the one
+  // already on screen (record() redraws it after a sign in/out to flip the
+  // pill under the guard's finger) — only the former should reset scroll.
+  const opening = !!r && !(state.selected && state.selected.id === r.id);
   state.selected = r;
   if (r) state.rows.set(r.id, r);
   const el = $("detail");
@@ -378,6 +382,7 @@ function renderDetail(r) {
     </div>
     <div id="detailHistory"></div>`;
   el.hidden = false;
+  if (opening) el.scrollTop = 0;
 
   $("doIn").onclick  = () => record(r.id, "in");
   $("doOut").onclick = () => record(r.id, "out");
