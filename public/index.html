@@ -134,9 +134,9 @@
         </div>
       </div>
       <nav class="viewswitch" aria-label="App view">
-        <span aria-current="page">In &amp; out</span>
-        <a href="/checkin.html">Daily register</a>
-        <a href="/admin.html" id="adminLink" hidden>Admin</a>
+        <span aria-current="page"><svg class="navico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="7 8 11 12 7 16"/><polyline points="17 8 13 12 17 16"/></svg>In &amp; out</span>
+        <a href="/checkin.html"><svg class="navico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M8.5 12.5l2 2 4-4.5"/></svg>Daily register</a>
+        <a href="/admin.html" id="adminLink" hidden><svg class="navico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><line x1="12" y1="3" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="3" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="21" y2="12"/><line x1="5.6" y1="5.6" x2="7.8" y2="7.8"/><line x1="16.2" y1="16.2" x2="18.4" y2="18.4"/><line x1="5.6" y1="18.4" x2="7.8" y2="16.2"/><line x1="16.2" y1="7.8" x2="18.4" y2="5.6"/></svg>Admin</a>
       </nav>
       <span id="netState" class="net" role="status" hidden></span>
 <a class="help" href="/help.html" aria-label="Help and guide" title="Help">?</a>
@@ -147,9 +147,9 @@
          residents, tap it again for everyone. Counted from the list itself,
          so the numbers and the list under them cannot disagree. -->
     <div class="stats">
-      <button class="stat ok" type="button" data-filter="in"    aria-pressed="false" data-tip="Residents whose last door movement was IN. Tap to see only them; tap again for everyone. Hold any tile for this note."><b id="statOnSite">–</b><span>On site</span></button>
-      <button class="stat"    type="button" data-filter="out"   aria-pressed="false" data-tip="Residents whose last movement was OUT, or who have never been signed in."><b id="statOffSite">–</b><span>Off site</span></button>
-      <button class="stat"    type="button" data-filter="today" aria-pressed="false" data-tip="Anyone with a door movement today, in or out. The Log tab lists each movement with the time and who recorded it."><b id="statToday">–</b><span>Moved today</span></button>
+      <button class="stat ok" type="button" data-filter="in"    aria-pressed="false" data-tip="Residents whose last door movement was IN. Tap to see only them; tap again for everyone. Hold any tile for this note."><svg class="statico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4 20 11"/><path d="M6.5 10v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-9"/></svg><div class="statbody"><b id="statOnSite">–</b><span>On site</span></div></button>
+      <button class="stat"    type="button" data-filter="out"   aria-pressed="false" data-tip="Residents whose last movement was OUT, or who have never been signed in."><svg class="statico" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="12" x2="17" y2="12"/><polyline points="12 6 18 12 12 18"/></svg><div class="statbody"><b id="statOffSite">–</b><span>Off site</span></div></button>
+      <button class="stat"    type="button" data-filter="today" aria-pressed="false" data-tip="Anyone with a door movement today, in or out. The Log tab lists each movement with the time and who recorded it."><svg class="statico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="8 6 4 10 8 14"/><line x1="4" y1="10" x2="15" y2="10"/><polyline points="16 10 20 14 16 18"/><line x1="20" y1="14" x2="9" y2="14"/></svg><div class="statbody"><b id="statToday">–</b><span>Moved today</span></div></button>
     </div>
 
   <main class="wrap">
