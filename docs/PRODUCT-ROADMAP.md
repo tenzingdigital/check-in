@@ -93,6 +93,18 @@ a supervisor's tool and add no data.**
 - Formats to follow whatever HIQA inspectors have actually asked a centre
   for, once one has.
 
+### Stage 4b — The inspection pack
+
+**Status: built 13 September 2026, no migration.** Four of the reports
+above — the weekly register update, vacancies, breach reports and the
+evacuation list — are what a HIQA/IPAS visit actually asks for, and a
+manager was exporting each one separately. `GET /api/reports/inspection-pack`
+runs all four in one call and the Reports tab has a single "Build pack"
+button that prints them as one document, each starting its own page. One
+`note_report()` call audits the whole pack, under the name
+`inspection-pack`; no schema changed, since the audit function already
+takes any report name.
+
 ## Stage 5 — Many centres
 
 **Status: built 4 September 2026 (migration 020), on the working branch and

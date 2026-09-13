@@ -108,9 +108,15 @@
   .rphead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 0; }
   .rphead h2 { margin: 0; font-size: 18px; }
   .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-  #rpTable, #impTable, #absTable { border-collapse: collapse; width: 100%; font-size: 13px; }
-  #rpTable th, #rpTable td, #impTable th, #impTable td, #absTable th, #absTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  #rpTable th, #impTable th, #absTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  #rpTable, #impTable, #absTable, .packTable { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #rpTable th, #rpTable td, #impTable th, #impTable td, #absTable th, #absTable td, .packTable th, .packTable td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  #rpTable th, #impTable th, #absTable th, .packTable th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+  /* Inspection pack: each of the four reports gets its own heading, and on
+     paper its own page — an inspector reading a printed pack expects one
+     document per page, not everything run together. */
+  .packSection { margin-bottom: 28px; }
+  .packSection:last-child { margin-bottom: 0; }
+  .packSection > h3 { margin: 0 0 8px; font-size: 15px; }
   #absTable td.at { color: var(--bad); font-weight: 600; }
   #absTable td.num { font-variant-numeric: tabular-nums; }
   #impTable td.st-error { color: var(--bad); white-space: normal; }
@@ -137,22 +143,29 @@
     body.printing #panelResidents, body.printing #panelAbsences, body.printing #panelBuildings, body.printing #panelStaff, body.printing #panelSettings,
     body.printing #toast, body.printing #detail, body.printing #notForYou { display: none !important; }
     body.printing .tablewrap { border: 0; overflow: visible; }
-    body.printing #rpTable th, body.printing #rpTable td { white-space: normal; border-color: #999; }
+    body.printing #rpTable th, body.printing #rpTable td,
+    body.printing .packTable th, body.printing .packTable td { white-space: normal; border-color: #999; }
     /* Column headings repeat on every page — a table that runs to page three
        is unreadable without them — and a resident's row is never split
        across a break. */
-    body.printing #rpTable thead { display: table-header-group; }
-    body.printing #rpTable tr { break-inside: avoid; }
+    body.printing #rpTable thead, body.printing .packTable thead { display: table-header-group; }
+    body.printing #rpTable tr, body.printing .packTable tr { break-inside: avoid; }
     /* The screen palette is dark. Printed as-is it is a page of ink and the
        text is unreadable on white, so the report prints black on white. */
     body.printing, body.printing #rpTable, body.printing #rpTable th,
     body.printing #rpTable td, body.printing .rphead, body.printing #rpTitle,
     body.printing #rpSub, body.printing .weeklyDoc, body.printing .weeklyDoc h3,
-    body.printing .weeklyDoc .wkPeriod { background: #fff !important; color: #000 !important; }
-    body.printing #rpTable th { position: static; }
+    body.printing .weeklyDoc .wkPeriod, body.printing .packTable, body.printing .packTable th,
+    body.printing .packTable td, body.printing .packSection > h3 { background: #fff !important; color: #000 !important; }
+    body.printing #rpTable th, body.printing .packTable th { position: static; }
     body.printing #rpSub { font-size: 9pt; }
     body.printing .weeklyDoc { border: 0; padding: 0; }
     body.printing .weeklyDoc li.flag { background: #fff3a3 !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    /* One report per printed page: a HIQA/IPAS inspector reading a stapled
+       pack expects each document to start clean, not run on from the last
+       row of the one before it. */
+    body.printing .packSection { break-before: page; }
+    body.printing .packSection:first-child { break-before: auto; }
   }
   @page { margin: 14mm; }
   .seg { display: flex; gap: 6px; }
@@ -398,6 +411,10 @@
             <div><label class="lbl" for="rpTo">To</label><input id="rpTo" class="field" type="date" required></div>
           </div>
           <div><label class="lbl" for="rpReason">Reason for the export <button class="tip" type="button" data-tip="Every export is written to the audit record with this reason and the date range. An inspector or a data-protection request can ask why a report was run, so say what it was for." aria-label="Why a reason is needed">?</button></label><input id="rpReason" class="field" type="text" maxlength="200" required placeholder="e.g. HIQA inspection 12 September"></div>
+          <div class="report" id="packCard">
+            <div><b>Inspection pack</b><span class="hint">Weekly register update, vacancies, breach reports and the evacuation list, combined into one document for a HIQA or IPAS visit.</span></div>
+            <div class="row"><button class="btn primary-in sm" type="button" id="packBtn">Build pack</button></div>
+          </div>
           <div id="reportList" class="list"></div>
         </form>
       </div>
@@ -408,6 +425,7 @@
         </div>
         <div id="rpTableWrap" class="tablewrap"><table id="rpTable"></table></div>
         <div id="rpNarrative" class="weeklyDoc" hidden></div>
+        <div id="rpPack" hidden></div>
       </div>
     </section>
 
@@ -1744,7 +1762,7 @@ function fmtDMY(iso) {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB");
 }
 
-function renderWeeklyDoc(out) {
+function weeklyDocHTML(out) {
   const bySection = new Map();
   for (const r of out.rows) {
     if (!bySection.has(r.section)) bySection.set(r.section, []);
@@ -1758,11 +1776,55 @@ function renderWeeklyDoc(out) {
     }).join("");
     return `<h3>${esc(section)}:</h3>${items ? `<ul>${items}</ul>` : ""}`;
   }).join("");
-  $("rpNarrative").innerHTML = `
+  return `
     <h2 class="wkTitle">${esc(state.settings?.site_name || "")} Weekly Register Updates WK Ending ${esc(fmtDMY(out.to))}</h2>
     <p class="wkPeriod">Updates for the period between ${esc(fmtDMY(out.from))} - ${esc(fmtDMY(out.to))}</p>
     ${body}`;
 }
+function renderWeeklyDoc(out) { $("rpNarrative").innerHTML = weeklyDocHTML(out); }
+
+// Shared by a single report's table view and each table section of the
+// inspection pack below — one row-and-column renderer, not two.
+function genericTableHTML(rows) {
+  const cols = rows.length ? Object.keys(rows[0]) : [];
+  const head = (c) => c.replace(/_/g, " ");
+  const cell = (v) => v === null || v === undefined ? "" : typeof v === "boolean" ? (v ? "yes" : "no") : esc(String(v).replace(/T\d\d:\d\d:\d\d.*$/, ""));
+  return rows.length
+    ? `<thead><tr>${cols.map((c) => `<th>${esc(head(c))}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td>${cell(r[c])}</td>`).join("")}</tr>`).join("")}</tbody>`
+    : `<tbody><tr><td class="hint">Nothing in this range.</td></tr></tbody>`;
+}
+
+// The inspection pack: the weekly register update in its own document shape,
+// then a page each for vacancies, breach reports and the evacuation list —
+// one printed document instead of four separate exports.
+function packQuery() {
+  const reason = $("rpReason").value.trim();
+  if (!reason) { toast("Give the reason for the export", "err"); $("rpReason").focus(); return null; }
+  return `/api/reports/inspection-pack?from=${encodeURIComponent($("rpFrom").value)}&to=${encodeURIComponent($("rpTo").value)}&reason=${encodeURIComponent(reason)}`;
+}
+function renderPack(out) {
+  $("rpTitle").textContent = "Inspection pack";
+  $("rpSub").textContent = [
+    state.settings?.site_name || "",
+    `${out.from} to ${out.to}`,
+    `printed ${new Date().toLocaleString("en-IE")}`,
+    state.profile?.full_name ? `by ${state.profile.full_name}` : "",
+  ].filter(Boolean).join(" · ");
+  $("rpPack").innerHTML = out.sections.map((s) => `<div class="packSection">${
+    s.name === "weekly"
+      ? `<div class="weeklyDoc">${weeklyDocHTML(s)}</div>`
+      : `<h3>${esc(s.title)}</h3><div class="tablewrap"><table class="packTable">${genericTableHTML(s.rows)}</table></div>`
+  }</div>`).join("");
+  $("rpTableWrap").hidden = true; $("rpNarrative").hidden = true; $("rpPack").hidden = false;
+}
+$("packBtn").addEventListener("click", async () => {
+  const q = packQuery(); if (!q) return;
+  const out = await guarded(() => apiGet(q), (err) => toast("Could not build pack: " + err.message, "err"));
+  if (!out) return;
+  renderPack(out);
+  $("reportActions").hidden = true; $("reportView").hidden = false;
+  window.scrollTo(0, 0);
+});
 
 $("reportForm").addEventListener("submit", (e) => e.preventDefault());
 $("reportList").addEventListener("click", async (e) => {
@@ -1793,16 +1855,12 @@ $("reportList").addEventListener("click", async (e) => {
       `printed ${new Date().toLocaleString("en-IE")}`,
       state.profile?.full_name ? `by ${state.profile.full_name}` : "",
     ].filter(Boolean).join(" · ");
+    $("rpPack").hidden = true;
     if (viewBtn.dataset.view === "weekly" && out.from && out.to) {
       renderWeeklyDoc(out);
       $("rpTableWrap").hidden = true; $("rpNarrative").hidden = false;
     } else {
-      const cols = out.rows.length ? Object.keys(out.rows[0]) : [];
-      const head = (c) => c.replace(/_/g, " ");
-      const cell = (v) => v === null || v === undefined ? "" : typeof v === "boolean" ? (v ? "yes" : "no") : esc(String(v).replace(/T\d\d:\d\d:\d\d.*$/, ""));
-      $("rpTable").innerHTML = out.rows.length
-        ? `<thead><tr>${cols.map((c) => `<th>${esc(head(c))}</th>`).join("")}</tr></thead><tbody>${out.rows.map((r) => `<tr>${cols.map((c) => `<td>${cell(r[c])}</td>`).join("")}</tr>`).join("")}</tbody>`
-        : `<tbody><tr><td class="hint">Nothing in this range.</td></tr></tbody>`;
+      $("rpTable").innerHTML = genericTableHTML(out.rows);
       $("rpTableWrap").hidden = false; $("rpNarrative").hidden = true;
     }
     $("reportActions").hidden = true; $("reportView").hidden = false;

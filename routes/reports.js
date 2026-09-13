@@ -21,6 +21,19 @@
 // to admin_audit by note_report() in the same transaction, so an inspection
 // pack has a trail. CSV is the default; format=json is for the printable
 // page in the browser (and the tests).
+//
+//   GET /api/reports/inspection-pack?from=&to=&reason=
+//
+// The one-click inspection pack: the weekly register update, vacancies,
+// breach reports and the evacuation list, run together and handed back as
+// one document instead of four separate exports. It is not a row in REPORTS
+// above because it has no single query of its own — it is a fixed bundle of
+// the four reports a HIQA/IPAS visit actually asks for, each still run
+// against its own query so a change to one of those four is a change to the
+// pack for free. One note_report() call audits the whole pack under the name
+// "inspection-pack"; it is JSON-only, since the point is a single printed
+// document, not a spreadsheet. No migration: note_report() already accepts
+// any report name, so nothing in the database needed to change.
 
 const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
@@ -338,6 +351,34 @@ const { xlsx } = require('../lib/xlsx');
 
 router.get('/reports', wrap(async (req, res) => {
   res.json(Object.entries(REPORTS).map(([name, r]) => ({ name, title: r.title, ranged: r.ranged, admin: !!r.admin })));
+}));
+
+// Registered ahead of GET /reports/:name so the literal path wins.
+const INSPECTION_PACK = ['weekly', 'vacancies', 'breaches', 'evacuation'];
+router.get('/reports/inspection-pack', wrap(async (req, res) => {
+  const reason = String(req.query.reason || '').trim();
+  if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
+  const from = dateParam(req.query.from, 'from');
+  const to = dateParam(req.query.to || req.query.from, 'to');
+  if (to < from) throw new HttpError(400, 'to must not be before from');
+  const days = (Date.parse(to) - Date.parse(from)) / 86400000;
+  if (days > 366) throw new HttpError(400, 'A report covers at most a year');
+
+  const sections = await db.withIdentity(req.session.userId, async (client) => {
+    await client.query('select note_report($1, $2, $3, $4)', ['inspection-pack', reason, from, to]);
+    const out = [];
+    for (const name of INSPECTION_PACK) {
+      const def = REPORTS[name];
+      const { rows } = await client.query(def.sql, def.ranged ? [from, to] : []);
+      out.push({ name, title: def.title, rows, from: def.ranged ? from : null, to: def.ranged ? to : null });
+    }
+    return out;
+  }).catch((err) => {
+    if (err && err.code === '42501') throw new HttpError(403, 'Only a supervisor or admin can export a report');
+    throw err;
+  });
+
+  res.json({ title: 'Inspection pack', from, to, sections });
 }));
 
 router.get('/reports/:name', wrap(async (req, res) => {

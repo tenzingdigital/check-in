@@ -1608,6 +1608,34 @@ async function main() {
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
+  await test("the inspection pack bundles the weekly register, vacancies, breaches and evacuation list in one call", async () => {
+    const today = siteToday();
+    const from = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+    const noReason = await supC.fetch(`/api/reports/inspection-pack?from=${from}&to=${today}`);
+    assert.equal(noReason.status, 400);
+    const asGuard = await api.fetch(`/api/reports/inspection-pack?from=${from}&to=${today}&reason=HIQA+visit`);
+    assert.equal(asGuard.status, 403);
+    const tooLong = await supC.fetch(`/api/reports/inspection-pack?from=2020-01-01&to=2022-01-01&reason=test`);
+    assert.equal(tooLong.status, 400);
+
+    const rep = await supC.fetch(`/api/reports/inspection-pack?from=${from}&to=${today}&reason=HIQA+visit`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.equal(rep.json.title, "Inspection pack");
+    assert.equal(rep.json.from, from); assert.equal(rep.json.to, today);
+    assert.deepEqual(rep.json.sections.map((s) => s.name), ["weekly", "vacancies", "breaches", "evacuation"]);
+    const weekly = rep.json.sections.find((s) => s.name === "weekly");
+    assert.equal(weekly.title, "Weekly register update");
+    assert.equal(weekly.from, from); assert.equal(weekly.to, today);
+    const evac = rep.json.sections.find((s) => s.name === "evacuation");
+    assert.equal(evac.title, "Evacuation list");
+    assert.equal(evac.from, null, "evacuation is 'as it stands now', not ranged");
+    assert.ok(Array.isArray(evac.rows) && evac.rows.length > 0, "the evacuation section should list residents");
+
+    const logged = await withOwner((c) => c.query(
+      `select note from public.admin_audit where table_name = 'reports' and row_id = 'inspection-pack' order by at desc limit 1`));
+    assert.match(logged.rows[0].note, /HIQA visit \[/, "the pack should be on the audit record as one entry");
+  });
+
   await test("a resident's history filters by register and exports as CSV for a supervisor with a reason", async () => {
     const found = await supC.fetch("/api/residents?q=brennan");
     const rid = found.json[0].id;
