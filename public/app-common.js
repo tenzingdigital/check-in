@@ -462,22 +462,34 @@ function mountViewChooser({ current, canAdmin = false, canOrg = false } = {}) {
     return;
   }
   if (viewChosen()) return;
+  const ICO = {
+    gate: '<polyline points="7 8 11 12 7 16"/><polyline points="17 8 13 12 17 16"/>',
+    register: '<rect x="5" y="4" width="14" height="17" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M8.5 12.5l2 2 4-4.5"/>',
+    admin: '<circle cx="12" cy="12" r="3.2"/><line x1="12" y1="3" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="3" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="21" y2="12"/><line x1="5.6" y1="5.6" x2="7.8" y2="7.8"/><line x1="16.2" y1="16.2" x2="18.4" y2="18.4"/><line x1="5.6" y1="18.4" x2="7.8" y2="16.2"/><line x1="16.2" y1="7.8" x2="18.4" y2="5.6"/>',
+    org: '<rect x="3" y="10" width="5" height="11"/><rect x="10" y="5" width="5" height="16"/><rect x="17" y="13" width="4" height="8"/>',
+  };
+  const ico = (name) => `<div class="choiceico" aria-hidden="true"><svg viewBox="0 0 24 24">${ICO[name]}</svg></div>`;
   const el = document.createElement("div");
   el.id = "chooser"; el.className = "chooser"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
   el.innerHTML = `
-    <h2>What are you recording?</h2>
-    <p class="hint">Two different things are recorded here. Pick the one for this terminal; you can switch at the top of the screen later.</p>
-    <a class="choice gate" href="/index.html" data-view="gate">
-      <b>In &amp; out</b>
-      <span>People passing in and out. Swipe right to sign IN, left to sign OUT. Keeps the movement log and who is on site now.</span>
-    </a>
-    <a class="choice register" href="/checkin.html" data-view="register">
-      <b>Daily register — check-in</b>
-      <span>The once-a-day presentation the policy requires. Swipe a card either way to record today's check-in. Nothing here signs anyone in or out.</span>
-    </a>
-    ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin"><b>Site admin</b><span>This centre's residents, buildings, staff and settings.</span></a>` : ""}
-    ${canOrg ? `<a class="choice admin" href="/org.html" data-view="org"><b>Organisation</b><span>Every centre on the service. No resident data.</span></a>` : ""}
-    <label class="check always"><input type="checkbox" id="chooserAlways"> <span>Always open this on this tablet. To undo, open the address with <b>?view=choose</b>.</span></label>`;
+    <div class="chooserInner">
+      <div class="chooserMark">${MARK_SVG}</div>
+      <h2>What are you recording?</h2>
+      <p class="hint">Two different things are recorded here. Pick the one for this terminal; you can switch at the top of the screen later.</p>
+      <a class="choice gate" href="/index.html" data-view="gate">
+        ${ico("gate")}
+        <div class="choiceText"><b>In &amp; out</b>
+        <span>People passing in and out. Swipe right to sign IN, left to sign OUT. Keeps the movement log and who is on site now.</span></div>
+      </a>
+      <a class="choice register" href="/checkin.html" data-view="register">
+        ${ico("register")}
+        <div class="choiceText"><b>Daily register — check-in</b>
+        <span>The once-a-day presentation the policy requires. Swipe a card either way to record today's check-in. Nothing here signs anyone in or out.</span></div>
+      </a>
+      ${canAdmin ? `<a class="choice admin" href="/admin.html" data-view="admin">${ico("admin")}<div class="choiceText"><b>Site admin</b><span>This centre's residents, buildings, staff and settings.</span></div></a>` : ""}
+      ${canOrg ? `<a class="choice admin" href="/org.html" data-view="org">${ico("org")}<div class="choiceText"><b>Organisation</b><span>Every centre on the service. No resident data.</span></div></a>` : ""}
+      <label class="check always"><input type="checkbox" id="chooserAlways"> <span>Always open this on this tablet. To undo, open the address with <b>?view=choose</b>.</span></label>
+    </div>`;
   el.addEventListener("click", (e) => {
     const a = e.target.closest("[data-view]");
     if (!a) return;

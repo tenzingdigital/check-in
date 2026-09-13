@@ -114,7 +114,9 @@
   .brand small b { font-weight: 600; color: var(--text); }
   /* ---- history (a resident's movements and check-ins over a range) ---- */
   .meta .away { color: var(--warn-text); font-weight: 600; }
-  .chooser .always { margin-top: 14px; font-size: 14px; color: var(--muted); }
+  .chooser .always { display: flex; align-items: flex-start; gap: 10px; margin-top: 6px; padding: 0 2px; font-size: 13px; color: var(--muted); }
+  .chooser .always input { flex: none; width: 20px; height: 20px; margin-top: 1px; }
+  .chooser .always b { color: var(--text); font-weight: 600; }
   .roster { margin: 2px 0 6px; }
   .roster .chips { margin-top: 6px; }
   .roster .chips button { color: var(--text); }
@@ -241,26 +243,44 @@
   .jobline b.gate     { color: var(--accent); }
   .jobline b.register { color: var(--ok); }
 
-  /* The chooser: shown once per session, before either list. */
+  /* The chooser: shown once per session, before either list. Centred in a
+     column that is never wider than a comfortable reading measure, so it
+     does not stretch into oversized cards on a full-size tablet. */
   .chooser {
     position: fixed; inset: 0; z-index: 40; background: var(--bg);
-    display: flex; flex-direction: column; justify-content: center; padding: 24px 18px; gap: 12px;
-    overflow-y: auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px 20px; overflow-y: auto;
   }
-  .chooser h2 { margin: 0 0 4px; font-size: 22px; }
-  .chooser p.hint { margin: 0 0 10px; }
+  .chooserInner { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 14px; }
+  .chooserMark { display: flex; justify-content: center; margin-bottom: 2px; }
+  .chooserMark .mark { width: 48px; height: 48px; }
+  .chooser h2 { margin: 0 0 2px; font-size: 23px; text-align: center; }
+  .chooser p.hint { margin: 0 0 6px; text-align: center; }
   .choice {
-    display: flex; flex-direction: column; gap: 6px; text-align: left;
-    padding: 18px 18px; border-radius: var(--radius); border: 2px solid var(--line);
+    display: flex; align-items: flex-start; gap: 14px; text-align: left;
+    padding: 16px 18px; border-radius: var(--radius); border: 2px solid var(--line);
     background: var(--surface); color: var(--text); font: inherit; cursor: pointer; text-decoration: none;
+    transition: background .15s, border-color .15s, transform .1s;
   }
-  .choice b { font-size: 20px; }
+  .choice:hover { background: var(--surface-2); }
+  .choice:active { transform: scale(0.985); }
+  .choiceText { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .choiceico {
+    flex: none; width: 42px; height: 42px; margin-top: 1px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, currentColor 16%, transparent);
+  }
+  .choiceico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .choice b { font-size: 19px; }
   .choice span { color: var(--muted); font-size: 14px; line-height: 1.4; }
   .choice.gate     { border-color: var(--accent); }
   .choice.register { border-color: var(--ok); }
   .choice.gate b     { color: var(--accent); }
   .choice.register b { color: var(--ok); }
+  .choice.gate .choiceico     { color: var(--accent); }
+  .choice.register .choiceico { color: var(--ok); }
   .choice.admin { border-style: dashed; }
+  .choice.admin .choiceico { color: var(--muted); }
   .choice:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   .viewswitch a { color: var(--text); background: var(--surface-2); border: 1px solid var(--line); }
   .viewswitch a:hover { border-color: var(--accent); }
