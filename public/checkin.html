@@ -854,9 +854,9 @@ async function enterApp() {
   $("app").hidden = false;
   mountTips();
   mountCoach({ app: "register", title: "The daily register in three lines", before: "searchResults", points: [
-    "Tap Check in on the card, or swipe it either way, to record today's check-in. The card drops off the Not seen list.",
-    "The list opens on who has not been seen today. Type a name to find anyone.",
-    "Tap a name for the ID number and the last 30 days.",
+    "Tap or swipe a card to check someone in.",
+    "Shows who hasn't been seen today; search for anyone.",
+    "Tap a name for their ID and history.",
   ] });
 
   $("q").focus();

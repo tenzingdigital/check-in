@@ -2010,9 +2010,9 @@ async function enterApp() {
   $("orgLink").hidden = !profile.platform_admin;
   mountTips();
   mountCoach({ app: "admin", title: "Admin in three lines", before: "residentList", points: [
-    "Residents: add one, or import a whole spreadsheet with a preview of every line first.",
-    "Reports need a reason and are logged. Staff are invited by email and never handed a password.",
-    "Settings: turn features on per site, set retention, and choose who needs an email code to log in.",
+    "Add residents one at a time, or import a spreadsheet.",
+    "Reports are logged; staff are invited by email.",
+    "Settings: features, retention and login security.",
   ] });
   applyFeatures();
   if (featureOn("feature_buildings")) loadBuildings({ quiet: true });
