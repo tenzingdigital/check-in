@@ -173,9 +173,13 @@ const weekly = require('../lib/weeklyReport');
 // authenticated admin cause a genuine, DKIM-signed email to reach every
 // ticked supervisor and administrator carrying an origin nobody chose.
 // compose() already handles link being absent.
-function reportLink() {
+// `params` lands the reader on the report and the week it is about — same
+// shape as jobs.js reportLink(), and read by readDeepLink() in admin.html.
+function reportLink(params) {
   const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
-  return configured ? `${configured}/admin.html` : null;
+  if (!configured) return null;
+  const query = params ? `?${new URLSearchParams(params)}` : '';
+  return `${configured}/admin.html${query}`;
 }
 
 router.post('/weekly-report/send', wrap(async (req, res) => {
@@ -190,10 +194,13 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
     const { from, to } = weekly.lastWeek(s.today);
     await client.query('select note_report($1, $2, $3, $4)', ['weekly', 'sent by hand', from, to]);
     const { rows } = await client.query('select * from weekly_register_rows($1, $2)', [from, to]);
-    const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows, link: reportLink() });
+    const { subject, text, html } = weekly.compose({
+      siteName: s.site_name, from, to, rows,
+      link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
+    });
     let sent = 0;
     for (const email of staff) {
-      const mailed = await mail.send({ to: email, subject, text });
+      const mailed = await mail.send({ to: email, subject, text, html });
       if (mailed.delivered) sent += 1;
     }
     return { sent, recipients: staff.length, from, to };

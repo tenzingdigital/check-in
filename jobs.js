@@ -162,14 +162,31 @@ async function notifyThresholds(schema, label) {
         `select u.email, p.full_name from profiles p join auth.users u on u.id = p.id
           where p.active and p.role in ('supervisor', 'admin') and u.email is not null`);
       if (!to.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
-      const lines = rows.map((r) => `- ${r.full_name}${r.room_label ? ` (${r.room_label})` : ''}: ${r.consecutive_missed} consecutive night${r.consecutive_missed === 1 ? '' : 's'}, ${r.absent_in_window} of ${s.win_limit} days in ${s.win_days}`);
+      const figures = `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}.`;
+      const decision = 'The app records the facts; whether a letter or a breach report follows is the manager\'s decision. ' +
+        'Authorised absences are already left out. Details under Admin → Absences.';
+      const person = (r) => `${r.consecutive_missed} consecutive night${r.consecutive_missed === 1 ? '' : 's'}, ${r.absent_in_window} of ${s.win_limit} days in ${s.win_days}`;
+      const lines = rows.map((r) => `- ${r.full_name}${r.room_label ? ` (${r.room_label})` : ''}: ${person(r)}`);
       const text = `${s.site_name || 'CheckSteady'}: ${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure after last night's close-out.\n\n` +
-        `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}.\n\n${lines.join('\n')}\n\n` +
-        `The app records the facts; whether a letter or a breach report follows is the manager's decision. ` +
-        `Authorised absences are already left out. Details under Admin → Absences.`;
+        `${figures}\n\n${lines.join('\n')}\n\n${decision}`;
+      // Unlike the other two reports this one names residents by design (see
+      // docs/GDPR.md, "What leaves by email") — so every name and room label
+      // goes through the layout's escaping, never into markup raw.
+      const html = mail.layout({
+        siteName: s.site_name,
+        heading: `${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure`,
+        paragraphs: [`After last night's close-out. ${figures}`],
+        rows: rows.map((r) => ({
+          label: r.full_name,
+          note: [r.room_label, `${r.absent_in_window} of ${s.win_limit} days in ${s.win_days}`].filter(Boolean).join(' · '),
+          value: `${r.consecutive_missed} night${r.consecutive_missed === 1 ? '' : 's'}`,
+        })),
+        cta: reportLink({ tab: 'absences' }) ? { href: reportLink({ tab: 'absences' }), label: 'Open Admin → Absences' } : null,
+        notes: [decision],
+      });
       let delivered = 0;
       for (const r of to) {
-        const out = await mail.send({ to: r.email, subject: `${s.site_name || 'CheckSteady'}: ${rows.length} at a House Rules figure`, text });
+        const out = await mail.send({ to: r.email, subject: `${s.site_name || 'CheckSteady'}: ${rows.length} at a House Rules figure`, text, html });
         if (out.delivered) delivered += 1;
       }
       await record(client, name, true, `${rows.length} listed, ${delivered}/${to.length} emailed`);
@@ -198,9 +215,20 @@ const safeguarding = require('./lib/safeguardingAlert');
 // not the job's problem to fix: compose() sends the email regardless, with
 // the link left out and a sentence naming Admin → Reports instead. Never a
 // relative or broken link.
-function reportLink() {
+//
+// `params` lands the reader on the report the email is about, for the nights
+// it is about (admin.html reads tab/report/from/to — see readDeepLink()
+// there). An email that says "11 children" and then opens on a screen
+// defaulting to the last seven days makes the reader re-enter the dates the
+// email already knew, at 1am, which is how the wrong night gets looked at.
+// Nothing here is a credential: the link is to a screen that still demands a
+// login, and the report behind it still demands a reason and is still
+// audited.
+function reportLink(params) {
   const configured = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
-  return configured ? `${configured}/admin.html` : null;
+  if (!configured) return null;
+  const query = params ? `?${new URLSearchParams(params)}` : '';
+  return `${configured}/admin.html${query}`;
 }
 
 // The overnight safeguarding alert (041). Runs every night, unlike the weekly
@@ -246,13 +274,16 @@ async function safeguardingNightly(schema, label) {
 
       const { rows: [c] } = await client.query('select overnight_safeguarding_count($1) as n', [s.night]);
       const count = Number(c.n) || 0;
-      const { subject, text } = safeguarding.compose({
-        siteName: s.site_name, night: s.night, count, link: reportLink(),
+      const { subject, text, html } = safeguarding.compose({
+        siteName: s.site_name,
+        night: s.night,
+        count,
+        link: reportLink({ tab: 'reports', report: 'overnight', from: s.night, to: s.night }),
       });
 
       let delivered = 0;
       for (const email of staff) {
-        const out = await mail.send({ to: email, subject, text });
+        const out = await mail.send({ to: email, subject, text, html });
         if (out.delivered) delivered += 1;
       }
       const result = `${count} to look at, ${delivered}/${staff.length} emailed`;
@@ -312,10 +343,13 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
       if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
       const { from, to } = weekly.lastWeek(s.today);
       const { rows } = await client.query('select * from weekly_register_rows_unchecked($1, $2)', [from, to]);
-      const { subject, text } = weekly.compose({ siteName: s.site_name, from, to, rows, link: reportLink() });
+      const { subject, text, html } = weekly.compose({
+        siteName: s.site_name, from, to, rows,
+        link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
+      });
       let delivered = 0;
       for (const email of staff) {
-        const out = await mail.send({ to: email, subject, text });
+        const out = await mail.send({ to: email, subject, text, html });
         if (out.delivered) delivered += 1;
       }
       // A partial or total delivery failure is not a successful run. Recording

@@ -256,6 +256,18 @@ evacuation need, or any free text about a person. The House Rules reminder
 is the only one of the two that names a resident, and it carries nothing
 beyond a name, a room label and the two night counts above.
 
+**How those messages are built.** Each is sent as plain text and as a
+styled part carrying the same words, laid out by `layout()` in
+`lib/mail.js`. The styled part contains no image of any kind — not the
+mark, not a spacer, not a tracking pixel — and no external stylesheet,
+font or script. Nothing in it is fetched when the message is opened, so
+neither this service nor anyone hosting an asset for it learns that a
+recipient read it, or when, or where from. Every link in it is built from
+`PUBLIC_URL` and goes to a screen that still requires a login; a link may
+name a report and a date range so the reader lands on the night the
+message is about, which is a date the message already states and names
+nobody.
+
 ---
 
 ## Data subject rights

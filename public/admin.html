@@ -105,6 +105,9 @@
   .report b { display: block; }
   .report .hint { font-size: 12px; }
   .report .row { flex: none; }
+  /* The report an emailed link asked for, so the eye lands on it rather than
+     hunting a list of seventeen for the one the email was about. */
+  .report.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .rphead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 0; }
   .rphead h2 { margin: 0; font-size: 18px; }
   .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
@@ -567,6 +570,7 @@ const state = {
   buildings: [],        // GET /api/buildings, for the room selectors and the Buildings tab,
   famSelecting: false,
   famIds: new Set(),
+  deepLink: null,       // readDeepLink(): which report and which nights an emailed link asked for
 };
 
 const canResidents = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
@@ -1726,7 +1730,17 @@ $("buildingList").addEventListener("click", async (e) => {
    Reports (supervisors and admins) — Stage 4 of the product roadmap
    ====================================================================== */
 async function loadReports() {
-  if (!$("rpFrom").value) {
+  // A link out of one of the report emails (jobs.js reportLink()) says which
+  // report and which nights it is about, so the reader is not retyping dates
+  // the email already knew — at 1am, from a phone, which is how the wrong
+  // night gets looked at. Consumed once: coming back to the tab later is a
+  // fresh look, not a repeat of last night's.
+  const wanted = state.deepLink;
+  state.deepLink = null;
+  if (wanted && wanted.from) {
+    $("rpFrom").value = wanted.from;
+    $("rpTo").value = wanted.to || wanted.from;
+  } else if (!$("rpFrom").value) {
     const d = new Date(); const p = (v) => String(v).padStart(2, "0");
     const iso = (x) => `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
     $("rpTo").value = iso(d); d.setDate(d.getDate() - 6); $("rpFrom").value = iso(d);
@@ -1735,15 +1749,31 @@ async function loadReports() {
   const list = await guarded(() => apiGet("/api/reports"), (err) => showError("Could not load reports: " + err.message));
   if (!list) return;
   showError("");
-  $("reportList").innerHTML = list.filter((r) => !r.admin || canStaff()).map((r) => `
-    <div class="report">
-      <div><b>${esc(r.title)}</b><span class="hint">${r.ranged ? "For the dates above" : "As it stands now"}</span></div>
+  const shown = list.filter((r) => !r.admin || canStaff());
+  const picked = wanted && shown.find((r) => r.name === wanted.report);
+  // The one the email was about goes to the top rather than being scrolled
+  // to: seventeen reports do not fit a phone, and scrolling to the card
+  // would push the dates this link just filled in off the screen, leaving
+  // the reader to wonder whether they were set at all.
+  const ordered = picked ? [picked, ...shown.filter((r) => r.name !== picked.name)] : shown;
+  $("reportList").innerHTML = ordered.map((r) => `
+    <div class="report${picked && r.name === picked.name ? " picked" : ""}">
+      <div><b>${esc(r.title)}</b><span class="hint">${picked && r.name === picked.name ? "From your email · for the dates above" : r.ranged ? "For the dates above" : "As it stands now"}</span></div>
       <div class="row">
         <button class="btn ghost sm" type="button" data-view="${esc(r.name)}">View</button>
         <button class="btn ghost sm" type="button" data-csv="${esc(r.name)}">CSV</button>
         <button class="btn sm" type="button" data-xlsx="${esc(r.name)}">Excel</button>
       </div>
     </div>`).join("");
+
+  // The report is not opened for them: an export is audited and asks why it
+  // was run, and answering that is the reader's to do, not the email's. What
+  // the link can honestly fill in is where they have come from, which is the
+  // true answer — and it stays editable.
+  if (picked && !$("rpReason").value) {
+    const range = $("rpTo").value !== $("rpFrom").value ? `${$("rpFrom").value} to ${$("rpTo").value}` : $("rpFrom").value;
+    $("rpReason").value = `${picked.title}, ${range}`;
+  }
 }
 
 function reportQuery(name) {
@@ -1959,6 +1989,22 @@ $("awList").addEventListener("click", async (e) => {
 /* ========================================================================
    Tabs, session, wiring
    ====================================================================== */
+// ?tab=reports&report=overnight&from=2026-09-13&to=2026-09-13 — what the
+// report emails link to. Everything here arrives from a URL, so nothing is
+// trusted: the tab and report names are matched against the ones this page
+// actually has, and the dates must be plain ISO days. A link that says
+// anything else simply opens the page as normal.
+const TABS = ["residents", "absences", "buildings", "reports", "staff", "settings"];
+function readDeepLink() {
+  let q;
+  try { q = new URLSearchParams(location.search); } catch (_) { return null; }
+  const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? v : null);
+  const tab = TABS.includes(q.get("tab")) ? q.get("tab") : null;
+  if (!tab) return null;
+  const from = day(q.get("from"));
+  return { tab, report: q.get("report") || null, from, to: day(q.get("to")) || from };
+}
+
 function selectTab(name) {
   state.tab = name;
   for (const t of ["residents", "absences", "buildings", "reports", "staff", "settings"]) {
@@ -2020,7 +2066,11 @@ async function enterApp() {
   ] });
   applyFeatures();
   if (featureOn("feature_buildings")) loadBuildings({ quiet: true });
-  selectTab("residents");
+  // The link is read after login, not before: arriving from an email while
+  // logged out still lands on the right report once the password is in.
+  state.deepLink = readDeepLink();
+  selectTab(state.deepLink && !$("tab" + state.deepLink.tab[0].toUpperCase() + state.deepLink.tab.slice(1)).hidden
+    ? state.deepLink.tab : "residents");
 }
 
 function showLogin(message) {
