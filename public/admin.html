@@ -506,7 +506,9 @@
 
         <h2 class="mt6">Weekly register update</h2>
         <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> Early Sunday morning, after Saturday night's snapshot, the staff ticked to receive it are emailed a count for resident absences, weekend updates, removals and room updates, and a link into the app — no resident names, rooms or dates. Needs email configured on the service.</span></label>
-        <p class="hint flush">Recipients are chosen on the staff record: tick "Gets the Sunday report" for a supervisor or admin under Staff. <button class="linkish" type="button" id="stWeeklySend">Send last week's now</button> to check what arrives. A manual send is on the audit record.</p>
+        <p class="hint flush">Recipients are chosen on the staff record: tick "Gets the Sunday report" for a supervisor or admin under Staff.</p>
+        <div class="mt8"><button class="btn ghost sm" type="button" id="stWeeklySend">Send last week's now</button>
+          <p class="hint under">Emails last week's update to everyone ticked, so you can see what arrives. Asks first; a manual send is on the audit record.</p></div>
 
         <h2 class="mt6">Permitted absence periods <button class="tip" type="button" data-tip="The dates IPAS notifies: Christmas, Ramadan, Easter, the summer school holiday. A holiday authorised outside these periods still goes through; the screen says so." aria-label="About permitted absence periods">?</button></h2>
         <div id="awList" class="list"></div>
@@ -1954,9 +1956,15 @@ $("settingsForm").addEventListener("submit", async (e) => {
 });
 $("stReload").addEventListener("click", loadSettings);
 $("stWeeklySend").addEventListener("click", async () => {
-  $("stWeeklySend").disabled = true;
+  const btn = $("stWeeklySend");
+  if (btn.disabled) return;
+  if (!confirm("Email last week's Weekly register update now to everyone ticked to receive it? Each send is a separate email and goes on the audit record.")) return;
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Sending…";
   const out = await guarded(() => apiPost("/api/settings/weekly-report/send", {}), (err) => toast("Not sent: " + err.message, "err"));
-  $("stWeeklySend").disabled = false;
+  btn.disabled = false;
+  btn.textContent = label;
   if (!out) return;
   if (out.sent === 0) {
     toast(`Nothing delivered for ${out.from} to ${out.to}: configure email (RESEND_API_KEY and MAIL_FROM) on the service`, "err");
