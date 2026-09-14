@@ -17,6 +17,19 @@ function esc(v) {
   ));
 }
 
+// Shared by toast() and progress(): neither must ever sit on top of a bulk
+// action bar ("N selected … Sign IN / Departed / Family") fixed to the
+// bottom of the screen — so whichever is on screen when this element is
+// (re)shown, it lifts clear of it instead of covering it. progress() runs
+// while that bar is still open (a bulk action is mid-flight), so it needs
+// this exactly as much as toast() does — missing it here is what let a
+// "Linking…" or "Family of N made" message sit over the very button it was
+// reporting on.
+function liftToastAboveBar(el) {
+  const bar = document.querySelector(".multibar:not([hidden])");
+  el.style.bottom = bar ? `${bar.offsetHeight + 12}px` : "";
+}
+
 // Successes fade; errors stay until tapped. A guard who looked up at the
 // person and back down again must still be able to read why the tap did
 // not record. Tapping the toast dismisses it either way.
@@ -28,6 +41,7 @@ function esc(v) {
 // the next toast(), which every caller ends with.
 function progress(msg, done, total) {
   const el = $("toast");
+  liftToastAboveBar(el);
   clearTimeout(toast._t);
   el.className = "show busy";
   el.setAttribute("role", "status");
@@ -55,12 +69,7 @@ function toast(msg, kind = "ok") {
   const el = $("toast");
   el.textContent = msg;
   el.className = "show " + kind;
-  // A toast is a passing note; it must never sit on top of the very button
-  // it is telling you about. The multi-select bar ("N selected ... Sign IN /
-  // Sign OUT") is fixed to the bottom of the screen too, so when it is on
-  // screen the toast lifts above it instead of covering it.
-  const bar = document.querySelector(".multibar:not([hidden])");
-  el.style.bottom = bar ? `${bar.offsetHeight + 12}px` : "";
+  liftToastAboveBar(el);
   clearTimeout(toast._t);
   if (kind === "err") {
     el.setAttribute("role", "alert");
