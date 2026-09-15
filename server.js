@@ -135,6 +135,11 @@ app.get('/healthz', (req, res, next) => {
 app.use(express.urlencoded({ extended: false, limit: '16kb' }));
 app.use(require('./routes/signup'));
 
+// The Unsubscribe link in the recurring emails (049). Same posture as
+// signup: unauthenticated by necessity, form-encoded, rate-limited in the
+// route, and a GET that changes nothing.
+app.use(require('./routes/unsubscribe'));
+
 /* --------------------------------------------------------------------------
    API
    ------------------------------------------------------------------------ */

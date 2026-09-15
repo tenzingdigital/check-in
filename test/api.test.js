@@ -3470,6 +3470,89 @@ async function main() {
     assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/safeguarding-alert`, { method: "POST", body: { on: false } })).status, 200);
   });
 
+  const form = (path, fields) => fetch(base + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields).toString(),
+    redirect: "manual",
+  });
+
+  await test("GET /unsubscribe shows the choice and changes nothing; POST stops one, or all; resume brings them back", async () => {
+    const prefs = require("../lib/emailPrefs");
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
+    const key = await withOwner((c) => prefs.keyFor(c, unsubSupId));
+    const q = `t=default&k=${key}&e=weekly_report`;
+
+    const page = await fetch(`${base}/unsubscribe?${q}`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /the Sunday report/);
+    assert.match(html, /unsubsup@hut\.example/, "names the address it goes to");
+    assert.match(html, /Stop this email/); assert.match(html, /Stop all site emails/);
+    assert.match(page.headers.get("content-security-policy"), /form-action 'self'/, "the page may post to itself");
+    assert.match(page.headers.get("cache-control"), /no-store/);
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0, "GET changed nothing");
+
+    const stop = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "weekly_report", action: "stop" });
+    assert.equal(stop.status, 200);
+    const stopped = await stop.text();
+    assert.match(stopped, /will not be sent to you/i);
+    assert.match(stopped, /Get these again/);
+    let outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
+    assert.deepEqual(outs.map((o) => o.kind), ["weekly_report"]);
+    const p = (await withOwner((c) => c.query(`select weekly_report from public.profiles where id = $1`, [unsubSupId]))).rows[0];
+    assert.equal(p.weekly_report, false);
+    const audit = await withOwner((c) => c.query(`select actor_id from public.admin_audit where table_name = 'email_opt_outs' order by at desc limit 1`));
+    assert.equal(audit.rows[0].actor_id, unsubSupId, "the audit row names the person, not nobody");
+
+    const all = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "all", action: "stop" });
+    assert.equal(all.status, 200);
+    outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
+    assert.deepEqual(outs.map((o) => o.kind).sort(), ["house_rules", "safeguarding_alert", "weekly_report"]);
+
+    const back = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "weekly_report", action: "resume" });
+    assert.equal(back.status, 200);
+    assert.match(await back.text(), /will be sent to you again/i);
+    outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
+    assert.deepEqual(outs.map((o) => o.kind).sort(), ["house_rules", "safeguarding_alert"]);
+    const backAll = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "all", action: "resume" });
+    assert.equal(backAll.status, 200);
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);
+  });
+
+  await test("a one-click POST from a mail client stops the kind in the URL and returns 200 with no page", async () => {
+    const prefs = require("../lib/emailPrefs");
+    const key = await withOwner((c) => prefs.keyFor(c, unsubSupId));
+    const res = await fetch(`${base}/unsubscribe?t=default&k=${key}&e=safeguarding_alert`, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click",
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await res.text()).length, 0);
+    assert.deepEqual((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).map((o) => o.kind), ["safeguarding_alert"]);
+    await withOwner((c) => prefs.optIn(c, unsubSupId, ["safeguarding_alert"]));
+  });
+
+  await test("a wrong key, unknown slug or bad kind is one identical 404, and repeated wrong keys lock the address out", async () => {
+    const bad = await fetch(`${base}/unsubscribe?t=default&k=not-a-key-at-all-xxxxxxxxxxxxxxxxxxxxxxxx&e=weekly_report`);
+    assert.equal(bad.status, 404);
+    const badText = await bad.text();
+    assert.match(badText, /This link is not valid/);
+    const badSlug = await fetch(`${base}/unsubscribe?t=nowhere&k=abc&e=weekly_report`);
+    assert.equal(badSlug.status, 404);
+    assert.equal(await badSlug.text(), badText, "same body whether the person or the centre exists");
+    const badKind = await fetch(`${base}/unsubscribe?t=default&k=abc&e=marketing`);
+    assert.equal(badKind.status, 404);
+    assert.equal(await badKind.text(), badText);
+    const badPost = await form("/unsubscribe", { t: "default", k: "abc", e: "weekly_report", kind: "weekly_report", action: "stop" });
+    assert.equal(badPost.status, 404);
+    for (let i = 0; i < 8; i++) await fetch(`${base}/unsubscribe?t=default&k=wrong${i}&e=weekly_report`);
+    const locked = await fetch(`${base}/unsubscribe?t=default&k=wrong-again&e=weekly_report`);
+    assert.equal(locked.status, 429);
+    auth.clearFailures("unsubscribe", "127.0.0.1");
+    auth.clearFailures("unsubscribe", "::ffff:127.0.0.1");
+    auth.clearFailures("unsubscribe", "::1");
+  });
+
   server.close();
   await closePool();
   console.log(`\nPASS: ${passed} HTTP assertions.`);

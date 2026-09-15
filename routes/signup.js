@@ -35,6 +35,7 @@ const tenancy = require('../lib/tenancy');
 const mail = require('../lib/mail');
 const { seedDemoCentre } = require('../lib/demoSeed');
 const { clientIp } = require('../lib/request-ip');
+const { esc, pageHtml } = require('../lib/page');
 
 const router = express.Router();
 
@@ -116,33 +117,6 @@ async function freeSlug(client, wanted) {
 // ---------------------------------------------------------------------------
 // The two pages this route serves
 // ---------------------------------------------------------------------------
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-function pageHtml({ title, heading, body, backHref = 'https://checksteady.com/', backLabel = 'Back to checksteady.com' }) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark light">
-<meta name="robots" content="noindex">
-<title>${esc(title)} — CheckSteady</title>
-<link rel="stylesheet" href="/app-common.css">
-</head>
-<body class="app-signup">
-<main class="wrap">
-  <section class="login">
-    <h1>CheckSteady</h1>
-    <h2>${esc(heading)}</h2>
-    ${body}
-    <p class="hint"><a class="linkish" href="${esc(backHref)}">${esc(backLabel)}</a></p>
-  </section>
-</main>
-</body>
-</html>`;
-}
-
 const sent = (email) => pageHtml({
   title: 'Check your email',
   heading: 'Check your email',
