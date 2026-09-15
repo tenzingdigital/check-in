@@ -550,7 +550,7 @@
   </main>
 </div>
 
-<div id="toast" role="status" aria-live="polite"></div>
+<div id="toast" role="status" aria-live="polite" title="Dismiss"></div>
 
 <script src="/app-common.js"></script>
 <script src="/offline.js"></script>
@@ -1286,31 +1286,37 @@ function renderDetail(rec, summary) {
     loadResidents();
   };
   const exportBtn = $("exportBtn");
-  if (exportBtn) exportBtn.onclick = () => {
-    const reason = $("exReason").value.trim();
-    if (!reason) { toast("Give the reason for the export", "err"); $("exReason").focus(); return; }
-    if (!Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
-    // A plain navigation: the server answers with Content-Disposition:
-    // attachment, so the browser saves the file and the page stays put.
-    window.location.href = `/api/residents/${rec.id}/export?reason=${encodeURIComponent(reason)}`;
-    toast("Export recorded and downloading", "ok");
-  };
+  if (exportBtn) {
+    dismissToastOnInput($("exReason"));
+    exportBtn.onclick = () => {
+      const reason = $("exReason").value.trim();
+      if (!reason) { toast("Give the reason for the export", "err"); $("exReason").focus(); return; }
+      if (!Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
+      // A plain navigation: the server answers with Content-Disposition:
+      // attachment, so the browser saves the file and the page stays put.
+      window.location.href = `/api/residents/${rec.id}/export?reason=${encodeURIComponent(reason)}`;
+      toast("Export recorded and downloading", "ok");
+    };
+  }
   const eraseBtn = $("eraseBtn");
-  if (eraseBtn) eraseBtn.onclick = async () => {
-    const reason = $("erReason").value.trim();
-    const typed = $("erName").value.trim();
-    if (!reason) { toast("Give the reason for the erasure", "err"); $("erReason").focus(); return; }
-    if (!typed) { toast("Type the full name to confirm", "err"); $("erName").focus(); return; }
-    if (!confirm(`Erase ${rec.first_name} ${rec.last_name} and their entire history? This cannot be undone.`)) return;
-    const out = await guarded(
-      () => api(`/api/residents/${rec.id}`, { method: "DELETE", body: { reason, confirm_name: typed } }),
-      (err) => toast("Not erased: " + err.message, "err"),
-    );
-    if (!out) return;
-    toast(`Erased. ${out.events_removed} movement${out.events_removed === 1 ? "" : "s"} and ${out.register_rows_removed} register day${out.register_rows_removed === 1 ? "" : "s"} removed.`, "ok");
-    renderDetail(null);
-    loadResidents();
-  };
+  if (eraseBtn) {
+    dismissToastOnInput($("erReason"));
+    eraseBtn.onclick = async () => {
+      const reason = $("erReason").value.trim();
+      const typed = $("erName").value.trim();
+      if (!reason) { toast("Give the reason for the erasure", "err"); $("erReason").focus(); return; }
+      if (!typed) { toast("Type the full name to confirm", "err"); $("erName").focus(); return; }
+      if (!confirm(`Erase ${rec.first_name} ${rec.last_name} and their entire history? This cannot be undone.`)) return;
+      const out = await guarded(
+        () => api(`/api/residents/${rec.id}`, { method: "DELETE", body: { reason, confirm_name: typed } }),
+        (err) => toast("Not erased: " + err.message, "err"),
+      );
+      if (!out) return;
+      toast(`Erased. ${out.events_removed} movement${out.events_removed === 1 ? "" : "s"} and ${out.register_rows_removed} register day${out.register_rows_removed === 1 ? "" : "s"} removed.`, "ok");
+      renderDetail(null);
+      loadResidents();
+    };
+  }
   const react = $("reactivate");
   if (react) react.onclick = async () => {
     const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { status: "active" }), (err) => toast("Not changed: " + err.message, "err"));
@@ -2130,6 +2136,8 @@ $("logoutBtn").addEventListener("click", async () => {
   await logout();
   showLogin("");
 });
+
+dismissToastOnInput($("rpReason"));
 
 let searchTimer;
 $("q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadResidents, 220); });

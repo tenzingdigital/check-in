@@ -73,15 +73,27 @@ function toast(msg, kind = "ok") {
   clearTimeout(toast._t);
   if (kind === "err") {
     el.setAttribute("role", "alert");
+    toast._t = setTimeout(() => { el.className = ""; }, 6000);
     return;
   }
   el.setAttribute("role", "status");
   toast._t = setTimeout(() => { el.className = ""; }, 3200);
 }
-document.addEventListener("click", (e) => {
-  const el = e.target.closest("#toast");
-  if (el) { el.className = ""; clearTimeout(toast._t); }
-});
+
+function dismissToast() {
+  const el = $("toast");
+  el.className = "";
+  clearTimeout(toast._t);
+}
+if ($("toast")) $("toast").addEventListener("click", dismissToast);
+
+// A reason field for an export/erasure whose "Give the reason…" error toast
+// is still up: the guard is already fixing the problem by typing, so the
+// toast should clear the moment they start rather than linger for its full
+// timeout.
+function dismissToastOnInput(el) {
+  el?.addEventListener("input", () => { if ($("toast").classList.contains("err")) dismissToast(); });
+}
 
 // elId defaults to "appError" (the gate app's error banner) so checkin.html
 // can pass its own element id and reuse the same function.
@@ -666,6 +678,7 @@ function mountHistory(container, residentId, { canExport = false } = {}) {
       exportBtn.setAttribute("aria-expanded", String(!exportForm.hidden));
       if (!exportForm.hidden) exportForm.elements.reason.focus();
     });
+    dismissToastOnInput(exportForm.elements.reason);
     exportForm.addEventListener("submit", (e) => {
       e.preventDefault();
       const reason = exportForm.elements.reason.value.trim();

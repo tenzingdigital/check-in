@@ -722,6 +722,7 @@
     padding: 13px 18px; border-radius: 12px; font-weight: 600;
     box-shadow: 0 10px 34px var(--shadow);
     transition: transform .22s ease; z-index: 60; max-width: calc(100vw - 32px);
+    cursor: pointer;
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
   #toast.ok  { border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
