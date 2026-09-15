@@ -48,29 +48,42 @@ any change to who may carry the weekly or safeguarding ticks.
 
 ```sql
 create table email_opt_outs (
+  id              bigint generated always as identity primary key,
   profile_id      uuid not null references profiles (id) on delete cascade,
   kind            text not null check (kind in ('weekly_report', 'safeguarding_alert', 'house_rules')),
   unsubscribed_at timestamptz not null default now(),
-  primary key (profile_id, kind)
+  unique (profile_id, kind)
 );
 
-alter table profiles add column email_link_key_sha256 bytea;
+create table email_link_keys (
+  profile_id  uuid primary key references profiles (id) on delete cascade,
+  key         text not null unique,
+  created_at  timestamptz not null default now()
+);
 ```
 
 - A row in `email_opt_outs` means *this person opted themselves out of
   this email*. It is the only thing the indicator reads. Absence of a row
-  with the tick off means an admin unticked them, and shows nothing.
-- `email_link_key_sha256` is the SHA-256 of a per-person random key (32
-  CSPRNG bytes, base64url), generated the first time a link is needed and
-  never shown again — the same rule as `auth.password_resets`. The key in
-  the URL is the whole credential; what it can do is toggle that one
-  person's opt-outs, nothing else, so it does not expire. Regenerated only
-  if the owner ever needs to invalidate a leaked link (no UI for that; a
-  SQL `update` to null suffices, and the next send mints a fresh one).
-- Same grants as 037/041: the app role reads and writes both, the
-  `authenticated` role does not.
-- `tenant/template.sql` gets the same DDL, or migration 048's drift check
-  fires on the next nightly run.
+  with the tick off means an admin unticked them, and shows nothing. The
+  `id` column exists so `audit_row()` (migration 012) can be attached to it
+  unchanged; every opt-out and opt-in then lands in `admin_audit`.
+- `email_link_keys` holds one random key per person (32 CSPRNG bytes,
+  base64url), minted the first time a link is needed and reused for every
+  email after — so the link in an old email keeps working. It is stored in
+  clear, unlike a password-reset token, because it must be re-sent, and
+  because what it can do is toggle that one person's opt-outs and nothing
+  else. The table is readable by nobody but the database owner: no grant to
+  `authenticated` or `anon`. A SECURITY DEFINER function
+  `email_link_key(uuid) returns text` mints-or-returns the key; it refuses
+  any caller with a session who is not an admin (`auth.uid() is not null
+  and not is_admin()`), so the send-now route — which runs as the admin —
+  can build links, and nobody else can read a colleague's key. Deleting a
+  person's row invalidates their links; the next send mints a fresh one.
+- Same grants as 037/041 otherwise: the app role reads and writes both,
+  `authenticated` reads `email_opt_outs` (the staff list shows them) and
+  writes neither directly — the routes go through owner or admin paths.
+- `tenant/template.sql` is regenerated (`./tools/gen-tenant-template.sh`)
+  or migration 048's drift check fires on the next nightly run.
 
 ## Behaviour
 
@@ -116,7 +129,7 @@ slug is validated against `public.tenants` and mapped by
 `auth.requireSession`, next to `routes/signup`, with the form-encoded body
 parser it already has. Rate-limited per IP with `auth.lockedOut` /
 `auth.noteFailure` under its own bucket, as password-reset is, because the
-key is looked up by hash and a wrong key must cost the caller.
+key is looked up by value and a wrong key must cost the caller.
 
 - `GET /unsubscribe` renders the page and changes nothing. Mail scanners
   fetch links; a GET that acted would unsubscribe people who never clicked.
@@ -152,7 +165,7 @@ password resets are not affected."
 `lib/emailPrefs.js` (new, single owner of the rules):
 
 - `linkFor(client, schemaSlug, profileId, kind)` — returns the URL,
-  minting and storing the key hash if the profile has none.
+  minting and storing the key if the profile has none.
 - `optOut(client, profileId, kinds)` / `optIn(client, profileId, kinds)` —
   the row and tick changes above, in one statement each.
 - `KINDS` and their display names ("the Sunday report", "the nightly
