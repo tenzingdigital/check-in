@@ -630,6 +630,92 @@ page("/for/ukrainian-and-botp-accommodation/",
      [HOME, ("/for/ukrainian-and-botp-accommodation/", "Ukrainian and BOTP accommodation")], body, faqs)
 
 # --------------------------------------------------------------------------
+# /for/nursing-homes-and-residential-care/
+# --------------------------------------------------------------------------
+faqs = [
+ ("Is this a care-planning or medication system?",
+  "No. CheckSteady holds no care plans, medication records or nursing notes, and does not try to. It records presence and movement only — who was on the premises, who came and went, and who was marked safe at a drill."),
+ ("Can residents who go out with family be recorded?",
+  "Yes. A day out is a movement on the In &amp; out log; a night or longer away is recorded as an authorised absence with a return date, so the register shows the resident as away rather than missing."),
+ ("Does it hold health information?",
+  "Only if the centre turns the feature on: an evacuation-need code from a fixed list, recorded so a warden knows who needs help at a drill. It is a special-category field, and the centre records it in its own DPIA — CheckSteady does not decide that for it."),
+ ("Can it be used on a tablet at reception?",
+  "Yes. It installs to a tablet's home screen for a fixed station at reception, and works the same way on any staff phone."),
+]
+body = (
+  phead("Who it's for", "For nursing homes and residential care centres",
+        "A designated centre has to answer three questions inside a minute: who is in the building, who has visited today, and who is accounted for if the alarm goes. CheckSteady keeps the register that answers all three, instead of a book at reception.") +
+  sec("""    <h2>The register beside the care record</h2>
+    <p>CheckSteady is not a care plan, a medication record or a nursing record, and it does not try to be. It records presence and movement: who is on the premises, who came and went, and who was marked safe at a drill. It sits beside the care system, not inside it.</p>
+    <div class="pairs">
+      <div><h3>Fire register, always current</h3><p>Residents by building, floor and room, each with an evacuation-need code where the centre records one, and a roll call that groups by building for the assembly point.</p></div>
+      <div><h3>Visitors and contractors</h3><p>Signed in with their kind, name and company, signed out on departure, and included in the roll call for as long as they are on site.</p></div>
+      <div><h3>Drills and evacuations</h3><p>Started from any warden's phone, working offline, with the marked-safe list merging across every phone afterwards. The record — who was found, and when — is kept.</p></div>
+      <div><h3>Who is in right now</h3><p>A live count and a movement log with a name against every entry, the same record the roll call is built from.</p></div>
+    </div>""") +
+  sec("""    <h2>What an inspection can be shown</h2>
+    <p>Drill and evacuation records with who was marked safe and when. The visitor log for any date or range. All of it append-only, so what is shown is what was recorded at the time, not a version of it.</p>""", tint=True) +
+  sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
+  CTA +
+  nextlinks("Read next", [
+    ("/features/roll-call/", "Roll call", "Fire drills and evacuations on every warden's phone, offline."),
+    ("/features/in-and-out/", "In &amp; out", "The live on-site count and the movement log."),
+    ("/security-and-gdpr/", "Security and GDPR", "EU hosting, append-only records, erasure on request."),
+  ]))
+page("/for/nursing-homes-and-residential-care/",
+     "CheckSteady for nursing homes and residential care — fire register, visitor book and roll call",
+     "A fire register, visitor sign-in book and roll call for HIQA-registered nursing homes and residential care centres. Not a care record — EU hosted.",
+     [HOME, ("/for/nursing-homes-and-residential-care/", "Nursing homes and residential care")], body, faqs)
+
+# --------------------------------------------------------------------------
+# /for/refuges-and-treatment-centres/
+# --------------------------------------------------------------------------
+faqs = [
+ ("Does the app hold the refuge's address or location?",
+  "No. A site is a name, with buildings and rooms under it — there is no postal-address field for a site, a building or a resident anywhere in the app."),
+ ("Does anyone outside the service see the data?",
+  "No. Each site's records live in their own separate database schema in the EU, the Sunday email carries counts only, and the app itself holds no analytics or tracking."),
+ ("Can a resident's record be removed when they leave?",
+  "A departed resident is archived, with their history kept for the retention period you set. If a service wants a record erased sooner, that can be done on request."),
+ ("Is it a case-management or treatment-record system?",
+  "No. It records presence and movement — who was seen, who came and went, who was marked safe at a drill. It holds no case notes, treatment records or support plans."),
+]
+body = (
+  phead("Who it's for", "For refuges and residential treatment centres",
+        "In a refuge or a residential treatment service, who is on site is a safety question, and who came to the door is a security one. The register is built so the answer is always current, and holds as little data as the job needs.") +
+  sec("""    <h2>Who is on site, right now</h2>
+    <p>A live count says how many people are on site at this moment, residents included. Residents are signed in and out like anyone else, an authorised absence carries a return date so a planned night away never reads as missing, and a fire drill runs by building with every warden's phone showing the same list.</p>
+    <div class="pairs">
+      <div><h3>Every arrival at the door</h3><p>Visitors, contractors and suppliers are signed in with their kind, name and company, and signed out on departure. Nobody on site is off the list.</p></div>
+      <div><h3>Authorised leave, counted fairly</h3><p>In a residential treatment setting, planned leave and overnight passes are recorded as an authorised absence and excluded from the missed-night counts, so permitted time away is never counted as a miss.</p></div>
+      <div><h3>Roll call at 3am</h3><p>Started from any staff phone, working offline, with the marked-safe list merging across every phone once the connection returns.</p></div>
+      <div><h3>Children with a parent</h3><p>Households group a parent with their children, so a family stays together on the register, and children are marked on the roll call rather than left off it.</p></div>
+    </div>""") +
+  sec("""    <h2>Built for confidentiality</h2>
+    <p>The register holds as little as the job needs, and what it holds is described here precisely, not summarised.</p>
+    <div class="pairs">
+      <div><h3>No postal address, anywhere</h3><p>The app has no postal-address field for a site, a building or a resident. The only address it stores at all is an email address, for signing in.</p></div>
+      <div><h3>Counts only, never a name</h3><p>The Sunday email to your own staff carries counts and a link into the app. No resident's name ever appears in it.</p></div>
+      <div><h3>Identity documents, optional</h3><p>TRC or IRP can be recorded as printed if a service needs it. It is an optional field, left blank by any service that does not use it.</p></div>
+      <div><h3>Every opening logged</h3><p>Opening a resident's own record — not the register, the individual file — is logged with who opened it and when.</p></div>
+      <div><h3>One schema per site, in the EU</h3><p>Hosted in Frankfurt, encrypted in transit and at rest, with each site's records in their own separate database schema.</p></div>
+      <div><h3>Erasure on request</h3><p>A site's records can be erased on request, on top of the retention schedule that already applies once a resident departs.</p></div>
+    </div>
+    <p>A site can also restrict staff sign-in to a chosen home country, refusing a login attempt from anywhere else, if it turns that setting on.</p>
+    <p>It was built with an accommodation centre's feedback and is offered here because the register is the same; we would want to hear from a refuge or a treatment service before claiming to know its day.</p>""", tint=True) +
+  sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
+  CTA +
+  nextlinks("Read next", [
+    ("/security-and-gdpr/", "Security and GDPR", "EU hosting, per-site isolation, erasure on request."),
+    ("/features/in-and-out/", "In &amp; out", "The live on-site count and the movement log."),
+    ("/for/emergency-and-supported-accommodation/", "Emergency and supported accommodation", "The same register for family hubs and supported housing."),
+  ]))
+page("/for/refuges-and-treatment-centres/",
+     "CheckSteady for refuges and residential treatment centres",
+     "A daily register, visitor sign-in, live count and fire roll call for domestic violence refuges and residential treatment centres. No addresses, EU hosted.",
+     [HOME, ("/for/refuges-and-treatment-centres/", "Refuges and treatment centres")], body, faqs)
+
+# --------------------------------------------------------------------------
 # /pricing/
 # --------------------------------------------------------------------------
 faqs = [
