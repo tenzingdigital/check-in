@@ -27,6 +27,15 @@ What it asserts, and why each one is here:
   * No page references the old .onrender.com host, which would leak the
     unbranded origin into search results and split the domain's authority.
 
+  * No two pages share a <title> or a meta description. Two pages with one
+    title or one description compete with each other in search results and
+    tell nobody which to open.
+
+  * No page claims a customer the site does not have (a "trusted by",
+    "used by", or similar line). Written as a guard rather than a note
+    because the temptation is permanent and the cost of one false claim,
+    in this sector, is a reputation.
+
   * The generated pages match tools/build-site.py. Editing a generated page by
     hand works until the next time the generator runs, and then quietly does
     not.
@@ -85,14 +94,38 @@ def check_page(path):
         candidates = [os.path.join(SITE, target, "index.html"), os.path.join(SITE, target)]
         if not any(os.path.exists(c) for c in candidates):
             problem(f"{path}: broken internal link {attr_value}")
-    return rel
+
+    title = re.search(r"<title>(.*?)</title>", html, re.S)
+    desc = re.search(r'<meta name="description" content="(.*?)"', html, re.S)
+    return rel, (title.group(1).strip() if title else None), (desc.group(1).strip() if desc else None)
 
 
 def main():
     pages = sorted(glob.glob(f"{SITE}/**/index.html", recursive=True))
     if not pages:
         problem("no pages under site/")
-    seen = [check_page(p) for p in pages]
+    triples = [check_page(p) for p in pages]
+    seen = [t[0] for t in triples]
+
+    # Two pages with one title or one description compete with each other in
+    # search results and tell nobody which to open. Every page says what it is.
+    for what, idx in (("title", 1), ("description", 2)):
+        by_value = {}
+        for t in triples:
+            by_value.setdefault(t[idx], []).append(t[0])
+        for value, paths in by_value.items():
+            if value and len(paths) > 1:
+                problem(f"{what} {value!r} is shared by {', '.join(paths)}")
+
+    # The site must not claim customers it does not have. Written as a guard
+    # rather than a note because the temptation is permanent and the cost of
+    # one false "trusted by" line, in this sector, is a reputation.
+    CUSTOMER_CLAIMS = ("used by", "trusted by", "our customers", "customers include", "already use", "centres use")
+    for p in pages:
+        low = open(p).read().lower()
+        for phrase in CUSTOMER_CLAIMS:
+            if phrase in low:
+                problem(f"{p}: claims a customer the site does not have ({phrase!r})")
 
     for required in ("robots.txt", "sitemap.xml", "og.png"):
         if not os.path.exists(os.path.join(SITE, required)):
