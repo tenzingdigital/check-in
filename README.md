@@ -612,7 +612,7 @@ out of the two working apps:
 - **Codes by email at login** (admins, Settings → Security; on the working
   branch until proven on a copy): supervisors and administrators type a
   six-digit emailed code after their password, may trust a personal device
-  for 30 days, and guards keep password-only login. Needs email configured.
+  for 30 days, and guards keep password-only login.
 - **Where a login comes from** (migration 022, on the working branch): every
   sign-in records the country its address resolves to. Home is the site's
   list under Settings → Security, Ireland by default. A supervisor or
