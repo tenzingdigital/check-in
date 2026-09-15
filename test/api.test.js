@@ -3553,6 +3553,44 @@ async function main() {
     auth.clearFailures("unsubscribe", "::1");
   });
 
+  await test("the staff list shows who unsubscribed themselves; an admin re-ticking, or reinstating House Rules, clears it", async () => {
+    const prefs = require("../lib/emailPrefs");
+    await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report", "house_rules"]));
+    let list = await unsubAdmin.fetch("/api/staff");
+    let me = list.json.find((s) => s.id === unsubSupId);
+    assert.deepEqual(me.opt_outs.map((o) => o.kind).sort(), ["house_rules", "weekly_report"]);
+    assert.ok(me.opt_outs.every((o) => o.unsubscribed_at), "carries when");
+
+    // A supervisor can already list staff, so they can already read this
+    // column too — it names no resident, same reasoning as the rest of the row.
+    const asSupList = await unsubSup.fetch("/api/staff");
+    assert.equal(asSupList.status, 200);
+    assert.deepEqual(asSupList.json.find((s) => s.id === unsubSupId).opt_outs.map((o) => o.kind).sort(),
+      ["house_rules", "weekly_report"]);
+
+    // The deferred check from task 1's review: authenticated has SELECT and
+    // DELETE on email_opt_outs (via is_staff()/is_admin()) but never INSERT.
+    await assert.rejects(
+      withIdentity(unsubSupId, (c) => c.query(`insert into email_opt_outs (profile_id, kind) values ($1, 'house_rules')`, [unsubSupId])),
+      /permission denied/i);
+
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
+    list = await unsubAdmin.fetch("/api/staff");
+    me = list.json.find((s) => s.id === unsubSupId);
+    assert.deepEqual(me.opt_outs.map((o) => o.kind), ["house_rules"], "re-ticking clears the opt-out");
+    assert.equal(me.weekly_report, true);
+
+    const asSup = await unsubSup.fetch(`/api/staff/${unsubSupId}/house-rules`, { method: "POST", body: { on: true } });
+    assert.equal(asSup.status, 403, "only an admin reinstates");
+    const back = await unsubAdmin.fetch(`/api/staff/${unsubSupId}/house-rules`, { method: "POST", body: { on: true } });
+    assert.equal(back.status, 200, back.text);
+    list = await unsubAdmin.fetch("/api/staff");
+    assert.deepEqual(list.json.find((s) => s.id === unsubSupId).opt_outs, []);
+    const gone = await unsubAdmin.fetch(`/api/staff/00000000-0000-0000-0000-000000000000/house-rules`, { method: "POST", body: { on: true } });
+    assert.equal(gone.status, 404);
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
+  });
+
   server.close();
   await closePool();
   console.log(`\nPASS: ${passed} HTTP assertions.`);

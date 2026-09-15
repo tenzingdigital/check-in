@@ -18,12 +18,16 @@ const { HttpError, translateDbError, uuidParam } = require('../lib/api');
 
 const router = express.Router();
 
-// GET /api/staff — every account, active first.
+// GET /api/staff — every account, active first. `opt_outs` (049) is what
+// lets the card say "unsubscribed themselves" — readable by any staff
+// member like the rest of the row, since it names no resident.
 router.get('/', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select p.id, u.email, p.full_name, p.role, p.active, p.weekly_report, p.safeguarding_alert,
-              u.last_sign_in_at, p.created_at
+              u.last_sign_in_at, p.created_at,
+              coalesce((select json_agg(json_build_object('kind', o.kind, 'unsubscribed_at', o.unsubscribed_at) order by o.unsubscribed_at)
+                          from email_opt_outs o where o.profile_id = p.id), '[]'::json) as opt_outs
          from profiles p
          join auth.users u on u.id = p.id
         order by p.active desc, p.role, p.full_name`,
@@ -209,6 +213,9 @@ router.post('/:id/weekly-report', wrap(async (req, res) => {
       'update profiles set weekly_report = $2 where id = $1 returning id, weekly_report',
       [id, on],
     );
+    // Ticking someone back on is also the admin's way of undoing an
+    // unsubscribe (049): the row is what the staff card shows, so it must go.
+    if (on && rows[0]) await client.query(`delete from email_opt_outs where profile_id = $1 and kind = 'weekly_report'`, [id]);
     return rows[0];
   }).catch((err) => { throw translateDbError(err); });
 
@@ -240,10 +247,34 @@ router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
       'update profiles set safeguarding_alert = $2 where id = $1 returning id, safeguarding_alert',
       [id, on],
     );
+    // Ticking someone back on is also the admin's way of undoing an
+    // unsubscribe (049): the row is what the staff card shows, so it must go.
+    if (on && rows[0]) await client.query(`delete from email_opt_outs where profile_id = $1 and kind = 'safeguarding_alert'`, [id]);
     return rows[0];
   }).catch((err) => { throw translateDbError(err); });
 
   if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can change who receives the safeguarding alert.');
+  res.json(row);
+}));
+
+// POST /api/staff/:id/house-rules { on: true } — put someone back on the
+// nightly House Rules reminder after they unsubscribed themselves (049).
+// There is no tick for this email — every active supervisor and admin gets
+// it — so "on" means deleting their opt-out row, and there is no "off":
+// an admin who wants someone off it disables or demotes them. Admins only,
+// by the same shape as the siblings: the delete matches no rows for anyone
+// else, and a row that was never there is a 404 for an admin.
+router.post('/:id/house-rules', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'staff id');
+  if (req.body?.on !== true) throw new HttpError(400, 'Only { on: true } is accepted here.');
+  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can change who receives the House Rules reminder.');
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows: [exists] } = await client.query('select id from profiles where id = $1', [id]);
+    if (!exists) return null;
+    await client.query(`delete from email_opt_outs where profile_id = $1 and kind = 'house_rules'`, [id]);
+    return { id, house_rules: true };
+  });
+  if (!row) throw new HttpError(404, 'No such account.');
   res.json(row);
 }));
 
