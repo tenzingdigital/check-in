@@ -202,8 +202,13 @@ def foot():
     <nav class="footcol" aria-label="Who it is for">
       <h2>Who it's for</h2>
       <a href="/for/ipas-accommodation/">IPAS accommodation</a>
+      <a href="/for/ukrainian-and-botp-accommodation/">Ukrainian and BOTP accommodation</a>
+      <a href="/for/emergency-and-supported-accommodation/">Emergency and supported accommodation</a>
       <a href="/for/homeless-hostels/">Homeless hostels</a>
       <a href="/for/student-residences/">Student residences</a>
+      <a href="/for/nursing-homes-and-residential-care/">Nursing homes and residential care</a>
+      <a href="/for/refuges-and-treatment-centres/">Refuges and treatment centres</a>
+      <a href="/for/visitor-and-contractor-sign-in/">Visitor and contractor sign-in</a>
       <a href="{APP}/help.html">Help and guide</a>
     </nav>
     <div class="footcol">
@@ -546,6 +551,83 @@ page("/for/student-residences/",
      "CheckSteady for student residences and halls",
      "Know who is in which block, run fire roll calls on every warden's phone at once, and report occupancy and vacancies per building.",
      [HOME, ("/for/student-residences/", "Student residences")], body, faqs)
+
+# --------------------------------------------------------------------------
+# /for/emergency-and-supported-accommodation/
+# --------------------------------------------------------------------------
+faqs = [
+ ("Does it work for a family hub?",
+  "Yes. Households group parents and children together, so a family stays together on the register and on the roll call. Children are on the daily register, marked not required rather than left off it, and a room reads as a family rather than four unrelated names."),
+ ("Can a keyworker see who was seen today without the desk?",
+  "Yes. Any staff account, on any phone, opens the same register — who has been seen today, who is due, and who has not been seen. The record does not live at one desk."),
+ ("Is this a case-management or support-plan system?",
+  "No — it records presence and movement: who was seen, who moved in or out, who is on site. It holds no notes about a person's circumstances, care needs or support plan."),
+ ("Where is the data held?",
+  "In the European Union — Frankfurt — encrypted in transit and at rest. Each service's records live in their own separate database schema, so one service's staff cannot reach another's data even by accident."),
+]
+body = (
+  phead("Who it's for", "For emergency accommodation, family hubs and supported housing",
+        "The same register a hostel keeps, in a setting where most of the people on it are families rather than single adults — and where a keyworker, a scheme coordinator and a local authority all need to know who was seen today.") +
+  sec("""    <h2>The register an emergency accommodation service keeps</h2>
+    <p>One check-in per resident per day, closed automatically at local midnight, with anyone not seen recorded as a miss without anyone needing to remember to close the day. Where a resident is away with permission, an authorised absence with a return date keeps the register showing them as away rather than missing.</p>
+    <div class="pairs">
+      <div><h3>Families in a hub</h3><p>Households group parents and children. Children are on the daily register, marked not required rather than left off it, and a room reads as a family rather than four unrelated names.</p></div>
+      <div><h3>Keyworkers and visitors</h3><p>Every staff member on the site's list signs in with one tap from their own phone. Visitors, contractors and suppliers are signed in and out with their kind, name and an optional company, and a live count says who is on site right now.</p></div>
+      <div><h3>Bed nights and vacancies</h3><p>Buildings, floors and rooms, with physical beds and contracted beds held separately, occupancy at a glance, and a vacancies report for what the service can actually offer tonight.</p></div>
+      <div><h3>What the local authority asks</h3><p>The register for any date, the movement log for any range, and occupancy over time — each one exports as a spreadsheet.</p></div>
+    </div>""") +
+  sec("""    <h2>Supported and sheltered housing run by an approved housing body</h2>
+    <p>Supported and sheltered housing needs a lighter touch than a hostel, and CheckSteady scales down to it: a daily "seen" check-in per tenant, a door log where the scheme keeps a desk, and a roll call grouped by building for a fire drill — each one a switch, turned on only where the scheme wants it.</p>
+    <p>What it is not: a tenancy or rent system, and not a record of a support plan. It records that someone was seen and where they moved, not what a keyworker is helping them with.</p>""", tint=True) +
+  sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
+  CTA +
+  nextlinks("Read next", [
+    ("/for/homeless-hostels/", "Homeless hostels", "The same register at a hatch, phone-first and built for the night shift."),
+    ("/for/ipas-accommodation/", "IPAS accommodation", "The same register, in the vocabulary an IPAS-contracted centre uses."),
+    ("/features/roll-call/", "Roll call", "Fire drills and evacuations on every warden's phone, offline."),
+  ]))
+page("/for/emergency-and-supported-accommodation/",
+     "CheckSteady for emergency accommodation, family hubs and supported housing",
+     "A daily register, In &amp; out door log and fire roll call for Section 10 emergency accommodation, family hubs and supported and sheltered housing run by approved housing bodies. Phone-first, offline, append-only, hosted in the EU.",
+     [HOME, ("/for/emergency-and-supported-accommodation/", "Emergency and supported accommodation")], body, faqs)
+
+# --------------------------------------------------------------------------
+# /for/ukrainian-and-botp-accommodation/
+# --------------------------------------------------------------------------
+faqs = [
+ ("Can one site hold both IPAS and BOTP residents?",
+  "Yes. One register, one set of buildings and rooms — rooms and buildings tell the two groups apart if the centre wants to see that distinction, but the app itself holds no immigration-status field."),
+ ("Do residents need an app or a phone?",
+  "No. Staff record every check-in, movement and roll call from their own device. Residents are not asked to install anything or carry anything."),
+ ("Does it record PPS numbers or bank details?",
+  "No — neither is collected anywhere in the app. A resident's identity document is recorded as a TRC or an IRP, as printed, and only if the centre turns identity documents on."),
+ ("How long does it take to set up?",
+  "Import the spreadsheet you already keep — a verdict is shown for every line before anything is written — and turn on only the parts the centre uses. Nothing else is required to start."),
+]
+body = (
+  phead("Who it's for", "For Ukrainian and temporary protection (BOTP) accommodation",
+        "Often the same operator, and often the same building, as an IPAS centre. The register is the one your contract and your inspection already expect, without running a second system alongside it.") +
+  sec("""    <h2>One register for a mixed site</h2>
+    <p>A site housing both beneficiaries of temporary protection and IPAS residents does not need two registers. Buildings and rooms hold both, the daily check-in and the In &amp; out door log work the same way for everyone on site, and a room shows who is actually in it, whichever scheme they arrived under.</p>
+    <div class="pairs">
+      <div><h3>Families and rooms</h3><p>Households group parents and children, a room reads as a family, and children are on the daily register, marked not required rather than left off it.</p></div>
+      <div><h3>Contracted beds and vacancies</h3><p>Physical beds and contracted beds held separately, room status open or under maintenance with a note, and a vacancies report for what the centre can actually offer.</p></div>
+      <div><h3>Weekly register update</h3><p>Every Sunday morning the staff you choose get an email with counts of absences, weekend updates, removals and room changes, and a link into the app — the names, rooms and dates stay in the app.</p></div>
+      <div><h3>Records for the Department</h3><p>Append-only check-ins, movements and drills, plus the register for any date and occupancy over time, export as spreadsheets — for the Department of Children, Equality, Disability, Integration and Youth, or for your own contract review.</p></div>
+    </div>""") +
+  sec("""    <h2>Moving on and moving in</h2>
+    <p>Residents move on. Marking someone departed archives them without losing their history, so a past resident's record is still there if it is ever asked for. Bringing a new list in uses the same import throughout the app: a spreadsheet with a verdict shown for every line before anything is written, and a resident reference of the app's own for anyone the spreadsheet needs to refer to.</p>""", tint=True) +
+  sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
+  CTA +
+  nextlinks("Read next", [
+    ("/for/ipas-accommodation/", "IPAS accommodation", "The register in an IPAS centre's own vocabulary — permitted absences, house rules, contracted beds."),
+    ("/features/daily-register/", "Daily register", "One check-in per resident per day, closed automatically at midnight."),
+    ("/pricing/", "Pricing", "Per site, per month, every feature included."),
+  ]))
+page("/for/ukrainian-and-botp-accommodation/",
+     "CheckSteady for Ukrainian and temporary protection accommodation centres",
+     "A daily resident register, door log and roll call for accommodation centres housing beneficiaries of temporary protection (BOTP) from Ukraine — the same register an IPAS centre keeps, with families, rooms, contracted beds and append-only records. Hosted in the EU.",
+     [HOME, ("/for/ukrainian-and-botp-accommodation/", "Ukrainian and BOTP accommodation")], body, faqs)
 
 # --------------------------------------------------------------------------
 # /pricing/
