@@ -122,6 +122,27 @@ async function main() {
     assert.equal(logs.length, 0);
   });
 
+  await test('send() forwards headers to the provider, and sends none when not given', async () => {
+    const seen = [];
+    await withFetch(async (url, init) => { seen.push(JSON.parse(init.body)); return new Response('{}', { status: 200 }); }, async () => {
+      await mail.send({ to: 'a@example.ie', subject: 's', text: 't', headers: { 'List-Unsubscribe': '<https://x/u>' } });
+      await mail.send({ to: 'a@example.ie', subject: 's', text: 't' });
+    });
+    assert.deepEqual(seen[0].headers, { 'List-Unsubscribe': '<https://x/u>' });
+    assert.equal(seen[1].headers, undefined);
+  });
+
+  await test('layout() adds an Unsubscribe link to the footer only when given one; the transactional emails never carry it', async () => {
+    const withLink = mail.layout({ siteName: 'Slaney', heading: 'h', unsubscribe: 'https://x/unsubscribe?t=default&k=k&e=house_rules' });
+    assert.match(withLink, /href="https:\/\/x\/unsubscribe\?t=default&amp;k=k&amp;e=house_rules"[^>]*>Unsubscribe<\/a>/);
+    const without = mail.layout({ siteName: 'Slaney', heading: 'h' });
+    assert.doesNotMatch(without, /Unsubscribe/);
+    assert.doesNotMatch(mail.resetEmail({ fullName: 'A', link: 'https://x/r', minutes: 30 }).text, /nsubscribe/);
+    assert.doesNotMatch(mail.codeEmail({ fullName: 'A', code: '123456', minutes: 10 }).text, /nsubscribe/);
+    assert.equal(mail.textFooter('https://x/u'), 'To stop these emails: https://x/u');
+    assert.equal(mail.textFooter(null), null);
+  });
+
   console.log(`\nPASS: ${passed} mail-logging assertions.`);
 }
 
