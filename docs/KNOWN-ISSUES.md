@@ -82,19 +82,32 @@ first if there is one** — the manual check `docs/MULTI-TENANCY.md`
 ("Migration ordering") already called for, now with something to check
 instead of a cold `pg_namespace` query.
 
-**Migration 049 widens the gap the same way.** It adds `email_opt_outs`,
-`email_link_keys` and the `email_link_key(uuid)` function, used by the
-Sunday report, the nightly safeguarding alert, the nightly House Rules
-reminder and the public `/unsubscribe` page. A tenant provisioned before
-049 lacks the two tables, and `tenant_schema_gaps()` will report
-`email_link_key` missing until it is brought current — until then, each
-nightly job fails for that tenant by a different route (the safeguarding
-alert throws in its own `email_link_key()` call; the House Rules reminder
-throws earlier, in its recipients query, on the `email_opt_outs` it joins
-against — "relation ... does not exist" either way in the log) and records
-the run `FAILED` (both emails), and `/unsubscribe` 500s (a plain JSON
-error, not the "link is not valid" page) on that tenant's links. Nothing
-is dropped, so a rolling deploy of the code itself is safe for `public`.
+**Migration 049 widens the gap in a subtler way: silently, not loudly.**
+It adds `email_opt_outs`, `email_link_keys` and the `email_link_key(uuid)`
+function, used by the Sunday report, the nightly safeguarding alert, the
+nightly House Rules reminder and the public `/unsubscribe` page.
+`tenant_schema_gaps()` reports `email_link_key` missing for a tenant
+provisioned before 049 — check `GET /api/tenants` before deploying, as
+above; that is the real control here. But an unqualified reference to any
+of the three on such a tenant does not raise "relation does not exist":
+`searchPath()` (`lib/tenancy.js`) puts `public` after the tenant schema,
+so the reference falls through to the legacy centre's own objects
+instead. The House Rules recipients query (`jobs.js`, ~162-164) is such a
+cross-schema read: it queries `public.email_opt_outs` without error,
+matches nothing there (uuid profile ids never collide across tenants),
+and so House Rules on that tenant silently ignores opt-outs. All three
+senders then reach `email_link_key($1)` (`lib/emailPrefs.js keyFor()`),
+which likewise resolves to `public.email_link_key()`; its `insert into
+public.email_link_keys` violates the foreign key to `public.profiles` —
+`violates foreign key constraint "email_link_keys_profile_id_fkey"` in
+the log — and the run records `FAILED`. With `PUBLIC_URL` unset none of
+that fires: no key is minted, and the email simply goes out with no link.
+`/unsubscribe` for such a tenant does not 500 either — no such links can
+exist yet — it answers the ordinary 404 "link is not valid" page:
+`resolve()` (`routes/unsubscribe.js`) finds the key in
+`public.email_link_keys` but the join to the tenant's own `profiles`
+finds nothing. Nothing is dropped by 049, so a rolling deploy of the code
+itself is still safe for `public`.
 
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every

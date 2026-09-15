@@ -458,7 +458,8 @@ it, both built from `PUBLIC_URL` the same as the links above; unset it and
 the email still sends, just with no link to unsubscribe from. The link
 opens `/unsubscribe`, needs no login, and touches only that one person's
 own preference. Admin → Staff shows who used it and when, and re-ticking
-the box reinstates them.
+the box reinstates them — except for the House Rules reminder, which has
+no tick; there an admin presses Reinstate on their staff card instead.
 
 ### 4. Add the rest of the staff, and the residents
 

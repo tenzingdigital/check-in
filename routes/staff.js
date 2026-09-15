@@ -263,7 +263,8 @@ router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
 // it — so "on" means deleting their opt-out row, and there is no "off":
 // an admin who wants someone off it disables or demotes them. Admins only,
 // by the same shape as the siblings: the delete matches no rows for anyone
-// else, and a row that was never there is a 404 for an admin.
+// else, whether or not an opt-out row existed to remove — that is a 200
+// no-op. Only a missing profile is a 404 for an admin.
 router.post('/:id/house-rules', wrap(async (req, res) => {
   const id = uuidParam(req.params.id, 'staff id');
   if (req.body?.on !== true) throw new HttpError(400, 'Only { on: true } is accepted here.');

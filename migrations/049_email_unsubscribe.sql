@@ -69,6 +69,9 @@ revoke all on public.email_link_keys from anon, public, authenticated;
 -- Anyone else with a session — including the person themselves — is refused:
 -- a supervisor reading their own key gains nothing they cannot do from the
 -- email, and a supervisor reading a colleague's could unsubscribe them.
+-- The auth.uid() is null branch passes unconditionally, which is exactly
+-- what the owner-only nightly job needs — so the `revoke ... from anon`
+-- below is load-bearing, not incidental: never grant this function to anon.
 create or replace function public.email_link_key(p_profile uuid)
 returns text
 language plpgsql
