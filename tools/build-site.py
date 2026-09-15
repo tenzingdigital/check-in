@@ -446,7 +446,7 @@ body = (
   phead("Who it's for", "For IPAS and direct provision accommodation centres",
         "The daily register, the weekly register update and the door log an International Protection Accommodation Services (IPAS) centre keeps anyway — kept by the app, ready for an inspection, and written in the vocabulary a centre manager already uses.") +
   sec("""    <h2>Built around what an IPAS centre actually does</h2>
-    <p>CheckSteady was built with accommodation centre managers, and the vocabulary is theirs. Residents check in once a day; the day closes itself at local midnight; missed nights are counted against the figure your contract or your house rules use, not against one we invented.</p>
+    <p>CheckSteady was built with an accommodation centre manager, and the vocabulary is theirs. Residents check in once a day; the day closes itself at local midnight; missed nights are counted against the figure your contract or your house rules use, not against one we invented.</p>
     <div class="pairs">
       <div><h3>Identity documents, minimally</h3><p>TRC or IRP, recorded as printed. Never shown in a list, never in an export that does not need it, and every time a record is opened it is logged.</p></div>
       <div><h3>Families kept together</h3><p>Households group parents and children. A family stays together on the roll call with children marked, and a room reads as a family rather than four unrelated names.</p></div>
@@ -456,9 +456,9 @@ body = (
       <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app — no names, rooms or dates in the email. The full report, with names, is in the app and downloads as a spreadsheet.</p></div>
     </div>""") +
   sec("""    <h2>What an IPAS inspection asks for</h2>
-    <p>Every record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One download gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
+    <p>Every record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One printable document gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
     <h2>Children away overnight</h2>
-    <p>Children are not on the daily register — the obligation is on adults — so the app derives an overnight absence from the door log instead, and emails a nightly count of under-18s away overnight with no authorised absence: a count and a link, never a name. This is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
+    <p>Children are on the daily register but are not required to check in — the obligation is on adults — so the app derives an overnight absence from the In &amp; out register instead, and emails a nightly count of under-18s away overnight with no authorised absence: a count and a link, never a name. This is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
   sec("""    <h2>Getting started without a project</h2>
     <p>Import the spreadsheet you already keep — names, dates of birth, rooms, ID numbers, evacuation needs — and see a verdict for every line before anything is written. Turn on only the parts you use: rooms, families, visitors, evacuation needs and breach reports are each a switch, and a centre that leaves one off never sees it.</p>""") +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
@@ -470,7 +470,7 @@ body = (
   ]))
 page("/for/ipas-accommodation/",
      "CheckSteady for IPAS accommodation centres — daily register, weekly register and inspection records",
-     "A daily resident register, In &amp; out door log, roll call and the Sunday weekly register update for IPAS and direct provision accommodation centres. Append-only records for inspection, TRC and IRP handling, permitted absences, families and contracted beds. Hosted in the EU.",
+     "The daily register, Sunday weekly register update, door log and roll call for IPAS and direct provision centres — append-only records for inspection.",
      [HOME, ("/for/ipas-accommodation/", "IPAS accommodation")], body, faqs)
 
 # --------------------------------------------------------------------------
