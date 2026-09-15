@@ -82,6 +82,17 @@ first if there is one** — the manual check `docs/MULTI-TENANCY.md`
 ("Migration ordering") already called for, now with something to check
 instead of a cold `pg_namespace` query.
 
+**Migration 049 widens the gap the same way.** It adds `email_opt_outs`,
+`email_link_keys` and the `email_link_key(uuid)` function, used by the
+Sunday report, the nightly safeguarding alert, the nightly House Rules
+reminder and the public `/unsubscribe` page. A tenant provisioned before
+049 lacks the two tables, and `tenant_schema_gaps()` will report
+`email_link_key` missing until it is brought current — until then, each
+nightly job throws when it calls `email_link_key()` for that tenant and
+records the run `FAILED` (both emails), and `/unsubscribe` 404s on that
+tenant's links. Nothing is dropped, so a rolling deploy of the code
+itself is safe for `public`.
+
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every
 `t_*` schema at boot automatically, refusing to serve a schema still

@@ -451,6 +451,15 @@ from a shell.
 The reset link is the only one of the three that helps the *last remaining
 admin*, who has nobody above them to do it.
 
+Every recurring email — the Sunday Weekly register update, the nightly
+safeguarding alert and the nightly House Rules reminder — carries its own
+Unsubscribe link and the RFC 8058 headers that let a mail client one-click
+it, both built from `PUBLIC_URL` the same as the links above; unset it and
+the email still sends, just with no link to unsubscribe from. The link
+opens `/unsubscribe`, needs no login, and touches only that one person's
+own preference. Admin → Staff shows who used it and when, and re-ticking
+the box reinstates them.
+
 ### 4. Add the rest of the staff, and the residents
 
 Once you can log in as an admin, the header of either app shows an **Admin**
