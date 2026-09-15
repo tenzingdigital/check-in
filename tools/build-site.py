@@ -398,7 +398,7 @@ faqs = [
  ("How is this different from the daily register?",
   "They answer different questions and are kept as separate records. In and out says where somebody is right now — the fire-drill question. The daily register says whether somebody has been seen today at all, which is the welfare and compliance question. A resident can be off site and still have checked in."),
  ("Can staff sign several people in at once?",
-  "Yes. Select several ticks people and signs them in or out together — a minibus returning, a family arriving. Each person still gets their own movement, with their own time and the staff member's name; the shortcut is on the screen, not in the record."),
+  "Yes. Select several lets you tick people and sign them in or out together — a minibus returning, a family arriving. Each person still gets their own movement, with their own time and the staff member's name; the shortcut is on the screen, not in the record."),
  ("Is there a log of movements?",
   "Yes. Every movement for any day or range of days, newest first, with the time, the direction and who recorded it. It exports as a spreadsheet."),
  ("Does it cover staff, visitors and contractors?",
@@ -453,7 +453,7 @@ body = (
   sec("""    <h2>Built around what an IPAS centre actually does</h2>
     <p>CheckSteady was built with an accommodation centre manager, and the vocabulary is theirs. Residents check in once a day; the day closes itself at local midnight; missed nights are counted against the figure your contract or your house rules use, not against one we invented.</p>
     <div class="pairs">
-      <div><h3>Identity documents, minimally</h3><p>TRC or IRP, recorded as printed. Never shown in a list, never in an export that does not need it, and every time a record is opened it is logged.</p></div>
+      <div><h3>Identity documents, minimally</h3><p>TRC or IRP, recorded as printed. Never shown in a list, never in an export that does not need it, and every time the number is fetched it is logged.</p></div>
       <div><h3>Families kept together</h3><p>Households group parents and children. A family stays together on the roll call with children marked, and a room reads as a family rather than four unrelated names.</p></div>
       <div><h3>House rules, counted not judged</h3><p>Consecutive nights and days absent in a window, each beside the figure in your settings. Breach notices issued are recorded so nobody sends two.</p></div>
       <div><h3>Rooms and contracted beds</h3><p>Buildings, floors and rooms, with physical beds and contracted beds held separately, plus the bed set-up and a vacancies report for what you can actually offer.</p></div>
@@ -461,11 +461,11 @@ body = (
       <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app — no names, rooms or dates in the email. The full report, with names, is in the app and downloads as a spreadsheet.</p></div>
     </div>""") +
   sec("""    <h2>What an IPAS inspection asks for</h2>
-    <p>Every record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One printable document gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
+    <p>Every register record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One printable document gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
     <h2>Children away overnight</h2>
-    <p>Children are on the daily register but are not required to check in — the obligation is on adults — so the app derives an overnight absence from the In &amp; out register instead, and emails a nightly count of under-18s away overnight with no authorised absence: a count and a link, never a name. This is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
+    <p>Children are on the daily register but are not required to check in — the app requires a check-in only from adults — so the app derives an overnight absence from the In &amp; out register instead, and emails a nightly count of under-18s away overnight with no authorised absence: a count and a link, never a name. This is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
   sec("""    <h2>Getting started without a project</h2>
-    <p>Import the spreadsheet you already keep — names, dates of birth, rooms, ID numbers, evacuation needs — and see a verdict for every line before anything is written. Turn on only the parts you use: rooms, families, visitors, evacuation needs and breach reports are each a switch, and a centre that leaves one off never sees it.</p>""") +
+    <p>Import the spreadsheet you already keep — names, dates of birth, rooms, ID numbers, evacuation needs — and see a verdict for every line before anything is written. Turn on only the parts you use: rooms, families, visitors and evacuation needs are each a switch, and a centre that leaves one off never sees it.</p>""") +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
   CTA +
   nextlinks("Read next", [
@@ -521,7 +521,7 @@ page("/for/homeless-hostels/",
 # --------------------------------------------------------------------------
 faqs = [
  ("Do we have to use the daily check-in?",
-  "No. The daily register and the In and out door log are separate, and a residence that only wants to know who is in the building can use the door log and the roll call and leave the daily register alone."),
+  "Not as a separate act. The register cannot be switched off, but with the door switch on a sign-in at the door counts as the day's check-in, so a residence that only wants the door log and the roll call records nothing twice."),
  ("Can we run several blocks from one account?",
   "Yes. Buildings, floors and rooms are built in. The roll call groups by building so a warden at one assembly point sees only their block, and occupancy and vacancy reporting work per building."),
  ("How do fire drills work?",
@@ -536,7 +536,7 @@ body = (
     <p>A residence is not one list. Buildings, floors and rooms are first-class: rooms carry physical beds, contracted beds and the bed set-up, occupancy is counted per building, and searching a room number finds the people in it.</p>
     <div class="pairs">
       <div><h3>Roll call by block</h3><p>Wardens filter to their own building at their own assembly point. Counts are per group, and the whole list merges across phones.</p></div>
-      <div><h3>Take only what you need</h3><p>The daily welfare check-in is a switch. A residence that only needs the door log and the roll call turns the rest off and never sees it.</p></div>
+      <div><h3>Take only what you need</h3><p>The door can be the check-in. With the door switch on, a sign-in at the door records the day's check-in, so a residence that only works the door log and the roll call keeps an honest register without a second act.</p></div>
       <div><h3>Visitors and contractors</h3><p>Signed in on arrival, out on departure, and included in the on-site count that the roll call uses.</p></div>
       <div><h3>Occupancy reporting</h3><p>Occupancy over a range, vacancies as they stand, and room history showing who was in a room and when.</p></div>
     </div>""") +
@@ -577,7 +577,7 @@ body = (
       <div><h3>What a local authority may ask</h3><p>The register for any date, the movement log for any range, and occupancy — each one exports as a spreadsheet.</p></div>
     </div>""") +
   sec("""    <h2>Supported and sheltered housing run by an approved housing body</h2>
-    <p>Supported and sheltered housing needs a lighter touch than a hostel, and CheckSteady scales down to it: a daily "seen" check-in per tenant, a door log where the scheme keeps a desk, and a roll call grouped by building for a fire drill. The parts a scheme does not use — visitors, buildings, households, evacuation needs — stay switched off.</p>
+    <p>Supported and sheltered housing needs a lighter touch than a hostel, and CheckSteady scales down to it: a daily "seen" check-in per tenant, a door log where the scheme keeps a desk, and a roll call grouped by building for a fire drill. The parts a scheme does not use — visitors, households and the rest — stay switched off.</p>
     <p>What it is not: a tenancy or rent system, and not a record of a support plan. It records that someone was seen and where they moved, not what a keyworker is helping them with.</p>""", tint=True) +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
   CTA +
@@ -636,7 +636,7 @@ faqs = [
  ("Is this a care-planning or medication system?",
   "No. CheckSteady holds no care plans, medication records or nursing notes, and does not try to. It records presence and movement only — who was on the premises, who came and went, and who was marked safe at a drill."),
  ("Can residents who go out with family be recorded?",
-  "Yes. A day out is a movement on the In &amp; out log; a night or longer away is recorded as an authorised absence with a return date, so the register shows the resident as away rather than missing."),
+  "Yes. A day out is a movement on the In and out log; a night or longer away is recorded as an authorised absence with a return date, so the register shows the resident as away rather than missing."),
  ("Does it hold health information?",
   "Only if the centre turns the feature on: an evacuation-need code from a fixed list, recorded so a warden knows who needs help at a drill. It is a special-category field, and the centre records it in its own DPIA — CheckSteady does not decide that for it."),
  ("Can it be used on a tablet at reception?",
@@ -676,7 +676,7 @@ faqs = [
  ("Does anyone outside the service see the data?",
   "No. Each site's records live in their own separate database schema in the EU, the Sunday email carries counts only, and the app itself holds no analytics or tracking."),
  ("Can a resident's record be removed when they leave?",
-  "A departed resident is archived, with their history kept for the retention period you set. If a service wants a record erased sooner, that can be done on request."),
+  "A departed resident is archived, with their history kept for the retention period you set. If a service wants a record erased sooner, an administrator can erase it."),
  ("Is it a case-management or treatment-record system?",
   "No. It records presence and movement — who was seen, who came and went, who was marked safe at a drill. It holds no case notes, treatment records or support plans."),
 ]
@@ -723,7 +723,7 @@ faqs = [
  ("Can it print a badge or scan an ID?",
   "No. There is no badge printing and no ID scanning. A visitor is signed in with a kind, a name and an optional company, nothing more."),
  ("Does it work if the wifi drops?",
-  "Daily check-ins and movements queue on the device and send once the connection returns. Signing a visitor or a contractor in or out needs a live connection, so keep the reception device on wifi. The roll call itself works offline: it keeps the last on-site visitor list on the phone, so a drill can still count them."),
+  "Daily check-ins and movements queue on the device and send once the connection returns. Signing a visitor or a contractor in or out needs a live connection, so keep the reception device on wifi. The roll call itself works offline: it keeps the last on-site visitor list on the phone, so a drill can still count them; marking a visitor safe needs a connection."),
  ("Is there a tablet mode for reception?",
   "Yes. Install it to a tablet's home screen and lock it there with the device's own Guided Access or Single App Mode."),
 ]
@@ -825,7 +825,7 @@ body = (
     <div class="pairs">
       <div><h3>Hosted in the EU</h3><p>Frankfurt, encrypted in transit and at rest. No third-party analytics, trackers or external fonts on the app.</p></div>
       <div><h3>Separated by construction</h3><p>Each centre has its own database schema. One centre cannot read, change, export or erase another's records, and the tests prove it.</p></div>
-      <div><h3>Data minimisation</h3><p>Lists carry a name and what the screen needs. Dates of birth and identity numbers appear only on a record opened deliberately — and each opening is logged.</p></div>
+      <div><h3>Data minimisation</h3><p>Lists carry a name and what the screen needs. Dates of birth and identity numbers appear only on a record opened deliberately — and each opening on a connected phone is logged.</p></div>
       <div><h3>Roles in the database</h3><p>Staff record. Supervisors also manage the register. Administrators also manage accounts and run export and erasure. The rules are enforced below the screen.</p></div>
     </div>{analytics_note()}
     <h2>Subject access and erasure</h2>
@@ -900,7 +900,7 @@ form = f"""    <div class="signup">
 
 left = """    <div>
       <h2>What you get</h2>
-      <p>A working site of your own, not a guided demo. Everything is switched on: the daily register, the In and out door log, roll call, buildings and rooms, families, visitors, reports, imports and the GDPR tooling.</p>
+      <p>A working site of your own, not a guided demo. Everything is available: the daily register, the In and out door log, roll call, buildings and rooms, families, visitors and the rest. Start with sample residents and it is all switched on; start empty and turn on the parts you use under Settings → Features.</p>
       <ul>
         <li><strong>It opens on your phone.</strong> Nothing to install. Add it to the home screen if you want it there.</li>
         <li><strong>Sample data, if you want it.</strong> Thirty residents across rooms, with a day of check-ins already recorded and an attention list with something in it — so the screens look like a real morning rather than an empty box.</li>
