@@ -80,3 +80,11 @@ console.log('ok  degrades without a link');
 const noName = compose({ siteName: '', night: '2026-09-11', count: 0 });
 assert.match(noName.subject, /^CheckSteady:/, 'falls back to the product name');
 console.log('ok  falls back when the site has no name');
+
+// The way out (049): the footer link in both parts, given one, and nowhere
+// when none is given — the nil email goes out nightly too, so it needs it.
+const withOut = compose({ siteName: 'Slaney Manor', night: '2026-09-11', count: 1, link: 'https://example.test', unsubscribe: 'https://example.test/unsubscribe?t=default&k=k&e=safeguarding_alert' });
+assert.ok(withOut.text.endsWith('To stop these emails: https://example.test/unsubscribe?t=default&k=k&e=safeguarding_alert'), 'the text ends with the way out');
+assert.match(withOut.html, /Unsubscribe<\/a>/, 'and so does the html');
+assert.doesNotMatch(nil.text, /nsubscribe/, 'no link when none is given');
+console.log('ok  the way out is in both parts, given one, and absent without');

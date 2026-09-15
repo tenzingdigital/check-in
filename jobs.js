@@ -21,6 +21,7 @@
 
 const { closePool, withOwner, withOwnerIn } = require('./database');
 const tenancy = require('./lib/tenancy');
+const prefs = require('./lib/emailPrefs');
 
 // Order matters only in that close-out runs first: it writes the negative rows
 // for the day just ended, and the purges below must not race ahead of a day
@@ -159,8 +160,9 @@ async function notifyThresholds(schema, label) {
          order by consecutive_missed desc, absent_in_window desc, full_name`, [s.nights, s.win_limit, s.win_days]);
       if (!rows.length) { await record(client, name, true, 'nobody at a figure'); return 'nobody'; }
       const { rows: to } = await client.query(
-        `select u.email, p.full_name from profiles p join auth.users u on u.id = p.id
-          where p.active and p.role in ('supervisor', 'admin') and u.email is not null`);
+        `select p.id, u.email, p.full_name from profiles p join auth.users u on u.id = p.id
+          where p.active and p.role in ('supervisor', 'admin') and u.email is not null
+            and not exists (select 1 from email_opt_outs o where o.profile_id = p.id and o.kind = 'house_rules')`);
       if (!to.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
       const figures = `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}.`;
       const decision = 'The app records the facts; whether a letter or a breach report follows is the manager\'s decision. ' +
@@ -172,7 +174,7 @@ async function notifyThresholds(schema, label) {
       // Unlike the other two reports this one names residents by design (see
       // docs/GDPR.md, "What leaves by email") — so every name and room label
       // goes through the layout's escaping, never into markup raw.
-      const html = mail.layout({
+      const layoutArgs = {
         siteName: s.site_name,
         heading: `${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure`,
         paragraphs: [`After last night's close-out. ${figures}`],
@@ -183,10 +185,19 @@ async function notifyThresholds(schema, label) {
         })),
         cta: reportLink({ tab: 'absences' }) ? { href: reportLink({ tab: 'absences' }), label: 'Open Admin → Absences' } : null,
         notes: [decision],
-      });
+      };
+      const slug = await prefs.slugForSchema(client, schema);
       let delivered = 0;
       for (const r of to) {
-        const out = await mail.send({ to: r.email, subject: `${s.site_name || 'CheckSteady'}: ${rows.length} at a House Rules figure`, text, html });
+        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'house_rules' });
+        const footer = mail.textFooter(unsubscribe);
+        const out = await mail.send({
+          to: r.email,
+          subject: `${s.site_name || 'CheckSteady'}: ${rows.length} at a House Rules figure`,
+          text: footer ? `${text}\n\n${footer}` : text,
+          html: mail.layout({ ...layoutArgs, unsubscribe }),
+          headers: prefs.headersFor(unsubscribe),
+        });
         if (out.delivered) delivered += 1;
       }
       await record(client, name, true, `${rows.length} listed, ${delivered}/${to.length} emailed`);
@@ -274,16 +285,20 @@ async function safeguardingNightly(schema, label) {
 
       const { rows: [c] } = await client.query('select overnight_safeguarding_count($1) as n', [s.night]);
       const count = Number(c.n) || 0;
-      const { subject, text, html } = safeguarding.compose({
-        siteName: s.site_name,
-        night: s.night,
-        count,
-        link: reportLink({ tab: 'reports', report: 'overnight', from: s.night, to: s.night }),
-      });
 
+      const slug = await prefs.slugForSchema(client, schema);
       let delivered = 0;
-      for (const email of staff) {
-        const out = await mail.send({ to: email, subject, text, html });
+      for (const r of staff) {
+        // One compose per person: the footer link is theirs alone.
+        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'safeguarding_alert' });
+        const { subject, text, html } = safeguarding.compose({
+          siteName: s.site_name,
+          night: s.night,
+          count,
+          link: reportLink({ tab: 'reports', report: 'overnight', from: s.night, to: s.night }),
+          unsubscribe,
+        });
+        const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
         if (out.delivered) delivered += 1;
       }
       const result = `${count} to look at, ${delivered}/${staff.length} emailed`;
@@ -341,15 +356,19 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
            limit 1`,
         [name, s.local_timezone, s.today]);
       if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
+      const slug = await prefs.slugForSchema(client, schema);
       const { from, to } = weekly.lastWeek(s.today);
       const { rows } = await client.query('select * from weekly_register_rows_unchecked($1, $2)', [from, to]);
-      const { subject, text, html } = weekly.compose({
-        siteName: s.site_name, from, to, rows,
-        link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
-      });
       let delivered = 0;
-      for (const email of staff) {
-        const out = await mail.send({ to: email, subject, text, html });
+      for (const r of staff) {
+        // One compose per person: the footer link is theirs alone.
+        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'weekly_report' });
+        const { subject, text, html } = weekly.compose({
+          siteName: s.site_name, from, to, rows,
+          link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
+          unsubscribe,
+        });
+        const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
         if (out.delivered) delivered += 1;
       }
       // A partial or total delivery failure is not a successful run. Recording

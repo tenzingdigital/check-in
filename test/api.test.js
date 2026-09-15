@@ -3395,6 +3395,81 @@ async function main() {
     assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
   });
 
+  await test("every recurring email carries its own unsubscribe link and List-Unsubscribe headers; House Rules skips the opted-out", async () => {
+    const prefs = require("../lib/emailPrefs");
+    const { weeklyRegister, notifyThresholds } = require("../jobs");
+    process.env.PUBLIC_URL = "https://hut-check-in.onrender.com";
+    assert.equal(await withOwner((c) => prefs.slugForUser(c, unsubSupId)), "default", "slugForUser looks the tenant up from the user's own row");
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/safeguarding-alert`, { method: "POST", body: { on: true } })).status, 200);
+    const key = await withOwner((c) => prefs.keyFor(c, unsubSupId));
+
+    // The Sunday report, sent by hand.
+    let before = (global.__mailSink || []).length;
+    const sent = await unsubAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
+    assert.equal(sent.status, 200, sent.text);
+    let mine = (global.__mailSink || []).slice(before).find((m) => m.to === "unsubsup@hut.example");
+    assert.ok(mine, "the supervisor was emailed");
+    const wkUrl = `https://hut-check-in.onrender.com/unsubscribe?t=default&k=${key}&e=weekly_report`;
+    assert.ok(mine.text.endsWith(`To stop these emails: ${wkUrl}`), mine.text);
+    assert.match(mine.html, /Unsubscribe<\/a>/);
+    assert.equal(mine.headers["List-Unsubscribe"], `<${wkUrl}>`);
+    assert.equal(mine.headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+    const others = (global.__mailSink || []).slice(before).filter((m) => m.to !== "unsubsup@hut.example");
+    assert.ok(others.every((m) => !m.text.includes(key)), "nobody else's email carries this person's key");
+
+    // The Sunday report, by the job (forced past the Sunday gate).
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = true`));
+    await withOwner((c) => c.query(`delete from public.job_runs where job = 'weekly-register-email'`));
+    before = (global.__mailSink || []).length;
+    assert.equal(await weeklyRegister("public", "", { force: true }), true);
+    mine = (global.__mailSink || []).slice(before).find((m) => m.to === "unsubsup@hut.example");
+    assert.ok(mine && mine.text.endsWith(`To stop these emails: ${wkUrl}`), "the job builds the same link as the route");
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false`));
+
+    // The House Rules reminder: everyone, minus opt-outs.
+    await withOwner((c) => c.query(`delete from public.job_runs where job = 'notify-thresholds-email'`));
+    await withOwner((c) => c.query(`update public.app_settings set notify_thresholds_email = true`));
+    before = (global.__mailSink || []).length;
+    assert.equal(await notifyThresholds("public", ""), true);
+    mine = (global.__mailSink || []).slice(before).find((m) => m.to === "unsubsup@hut.example");
+    if (!mine) {
+      // Resolution 4: if an earlier test's daily_compliance rows have since
+      // been cleared, re-insert the same rows the "Missing Nights" test does
+      // so the job has someone to list, then run it again.
+      const made = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Missing", last_name: "Nights", date_of_birth: "1979-05-05" } });
+      assert.equal(made.status, 201, made.text);
+      await withOwner((c) => c.query(
+        `update public.residents set registered_at = now() - interval '10 days' where id = $1;`, [made.json.id]));
+      await withOwner((c) => c.query(
+        `insert into public.daily_compliance (resident_id, compliance_date, required, presented, checkin_count, closed_at)
+         select $1, d::date, true, false, 0, now() from generate_series(public.site_today() - 3, public.site_today() - 1, interval '1 day') d
+         on conflict do nothing`, [made.json.id]));
+      before = (global.__mailSink || []).length;
+      assert.equal(await notifyThresholds("public", ""), true);
+      mine = (global.__mailSink || []).slice(before).find((m) => m.to === "unsubsup@hut.example");
+    }
+    assert.ok(mine, "a supervisor gets the House Rules reminder");
+    assert.ok(mine.text.endsWith(`To stop these emails: https://hut-check-in.onrender.com/unsubscribe?t=default&k=${key}&e=house_rules`));
+    await withOwner((c) => prefs.optOut(c, unsubSupId, ["house_rules"]));
+    before = (global.__mailSink || []).length;
+    assert.equal(await notifyThresholds("public", ""), true);
+    assert.ok(!(global.__mailSink || []).slice(before).some((m) => m.to === "unsubsup@hut.example"), "opted out of House Rules: not emailed");
+    await withOwner((c) => prefs.optIn(c, unsubSupId, ["house_rules"]));
+    await withOwner((c) => c.query(`update public.app_settings set notify_thresholds_email = false`));
+
+    // With PUBLIC_URL unset: no link, no headers, still sent.
+    delete process.env.PUBLIC_URL;
+    before = (global.__mailSink || []).length;
+    const sent2 = await unsubAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
+    assert.equal(sent2.status, 200, sent2.text);
+    mine = (global.__mailSink || []).slice(before).find((m) => m.to === "unsubsup@hut.example");
+    assert.ok(mine && !/nsubscribe/.test(mine.text) && !mine.headers, "no link is invented without PUBLIC_URL");
+    process.env.PUBLIC_URL = "https://hut-check-in.onrender.com";
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/safeguarding-alert`, { method: "POST", body: { on: false } })).status, 200);
+  });
+
   server.close();
   await closePool();
   console.log(`\nPASS: ${passed} HTTP assertions.`);

@@ -164,6 +164,7 @@ router.delete('/demo-data', wrap(async (req, res) => {
 // ---------------------------------------------------------------------------
 const mail = require('../lib/mail');
 const weekly = require('../lib/weeklyReport');
+const prefs = require('../lib/emailPrefs');
 
 // Same rule as the nightly job (jobs.js reportLink()): PUBLIC_URL, or no
 // link at all — never one built from the request. A route has a Host and
@@ -184,6 +185,10 @@ function reportLink(params) {
 
 router.post('/weekly-report/send', wrap(async (req, res) => {
   if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can send the weekly report');
+  // The route runs under db.withIdentity, as the caller, who cannot read
+  // public.tenants; the slug is looked up as the owner first, from the
+  // admin's own row (see lib/emailPrefs.js slugForUser()).
+  const slug = await db.withOwner((c) => prefs.slugForUser(c, req.session.userId));
   const out = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: [s] } = await client.query(
       `select site_name, to_char(site_today(), 'YYYY-MM-DD') as today from app_settings where id`);
@@ -194,13 +199,15 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
     const { from, to } = weekly.lastWeek(s.today);
     await client.query('select note_report($1, $2, $3, $4)', ['weekly', 'sent by hand', from, to]);
     const { rows } = await client.query('select * from weekly_register_rows($1, $2)', [from, to]);
-    const { subject, text, html } = weekly.compose({
-      siteName: s.site_name, from, to, rows,
-      link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
-    });
     let sent = 0;
-    for (const email of staff) {
-      const mailed = await mail.send({ to: email, subject, text, html });
+    for (const r of staff) {
+      const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'weekly_report' });
+      const { subject, text, html } = weekly.compose({
+        siteName: s.site_name, from, to, rows,
+        link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
+        unsubscribe,
+      });
+      const mailed = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
       if (mailed.delivered) sent += 1;
     }
     return { sent, recipients: staff.length, from, to };
