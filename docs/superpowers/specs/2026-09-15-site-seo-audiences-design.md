@@ -28,11 +28,17 @@ product to them, with the page saying what it is not.
 
 ## Scope
 
-1. **Home page** (`site/index.html`, hand-written): new title, description
-   and Open Graph text leading with IPAS and direct provision, then the
-   other audiences by their searched names; `SoftwareApplication` schema
-   gains an `audience` list and the same description; the "Who it's for"
-   section gains a card per new page. The hero copy stays as it is.
+1. **Home page** (`site/index.html`, hand-written) — **quiet front door.**
+   The owner's call on 15 September, after weighing the attention a
+   "software for direct provision" front page draws from people who are
+   not buyers: the `<title>`, description and Open Graph text stay
+   sector-neutral — "accommodation and residential centres", the
+   audiences by their plain names — and do **not** say IPAS or direct
+   provision. Those terms live on the audience pages, which are what a
+   centre manager's search lands on. The `SoftwareApplication` schema
+   gains an `audience` list in the same neutral wording; the "Who it's
+   for" section gains a card per new page. The hero copy stays as it is.
+
 2. **`/for/ipas-accommodation/`** rewritten for the searched terms without
    dumbing it down, and brought current with the features shipped since
    9 September (weekly register update, safeguarding alert, Excel and
@@ -64,6 +70,16 @@ Out of scope: blog posts, backlinks, keyword pages, paid search, any
 change to the app, any claim the product does not back.
 
 ## Voice and truth rules
+
+- **No centre is ever named or located** anywhere on the site — no case
+  study, no logo wall, no "trusted by", no town. The one IPAS customer
+  stays invisible. `tools/check-site.py` forbids the customer phrases
+  below; the reviewer reads for a name or a place.
+- **Owner item, outside this change:** a contact address that is not a
+  person's name (e.g. `hello@checksteady.com`, forwarded) so any
+  hostility lands on a mailbox. Until it exists the site keeps the
+  current address; when it does, one search-and-replace in
+  `tools/build-site.py` and `site/index.html`.
 
 - Every audience page says what the product **is** for that buyer and
   what it **is not**. The HIQA page names the fire register, visitor book
