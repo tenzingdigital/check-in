@@ -3373,13 +3373,23 @@ async function main() {
     await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report", "house_rules"]));
     let p = (await withOwner((c) => c.query(`select weekly_report, safeguarding_alert from public.profiles where id = $1`, [unsubSupId]))).rows[0];
     assert.equal(p.weekly_report, false, "the tick follows the opt-out");
+    assert.equal(p.safeguarding_alert, false, "a weekly_report/house_rules opt-out leaves safeguarding_alert untouched");
     let outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
     assert.deepEqual(outs.map((o) => o.kind).sort(), ["house_rules", "weekly_report"]);
     await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report"]));
     assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 2, "opting out twice is a no-op");
+    await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report", "weekly_report"]));
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 2,
+      "a duplicated kind in one call is harmless, not a 'multiple assignments to same column' error");
     await withOwner((c) => prefs.optIn(c, unsubSupId, ["weekly_report", "house_rules"]));
     p = (await withOwner((c) => c.query(`select weekly_report from public.profiles where id = $1`, [unsubSupId]))).rows[0];
     assert.equal(p.weekly_report, true, "opting back in restores the tick");
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);
+    await withOwner((c) => prefs.optOut(c, unsubSupId, ["house_rules"]));
+    p = (await withOwner((c) => c.query(`select weekly_report, safeguarding_alert from public.profiles where id = $1`, [unsubSupId]))).rows[0];
+    assert.equal(p.weekly_report, true, "a House-Rules-only opt-out has no tick, so weekly_report reads back unchanged");
+    assert.equal(p.safeguarding_alert, false, "a House-Rules-only opt-out has no tick, so safeguarding_alert reads back unchanged");
+    await withOwner((c) => prefs.optIn(c, unsubSupId, ["house_rules"]));
     assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);
     assert.equal(await withOwner((c) => prefs.slugForSchema(c, "public")), "default");
     assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);

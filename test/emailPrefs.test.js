@@ -39,4 +39,6 @@ test('KINDS names every kind the migration accepts, and only those', () => {
   assert.ok(prefs.isKind('house_rules') && !prefs.isKind('all') && !prefs.isKind(''));
 });
 
+delete process.env.PUBLIC_URL;
+
 console.log(`\nPASS: ${passed} emailPrefs assertions.`);
