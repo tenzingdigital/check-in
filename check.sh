@@ -69,6 +69,7 @@ node tools/gen-permissions-doc.js --check || fail=1
 # only when the PostgreSQL binaries below are present.
 step "Mail provider error logging"
 node test/mail.test.js || fail=1
+node test/emailPrefs.test.js || fail=1
 node test/xlsx.test.js || fail=1
 node test/ref.test.js || fail=1
 node test/safeguardingAlert.test.js || fail=1

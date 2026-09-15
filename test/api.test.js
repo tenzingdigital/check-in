@@ -3367,6 +3367,24 @@ async function main() {
       /permission denied/i, "the table itself is owner-only");
   });
 
+  await test("optOut inserts the row and clears the tick; optIn reverses both; House Rules has no tick to clear", async () => {
+    const prefs = require("../lib/emailPrefs");
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
+    await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report", "house_rules"]));
+    let p = (await withOwner((c) => c.query(`select weekly_report, safeguarding_alert from public.profiles where id = $1`, [unsubSupId]))).rows[0];
+    assert.equal(p.weekly_report, false, "the tick follows the opt-out");
+    let outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
+    assert.deepEqual(outs.map((o) => o.kind).sort(), ["house_rules", "weekly_report"]);
+    await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report"]));
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 2, "opting out twice is a no-op");
+    await withOwner((c) => prefs.optIn(c, unsubSupId, ["weekly_report", "house_rules"]));
+    p = (await withOwner((c) => c.query(`select weekly_report from public.profiles where id = $1`, [unsubSupId]))).rows[0];
+    assert.equal(p.weekly_report, true, "opting back in restores the tick");
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);
+    assert.equal(await withOwner((c) => prefs.slugForSchema(c, "public")), "default");
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
+  });
+
   server.close();
   await closePool();
   console.log(`\nPASS: ${passed} HTTP assertions.`);
