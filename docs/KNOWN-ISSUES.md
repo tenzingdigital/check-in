@@ -88,10 +88,13 @@ Sunday report, the nightly safeguarding alert, the nightly House Rules
 reminder and the public `/unsubscribe` page. A tenant provisioned before
 049 lacks the two tables, and `tenant_schema_gaps()` will report
 `email_link_key` missing until it is brought current — until then, each
-nightly job throws when it calls `email_link_key()` for that tenant and
-records the run `FAILED` (both emails), and `/unsubscribe` 404s on that
-tenant's links. Nothing is dropped, so a rolling deploy of the code
-itself is safe for `public`.
+nightly job fails for that tenant by a different route (the safeguarding
+alert throws in its own `email_link_key()` call; the House Rules reminder
+throws earlier, in its recipients query, on the `email_opt_outs` it joins
+against — "relation ... does not exist" either way in the log) and records
+the run `FAILED` (both emails), and `/unsubscribe` 500s (a plain JSON
+error, not the "link is not valid" page) on that tenant's links. Nothing
+is dropped, so a rolling deploy of the code itself is safe for `public`.
 
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every
