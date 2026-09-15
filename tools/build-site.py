@@ -644,7 +644,7 @@ faqs = [
 ]
 body = (
   phead("Who it's for", "For nursing homes and residential care centres",
-        "A designated centre has to answer three questions inside a minute: who is in the building, who has visited today, and who is accounted for if the alarm goes. CheckSteady keeps the register that answers all three, instead of a book at reception.") +
+        "A designated centre should be able to answer three questions in a minute: who is in the building, who has visited today, and who is accounted for if the alarm goes. CheckSteady keeps the register that answers all three, instead of a book at reception.") +
   sec("""    <h2>The register beside the care record</h2>
     <p>CheckSteady is not a care plan, a medication record or a nursing record, and it does not try to be. It records presence and movement: who is on the premises, who came and went, and who was marked safe at a drill. It sits beside the care system, not inside it.</p>
     <div class="pairs">
@@ -686,7 +686,7 @@ body = (
   sec("""    <h2>Who is on site, right now</h2>
     <p>A live count says how many people are on site at this moment, residents included. Residents are signed in and out like anyone else, an authorised absence carries a return date so a planned night away never reads as missing, and a fire drill runs by building with every warden's phone showing the same list.</p>
     <div class="pairs">
-      <div><h3>Every arrival at the door</h3><p>Visitors, contractors and suppliers are signed in with their kind, name and company, and signed out on departure. Nobody on site is off the list.</p></div>
+      <div><h3>Every arrival at the door</h3><p>Visitors, contractors and suppliers are signed in with their kind, name and company, and signed out on departure, so the roll call's list is everyone on site, not only residents.</p></div>
       <div><h3>Authorised leave, counted fairly</h3><p>In a residential treatment setting, planned leave and overnight passes are recorded as an authorised absence and excluded from the missed-night counts, so permitted time away is never counted as a miss.</p></div>
       <div><h3>Roll call at 3am</h3><p>Started from any staff phone, working offline, with the marked-safe list merging across every phone once the connection returns.</p></div>
       <div><h3>Children with a parent</h3><p>Households group a parent with their children, so a family stays together on the register, and children are marked on the roll call rather than left off it.</p></div>
@@ -694,14 +694,13 @@ body = (
   sec("""    <h2>Built for confidentiality</h2>
     <p>The register holds as little as the job needs, and what it holds is described here precisely, not summarised.</p>
     <div class="pairs">
-      <div><h3>No postal address, anywhere</h3><p>The app has no postal-address field for a site, a building or a resident. The only address it stores at all is an email address, for signing in.</p></div>
+      <div><h3>No postal address, anywhere</h3><p>The app has no postal-address field for a site, a building or a resident.</p></div>
       <div><h3>Counts only, never a name</h3><p>The Sunday email to your own staff carries counts and a link into the app. No resident's name ever appears in it.</p></div>
       <div><h3>Identity documents, optional</h3><p>TRC or IRP can be recorded as printed if a service needs it. It is an optional field, left blank by any service that does not use it.</p></div>
-      <div><h3>Every opening logged</h3><p>Opening a resident's own record — not the register, the individual file — is logged with who opened it and when.</p></div>
+      <div><h3>Logged, on a connected phone</h3><p>Opening a resident's record on a connected phone — the register sheet, the edit sheet, an export — is logged with who and when. A sheet read from a phone's offline copy is not.</p></div>
       <div><h3>One schema per site, in the EU</h3><p>Hosted in Frankfurt, encrypted in transit and at rest, with each site's records in their own separate database schema.</p></div>
-      <div><h3>Erasure on request</h3><p>A site's records can be erased on request, on top of the retention schedule that already applies once a resident departs.</p></div>
+      <div><h3>Erasure on request</h3><p>A resident's record can be erased on request, and the site's data is removed when the service leaves.</p></div>
     </div>
-    <p>A site can also restrict staff sign-in to a chosen home country, refusing a login attempt from anywhere else, if it turns that setting on.</p>
     <p>It was built with an accommodation centre's feedback and is offered here because the register is the same; we would want to hear from a refuge or a treatment service before claiming to know its day.</p>""", tint=True) +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
   CTA +
@@ -712,7 +711,7 @@ body = (
   ]))
 page("/for/refuges-and-treatment-centres/",
      "CheckSteady for refuges and residential treatment centres",
-     "A daily register, visitor sign-in, live count and fire roll call for domestic violence refuges and residential treatment centres. No addresses, EU hosted.",
+     "A daily register, visitor sign-in, live count and fire roll call for domestic violence refuges and residential treatment centres. No postal address. EU hosted.",
      [HOME, ("/for/refuges-and-treatment-centres/", "Refuges and treatment centres")], body, faqs)
 
 # --------------------------------------------------------------------------
