@@ -723,9 +723,9 @@ faqs = [
  ("Can it print a badge or scan an ID?",
   "No. There is no badge printing and no ID scanning. A visitor is signed in with a kind, a name and an optional company, nothing more."),
  ("Does it work if the wifi drops?",
-  "Daily check-ins and movements queue on the device and send once the connection returns. Signing a visitor or a contractor in or out needs a live connection, so keep the reception device on wifi."),
+  "Daily check-ins and movements queue on the device and send once the connection returns. Signing a visitor or a contractor in or out needs a live connection, so keep the reception device on wifi. The roll call itself works offline: it keeps the last on-site visitor list on the phone, so a drill can still count them."),
  ("Is there a tablet mode for reception?",
-  "Yes. Install it to a tablet's home screen and lock it there with the device's own guided-access (kiosk) mode."),
+  "Yes. Install it to a tablet's home screen and lock it there with the device's own Guided Access or Single App Mode."),
 ]
 body = (
   phead("Who it's for", "A visitor and contractor sign-in book that does the fire roll call",
@@ -735,13 +735,13 @@ body = (
     <div class="pairs">
       <div><h3>Anyone at the door</h3><p>Pick the kind — visitor, contractor, supplier or staff — then a name and an optional company. Nothing else is asked.</p></div>
       <div><h3>A staff list for one tap</h3><p>Paste your own site staff list — kitchen, cleaning, maintenance — one name per line, and each becomes a button on the Visitors tab. Signing a regular face in or out is one tap.</p></div>
-      <div><h3>On the roll call while on site</h3><p>Everyone signed in stays on the roll call for as long as they are on site — the muster list is not only staff, it is everyone actually there.</p></div>
+      <div><h3>On the roll call while on site</h3><p>Everyone signed in stays on the roll call for as long as they are on site — the muster list is not only staff, it is everyone who was signed in.</p></div>
       <div><h3>The log for any range</h3><p>Who was in on a given day, or over a month, downloadable as a spreadsheet for an audit, a contractor review or your own records.</p></div>
     </div>""") +
   sec("""    <h2>The roll call</h2>
-    <p>A drill or an evacuation starts from any warden's phone, and every phone on site shows the same list at the same time. A mark made with no signal queues on that phone and merges with everyone else's the moment it reconnects, so one warden at the far end of a car park does not hold up the count. Every drill is recorded and kept — who was marked safe, and when.</p>""", tint=True) +
+    <p>A drill or an evacuation starts from any warden's phone, and every phone on site shows the same list within seconds. A mark made with no signal queues on that phone and merges with everyone else's the moment it reconnects, so one warden at the far end of a car park does not hold up the count. Every drill is recorded and kept — who was marked safe, and when.</p>""", tint=True) +
   sec("""    <h2>When there are no residents</h2>
-    <p>CheckSteady was built for residential sites, and it still carries a resident register — a building with no residents leaves it empty and never sees it. Turn on Visitors and Evacuation under Settings &rarr; Features and leave everything else off. Pricing is per site, per month, whatever is switched on.</p>""") +
+    <p>CheckSteady was built for residential sites, and it still carries a resident register. A building with no residents simply leaves it empty — the In &amp; out screen still shows it, with nobody on it — and works from the Visitors tab. Turn on Visitors and Evacuation under Settings &rarr; Features and turn nothing else on. Pricing is per site, per month, whatever is switched on.</p>""") +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
   CTA +
   nextlinks("Read next", [
@@ -751,7 +751,7 @@ body = (
   ]))
 page("/for/visitor-and-contractor-sign-in/",
      "Visitor and contractor sign-in with a fire roll call — CheckSteady",
-     "A visitor sign-in app for contractor sign in, suppliers and staff, a live on-site count and a fire roll call app on every warden's phone. EU hosted.",
+     "Sign visitors, contractors, suppliers and staff in and out, see who is on site, and run the fire roll call on every warden's phone. EU hosted.",
      [HOME, ("/for/visitor-and-contractor-sign-in/", "Visitor and contractor sign-in")], body, faqs)
 
 # --------------------------------------------------------------------------
