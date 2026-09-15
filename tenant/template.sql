@@ -683,6 +683,33 @@ $$;
 
 --
 
+-- Name: email_link_key(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.email_link_key(p_profile uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_key text;
+begin
+  if auth.uid() is not null and not __TENANT__.is_admin() then
+    raise exception 'Only an administrator can build an unsubscribe link.' using errcode = '42501';
+  end if;
+  select key into v_key from __TENANT__.email_link_keys where profile_id = p_profile;
+  if v_key is not null then return v_key; end if;
+  -- 32 bytes, base64url without padding: 43 characters that survive a URL.
+  v_key := replace(translate(encode(extensions.gen_random_bytes(32), 'base64'), '+/', '-_'), '=', '');
+  insert into __TENANT__.email_link_keys (profile_id, key) values (p_profile, v_key)
+    on conflict (profile_id) do update set key = __TENANT__.email_link_keys.key
+    returning key into v_key;
+  return v_key;
+end;
+$$;
+
+
+--
+
 -- Name: end_absence(bigint, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2561,6 +2588,47 @@ ALTER TABLE __TENANT__.checkin_events ALTER COLUMN id ADD GENERATED ALWAYS AS ID
 
 --
 
+-- Name: email_link_keys; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.email_link_keys (
+    profile_id uuid NOT NULL,
+    key text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+
+-- Name: email_opt_outs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.email_opt_outs (
+    id bigint NOT NULL,
+    profile_id uuid NOT NULL,
+    kind text NOT NULL,
+    unsubscribed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT email_opt_outs_kind_check CHECK ((kind = ANY (ARRAY['weekly_report'::text, 'safeguarding_alert'::text, 'house_rules'::text])))
+);
+
+
+--
+
+-- Name: email_opt_outs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.email_opt_outs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME __TENANT__.email_opt_outs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+
 -- Name: erasure_log; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3049,6 +3117,42 @@ ALTER TABLE ONLY __TENANT__.daily_compliance
 
 --
 
+-- Name: email_link_keys email_link_keys_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.email_link_keys
+    ADD CONSTRAINT email_link_keys_key_key UNIQUE (key);
+
+
+--
+
+-- Name: email_link_keys email_link_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.email_link_keys
+    ADD CONSTRAINT email_link_keys_pkey PRIMARY KEY (profile_id);
+
+
+--
+
+-- Name: email_opt_outs email_opt_outs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.email_opt_outs
+    ADD CONSTRAINT email_opt_outs_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: email_opt_outs email_opt_outs_profile_id_kind_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.email_opt_outs
+    ADD CONSTRAINT email_opt_outs_profile_id_kind_key UNIQUE (profile_id, kind);
+
+
+--
+
 -- Name: erasure_log erasure_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3508,6 +3612,14 @@ CREATE TRIGGER buildings_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.bu
 
 --
 
+-- Name: email_opt_outs email_opt_outs_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER email_opt_outs_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.email_opt_outs FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
 -- Name: profiles profiles_audit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3673,6 +3785,24 @@ ALTER TABLE ONLY __TENANT__.checkin_events
 
 ALTER TABLE ONLY __TENANT__.daily_compliance
     ADD CONSTRAINT daily_compliance_resident_id_fkey FOREIGN KEY (resident_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: email_link_keys email_link_keys_profile_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.email_link_keys
+    ADD CONSTRAINT email_link_keys_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES __TENANT__.profiles(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: email_opt_outs email_opt_outs_profile_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.email_opt_outs
+    ADD CONSTRAINT email_opt_outs_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES __TENANT__.profiles(id) ON DELETE CASCADE;
 
 
 --
@@ -4051,6 +4181,36 @@ ALTER TABLE __TENANT__.daily_compliance ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY daily_compliance_read ON __TENANT__.daily_compliance FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
+-- Name: email_link_keys; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.email_link_keys ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: email_opt_outs; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.email_opt_outs ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: email_opt_outs email_opt_outs_admin; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY email_opt_outs_admin ON __TENANT__.email_opt_outs FOR DELETE USING (__TENANT__.is_admin());
+
+
+--
+
+-- Name: email_opt_outs email_opt_outs_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY email_opt_outs_read ON __TENANT__.email_opt_outs FOR SELECT USING (__TENANT__.is_staff());
 
 
 --
@@ -4525,6 +4685,16 @@ REVOKE ALL ON FUNCTION __TENANT__.close_out_compliance_days(p_through date) FROM
 REVOKE ALL ON FUNCTION __TENANT__.close_out_due_through() FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO service_role;
+
+
+--
+
+-- Name: FUNCTION email_link_key(p_profile uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.email_link_key(p_profile uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.email_link_key(p_profile uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.email_link_key(p_profile uuid) TO service_role;
 
 
 --
@@ -5158,6 +5328,33 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.checkin_events TO service_
 GRANT ALL ON SEQUENCE __TENANT__.checkin_events_id_seq TO anon;
 GRANT ALL ON SEQUENCE __TENANT__.checkin_events_id_seq TO authenticated;
 GRANT ALL ON SEQUENCE __TENANT__.checkin_events_id_seq TO service_role;
+
+
+--
+
+-- Name: TABLE email_link_keys; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.email_link_keys TO service_role;
+
+
+--
+
+-- Name: TABLE email_opt_outs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.email_opt_outs TO service_role;
+GRANT SELECT,DELETE ON TABLE __TENANT__.email_opt_outs TO authenticated;
+
+
+--
+
+-- Name: SEQUENCE email_opt_outs_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT ALL ON SEQUENCE __TENANT__.email_opt_outs_id_seq TO anon;
+GRANT ALL ON SEQUENCE __TENANT__.email_opt_outs_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE __TENANT__.email_opt_outs_id_seq TO service_role;
 
 
 --

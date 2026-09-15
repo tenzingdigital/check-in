@@ -3341,6 +3341,32 @@ async function main() {
     assert.equal(icon.status, 200); assert.match(icon.headers.get("content-type"), /image\/png/);
   });
 
+  console.log("\n== unsubscribing from site emails (migration 049) ==");
+
+  const unsubAdmin = client(base);
+  await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["unsubadmin@hut.example", PASSWORD, "Una Admin", "admin"]));
+  assert.equal((await unsubAdmin.fetch("/api/session", { method: "POST", body: { email: "unsubadmin@hut.example", password: PASSWORD } })).status, 200);
+  const unsubSup = client(base);
+  await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["unsubsup@hut.example", PASSWORD, "Ursula Supervisor", "supervisor"]));
+  assert.equal((await unsubSup.fetch("/api/session", { method: "POST", body: { email: "unsubsup@hut.example", password: PASSWORD } })).status, 200);
+  const unsubSupId = (await withOwner((c) => c.query(`select id from auth.users where email = 'unsubsup@hut.example'`))).rows[0].id;
+
+  await test("email_link_key() mints once, returns the same key after, and refuses anyone with a session who is not an admin", async () => {
+    const first = (await withOwner((c) => c.query(`select email_link_key($1) as k`, [unsubSupId]))).rows[0].k;
+    assert.match(first, /^[A-Za-z0-9_-]{43}$/, "32 random bytes, base64url");
+    const again = (await withOwner((c) => c.query(`select email_link_key($1) as k`, [unsubSupId]))).rows[0].k;
+    assert.equal(again, first, "the key is stable so an old email's link keeps working");
+    const asAdmin = await withIdentity((await withOwner((c) => c.query(`select id from auth.users where email = 'unsubadmin@hut.example'`))).rows[0].id,
+      (c) => c.query(`select email_link_key($1) as k`, [unsubSupId]));
+    assert.equal(asAdmin.rows[0].k, first, "an admin may build a colleague's link");
+    await assert.rejects(
+      withIdentity(unsubSupId, (c) => c.query(`select email_link_key($1) as k`, [unsubSupId])),
+      /administrator/i, "a supervisor may not read even their own key");
+    await assert.rejects(
+      withIdentity(unsubSupId, (c) => c.query(`select key from email_link_keys`)),
+      /permission denied/i, "the table itself is owner-only");
+  });
+
   server.close();
   await closePool();
   console.log(`\nPASS: ${passed} HTTP assertions.`);
