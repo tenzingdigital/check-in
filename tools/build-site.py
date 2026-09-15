@@ -437,32 +437,40 @@ faqs = [
   "Yes. An authorised absence is recorded with a return date. While it runs the register shows the resident as away rather than missing, and the absence is excluded from the missed-night counts."),
  ("Where is the data held?",
   "In the European Union — Frankfurt — encrypted in transit and at rest. Each centre's records live in their own separate database schema, so one centre's staff cannot reach another's data even by accident."),
+ ("What is the weekly register update?",
+  "A Sunday-morning email to the staff you choose with counts of resident absences, weekend updates, removals and room updates over the past week, and a link to the full report. The email carries counts only; the names, rooms and dates are in the app, where the report also downloads as a spreadsheet."),
+ ("Is this built for direct provision centres specifically?",
+  "It was built with the feedback of an accommodation centre manager, and the vocabulary — permitted absences, house rules, TRC and IRP, contracted beds — is that of IPAS-contracted accommodation. The same register works for any residential centre that keeps a daily record of who was seen."),
 ]
 body = (
-  phead("Who it's for", "For IPAS accommodation centres",
-        "A daily register you can stand over at inspection, a door log with a name on every movement, and a roll call that works when the wifi does not.") +
-  sec("""    <h2>Built around what a centre actually does</h2>
+  phead("Who it's for", "For IPAS and direct provision accommodation centres",
+        "The daily register, the weekly register update and the door log an International Protection Accommodation Services (IPAS) centre keeps anyway — kept by the app, ready for an inspection, and written in the vocabulary a centre manager already uses.") +
+  sec("""    <h2>Built around what an IPAS centre actually does</h2>
     <p>CheckSteady was built with accommodation centre managers, and the vocabulary is theirs. Residents check in once a day; the day closes itself at local midnight; missed nights are counted against the figure your contract or your house rules use, not against one we invented.</p>
     <div class="pairs">
       <div><h3>Identity documents, minimally</h3><p>TRC or IRP, recorded as printed. Never shown in a list, never in an export that does not need it, and every time a record is opened it is logged.</p></div>
       <div><h3>Families kept together</h3><p>Households group parents and children. A family stays together on the roll call with children marked, and a room reads as a family rather than four unrelated names.</p></div>
       <div><h3>House rules, counted not judged</h3><p>Consecutive nights and days absent in a window, each beside the figure in your settings. Breach notices issued are recorded so nobody sends two.</p></div>
       <div><h3>Rooms and contracted beds</h3><p>Buildings, floors and rooms, with physical beds and contracted beds held separately, plus the bed set-up and a vacancies report for what you can actually offer.</p></div>
-    </div>
-    <h2>What an inspection asks for</h2>
-    <p>Every record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident.</p>""") +
+      <div><h3>Permitted absence periods</h3><p>The dates IPAS notifies — Christmas, Ramadan, Easter, the summer holiday — are recorded once; a holiday authorised outside them still goes through, with a warning on the screen, never a refusal.</p></div>
+      <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app — no names, rooms or dates in the email. The full report, with names, is in the app and downloads as a spreadsheet.</p></div>
+    </div>""") +
+  sec("""    <h2>What an IPAS inspection asks for</h2>
+    <p>Every record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One download gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
+    <h2>Children away overnight</h2>
+    <p>Children are not on the daily register — the obligation is on adults — so the app derives an overnight absence from the door log instead, and emails a nightly count of under-18s away overnight with no authorised absence: a count and a link, never a name. This is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
   sec("""    <h2>Getting started without a project</h2>
-    <p>Import the spreadsheet you already keep — names, dates of birth, rooms, ID numbers, evacuation needs — and see a verdict for every line before anything is written. Turn on only the parts you use: rooms, families, visitors, evacuation needs and breach reports are each a switch, and a centre that leaves one off never sees it.</p>""", tint=True) +
+    <p>Import the spreadsheet you already keep — names, dates of birth, rooms, ID numbers, evacuation needs — and see a verdict for every line before anything is written. Turn on only the parts you use: rooms, families, visitors, evacuation needs and breach reports are each a switch, and a centre that leaves one off never sees it.</p>""") +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
   CTA +
   nextlinks("Read next", [
+    ("/features/daily-register/", "Daily register", "One check-in per resident per day, closed automatically at midnight."),
+    ("/for/emergency-and-supported-accommodation/", "Emergency and supported accommodation", "Section 10 hostels, family hubs and AHB housing keep the same register."),
     ("/security-and-gdpr/", "Security and GDPR", "Append-only records, subject access, scheduled erasure, EU hosting."),
-    ("/features/roll-call/", "Roll call", "Drills and evacuations on every warden's phone at once."),
-    ("/pricing/", "Pricing", "Per site, per month, every feature included."),
   ]))
 page("/for/ipas-accommodation/",
-     "CheckSteady for IPAS accommodation centres",
-     "A daily resident register, door log and roll call built with accommodation centre managers: append-only records, TRC and IRP handling, families, contracted beds and EU hosting.",
+     "CheckSteady for IPAS accommodation centres — daily register, weekly register and inspection records",
+     "A daily resident register, In &amp; out door log, roll call and the Sunday weekly register update for IPAS and direct provision accommodation centres. Append-only records for inspection, TRC and IRP handling, permitted absences, families and contracted beds. Hosted in the EU.",
      [HOME, ("/for/ipas-accommodation/", "IPAS accommodation")], body, faqs)
 
 # --------------------------------------------------------------------------
