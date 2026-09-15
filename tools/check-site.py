@@ -124,7 +124,7 @@ def main():
     for p in pages:
         low = open(p).read().lower()
         for phrase in CUSTOMER_CLAIMS:
-            if phrase in low:
+            if re.search(r"\b" + re.escape(phrase) + r"\b", low):
                 problem(f"{p}: claims a customer the site does not have ({phrase!r})")
 
     for required in ("robots.txt", "sitemap.xml", "og.png"):
