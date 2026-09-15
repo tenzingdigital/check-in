@@ -251,6 +251,11 @@ removals and room updates, and a link into the app. The names, rooms and
 dates behind those counts stay in the app, under Admin → Reports, where
 they can also be downloaded as a spreadsheet.
 
+Every recurring email carries an Unsubscribe link (migration 049) that
+works without a login and stops that one email or all three; the fact is
+recorded against the staff record and shown to administrators, who may
+reinstate. Login codes, invitations and password resets carry no such link.
+
 Neither message carries a date of birth, an identity-document number, an
 evacuation need, or any free text about a person. The House Rules reminder
 is the only one of the two that names a resident, and it carries nothing

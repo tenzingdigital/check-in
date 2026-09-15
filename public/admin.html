@@ -201,6 +201,7 @@
   .pill.departed { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
   .notice { padding: 14px 16px; }
   .card.staff .who .check { margin-top: 6px; font-size: 13px; }
+  .card.staff .meta.unsub { display: block; color: var(--warn); }
   /* Staff cards on a phone: the actions get a row of their own. */
   @media (max-width: 600px) {
     .card.staff { flex-wrap: wrap; }
@@ -1332,6 +1333,10 @@ function renderDetail(rec, summary) {
 // policy makes a non-admin's update match no rows.
 const staffRows = new Map();
 
+function shortDate(iso) {
+  return new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", timeZone: "Europe/Dublin" }).format(new Date(iso));
+}
+
 function staffCard(s) {
   const meta = [
     esc(s.email),
@@ -1350,11 +1355,18 @@ function staffCard(s) {
   // alert points at a report a guard cannot run.
   const safeguarding = s.role === "guard" ? "" : `
         <label class="check"><input type="checkbox" class="sSg" data-sid="${esc(s.id)}" ${s.safeguarding_alert ? "checked" : ""}> <span>Gets the nightly safeguarding alert</span></label>`;
+  // Someone who used the Unsubscribe link in an email (049). Shown as its own
+  // line rather than an unticked box, because an unticked box cannot say
+  // whether it was them or an admin. Re-ticking clears the first two; the
+  // House Rules reminder has no tick, so it gets its own Reinstate.
+  const NAMES = { weekly_report: "the Sunday report", safeguarding_alert: "the nightly safeguarding alert", house_rules: "the nightly House Rules reminder" };
+  const optOuts = (s.opt_outs || []).map((o) => `
+        <span class="meta unsub">Unsubscribed themselves from ${NAMES[o.kind] || o.kind} on ${esc(shortDate(o.unsubscribed_at))}${o.kind === "house_rules" ? ` · <button class="linkish sHr" type="button" data-sid="${esc(s.id)}">Reinstate</button>` : ""}</span>`).join("");
   return `
     <div class="card staff">
       <span class="who">
         <span class="name">${esc(s.full_name)}</span>
-        <span class="meta">${meta}</span>${weeklyReport}${safeguarding}
+        <span class="meta">${meta}</span>${weeklyReport}${safeguarding}${optOuts}
       </span>
       <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
       <span class="actions-row">
@@ -1524,6 +1536,12 @@ $("staffList").addEventListener("click", async (e) => {
     );
     btn.disabled = false;
     if (out) showLinkResult(out, s.full_name);
+  } else if (btn.classList.contains("sHr")) {
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/house-rules`, { on: true }),
+      (err) => toast(err.message, "err"),
+    );
+    if (out) { toast(`${s.full_name} will get the nightly House Rules reminder again`, "ok"); loadStaff(); }
   }
 });
 
