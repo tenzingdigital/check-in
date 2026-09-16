@@ -1332,15 +1332,7 @@ function renderDetail(rec, summary) {
   const exportBtn = $("exportBtn");
   if (exportBtn) {
     dismissToastOnInput($("exReason"));
-    exportBtn.onclick = () => {
-      const reason = $("exReason").value.trim();
-      if (!reason) { toast("Give the reason for the export", "err"); $("exReason").focus(); return; }
-      if (!Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
-      // A plain navigation: the server answers with Content-Disposition:
-      // attachment, so the browser saves the file and the page stays put.
-      window.location.href = `/api/residents/${rec.id}/export?reason=${encodeURIComponent(reason)}`;
-      toast("Export recorded and downloading", "ok");
-    };
+    exportBtn.onclick = () => exportWithReason($("exReason"), (reason) => `/api/residents/${rec.id}/export?reason=${encodeURIComponent(reason)}`);
   }
   const eraseBtn = $("eraseBtn");
   if (eraseBtn) {
@@ -2285,8 +2277,8 @@ $("absPresets").querySelector('[data-preset="7nights"]').setAttribute("aria-pres
 // Excel: the whole range, never the search-filtered rows. The audit record
 // that note_report() writes names the range ("missed [from to to]"); a sheet
 // that quietly left people out because a name was typed in the filter box
-// would make that record misleading. Same reason-field widget as the History
-// export.
+// would make that record misleading. Shared exportWithReason() does the
+// reason/offline/download steps.
 const absExportBtn = $("absExport"), absExportForm = $("absExportForm");
 absExportBtn.addEventListener("click", () => {
   absExportForm.hidden = !absExportForm.hidden;
@@ -2296,15 +2288,11 @@ absExportBtn.addEventListener("click", () => {
 dismissToastOnInput(absExportForm.elements.reason);
 absExportForm.addEventListener("submit", (e) => {
   e.preventDefault();
-  const reason = absExportForm.elements.reason.value.trim();
   const from = $("absFrom").value, to = $("absTo").value;
-  if (!reason) { toast("Give the reason for the export", "err"); absExportForm.elements.reason.focus(); return; }
   if (!from || !to) { toast("Pick two dates first", "err"); return; }
-  if (!Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
-  // A file download: the browser saves it and stays on the page.
-  window.location.href = `/api/reports/missed?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&reason=${encodeURIComponent(reason)}&format=xlsx`;
-  toast("Export recorded and downloading", "ok");
-  absExportForm.hidden = true; absExportBtn.setAttribute("aria-expanded", "false");
+  const ok = exportWithReason(absExportForm.elements.reason,
+    (reason) => `/api/reports/missed?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&reason=${encodeURIComponent(reason)}&format=xlsx`);
+  if (ok) { absExportForm.hidden = true; absExportBtn.setAttribute("aria-expanded", "false"); }
 });
 $("tabBuildings").addEventListener("click", () => selectTab("buildings"));
 $("tabReports").addEventListener("click", () => selectTab("reports"));

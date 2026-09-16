@@ -636,6 +636,23 @@ function mountRangePresets(container, fromEl, toEl, onPick, presets = DEFAULT_PR
   fromEl.addEventListener("input", clear); toEl.addEventListener("input", clear);
 }
 
+// Every export asks for a reason and goes on the audit record. The History
+// panel, the Absences tab and the record export all do the same three
+// things before downloading, so they share them here: refuse an empty
+// reason, refuse an offline tablet, then navigate — the server answers with
+// Content-Disposition: attachment, so the browser saves the file and the
+// page stays put. buildUrl(reason) returns the URL to fetch. Returns true
+// when the download was started, so a caller with a fold-out form can close
+// it.
+function exportWithReason(reasonEl, buildUrl) {
+  const reason = reasonEl.value.trim();
+  if (!reason) { toast("Give the reason for the export", "err"); reasonEl.focus(); return false; }
+  if (typeof Offline !== "undefined" && !Offline.isOnline()) { toast("Exporting needs a connection", "err"); return false; }
+  window.location.href = buildUrl(reason);
+  toast("Export recorded and downloading", "ok");
+  return true;
+}
+
 // A resident's history: every movement and check-in with the date and time,
 // over a range, newest first. Shared by the gate sheet, the register sheet
 // and the admin edit sheet; each hands it a container to draw into.
@@ -701,13 +718,9 @@ function mountHistory(container, residentId, { canExport = false } = {}) {
     dismissToastOnInput(exportForm.elements.reason);
     exportForm.addEventListener("submit", (e) => {
       e.preventDefault();
-      const reason = exportForm.elements.reason.value.trim();
-      if (!reason) { toast("Give the reason for the export", "err"); exportForm.elements.reason.focus(); return; }
-      if (typeof Offline !== "undefined" && !Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
-      // A file download: the browser saves it and stays on the page.
-      window.location.href = `/api/residents/${residentId}/history?${query()}&format=csv&reason=${encodeURIComponent(reason)}`;
-      toast("Export recorded and downloading", "ok");
-      exportForm.hidden = true; exportBtn.setAttribute("aria-expanded", "false");
+      const ok = exportWithReason(exportForm.elements.reason,
+        (reason) => `/api/residents/${residentId}/history?${query()}&format=csv&reason=${encodeURIComponent(reason)}`);
+      if (ok) { exportForm.hidden = true; exportBtn.setAttribute("aria-expanded", "false"); }
     });
   }
   load();
