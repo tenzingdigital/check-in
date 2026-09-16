@@ -38,7 +38,7 @@ set local check_function_bodies = false;
 --
 
 CREATE FUNCTION __TENANT__.absence_authorised(p_resident_id uuid, p_day date) RETURNS boolean
-    LANGUAGE sql STABLE SECURITY DEFINER
+    LANGUAGE sql STABLE
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
   select exists (
@@ -1163,8 +1163,17 @@ begin
   select * into v_res from __TENANT__.residents where id = p_resident_id;
   -- Missing and inactive share one message and one errcode: from the
   -- tablet's point of view both are "nobody here to check in", and neither
-  -- should say more than that to a screen nobody is guarding.
-  if not found or v_res.status <> 'active' then
+  -- should say more than that to a screen nobody is guarding. Fix round 1
+  -- (Minor a): mirrors record_checkin_at's own rule exactly — a departed
+  -- resident may still check in on their departure day itself (the day
+  -- they leave is a day they must still be able to satisfy the duty for;
+  -- see record_checkin_at's comment on the same condition above), so this
+  -- only refuses status <> 'active' when today is AFTER departed_on, never
+  -- on it. Kept as its own check, ahead of the call below, rather than
+  -- relying on record_checkin_at to say so: kiosk_checkin's own refusal is
+  -- what keeps a child from ever reaching record_checkin_at at all.
+  if not found or (v_res.status <> 'active'
+                    and (v_res.departed_on is null or __TENANT__.site_today() > v_res.departed_on)) then
     raise exception 'Not a resident who checks in here' using errcode = 'P0002';
   end if;
 
@@ -1193,9 +1202,10 @@ CREATE FUNCTION __TENANT__.kiosk_search(p_q text) RETURNS TABLE(resident_id uuid
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
 declare
-  v_role  text := __TENANT__.my_role();
-  v_nq    text;
-  v_adult integer;
+  v_role    text := __TENANT__.my_role();
+  v_nq      text;
+  v_nq_like text;
+  v_adult   integer;
 begin
   if v_role not in ('kiosk', 'supervisor', 'admin') then
     raise exception 'Not authorised to search residents' using errcode = '42501';
@@ -1204,11 +1214,25 @@ begin
   -- Two letters minimum: the point of a search, not a list. A single letter
   -- (or the empty string a cleared box sends) would return "everyone whose
   -- name starts with A" off a shared tablet — this is the line that keeps
-  -- kiosk_search a search.
+  -- kiosk_search a search. A query containing a LIKE wildcard is refused
+  -- outright with the same message, belt and braces: '%%' or '__' would
+  -- otherwise match every adult and 'a%' every adult whose name starts with
+  -- "a", walking the whole roster five rows at a time. v_nq is also escaped
+  -- below before it ever reaches a LIKE, so this remains true even if a
+  -- future caller of this function forgets the check above matters.
   v_nq := lower(public.immutable_unaccent(btrim(coalesce(p_q, ''))));
-  if length(v_nq) < 2 then
+  if length(v_nq) < 2 or position('%' in v_nq) > 0 or position('_' in v_nq) > 0 then
     raise exception 'Type at least two letters' using errcode = '22023';
   end if;
+
+  -- Escaped for use inside LIKE: backslash first (so escaping % and _ does
+  -- not itself get re-escaped), then the two LIKE metacharacters. Under
+  -- standard_conforming_strings (the default since PG 9.1, and the only
+  -- mode this schema runs in — see immutable_unaccent above), a plain
+  -- '...' literal already treats backslash as an ordinary character, so no
+  -- E'' prefix is needed here; every LIKE below still names ESCAPE '\'
+  -- explicitly rather than relying on that being the unstated default.
+  v_nq_like := replace(replace(replace(v_nq, '\', '\\'), '%', '\%'), '_', '\_');
 
   select adult_age_years into v_adult from __TENANT__.app_settings where id;
 
@@ -1235,6 +1259,14 @@ begin
         -- The daily register is an adult's duty (IPAS): a child is never on
         -- this screen at all, not merely hidden after being found — the row
         -- never enters the candidate set, so no branch below can surface one.
+        -- site_today(), not current_date: current_date is the server clock's
+        -- day (008's v_resident_status.is_adult still uses it, unchanged
+        -- here — it is staff-facing and out of this migration's scope), and
+        -- site_today() is the site-local day the rest of the register runs
+        -- on (record_checkin_at, close-out, v_resident_compliance). The two
+        -- disagree for at most the hour either side of local midnight; a
+        -- kiosk's own write (below) must judge "adult" by the same calendar
+        -- day it is about to write a check-in against, not the server's.
         and r.date_of_birth <= (__TENANT__.site_today() - make_interval(years => v_adult))::date
         and (
           -- Name: prefix on either word order, so "aoi" and "brennan" both
@@ -1244,10 +1276,10 @@ begin
           -- the plain names instead, word-prefix only (never a bare
           -- substring), so a person cannot be found by a fragment buried
           -- mid-name that happens to be common to many residents.
-          lower(public.immutable_unaccent(btrim(r.first_name) || ' ' || btrim(r.last_name))) like v_nq || '%'
-          or lower(public.immutable_unaccent(btrim(r.first_name) || ' ' || btrim(r.last_name))) like '% ' || v_nq || '%'
-          or lower(public.immutable_unaccent(btrim(r.last_name) || ' ' || btrim(r.first_name))) like v_nq || '%'
-          or lower(public.immutable_unaccent(btrim(r.last_name) || ' ' || btrim(r.first_name))) like '% ' || v_nq || '%'
+          lower(public.immutable_unaccent(btrim(r.first_name) || ' ' || btrim(r.last_name))) like v_nq_like || '%' escape '\'
+          or lower(public.immutable_unaccent(btrim(r.first_name) || ' ' || btrim(r.last_name))) like '% ' || v_nq_like || '%' escape '\'
+          or lower(public.immutable_unaccent(btrim(r.last_name) || ' ' || btrim(r.first_name))) like v_nq_like || '%' escape '\'
+          or lower(public.immutable_unaccent(btrim(r.last_name) || ' ' || btrim(r.first_name))) like '% ' || v_nq_like || '%' escape '\'
           -- Room: the label as painted on the door, exact match only (never
           -- a prefix or substring) — a room holds several people, so a
           -- loose room match would be a mini roll-call of the whole room,

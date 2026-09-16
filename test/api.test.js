@@ -3783,6 +3783,54 @@ async function main() {
     assert.ok(six.rows.every((r) => r.full_name.startsWith("Sixtest")));
   });
 
+  // Fix round 1, Critical 1: LIKE metacharacters in the query used to reach
+  // the LIKE clause unescaped, so '%%', '__' or 'a%' would each return (up
+  // to) the first five adults on the site — walking the whole roster five
+  // rows at a time from a shared, unattended tablet.
+  await test("kiosk_search refuses LIKE wildcards outright, and a real name with an apostrophe or hyphen still matches", async () => {
+    await assert.rejects(withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('%%')`)), /two letters/i);
+    await assert.rejects(withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('__')`)), /two letters/i);
+    await assert.rejects(withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('a%')`)), /two letters/i);
+    await assert.rejects(withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('_1')`)), /two letters/i);
+
+    const made = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Siobhán-Rós", last_name: "O'Kioskleary", date_of_birth: "1994-04-04" },
+    });
+    assert.equal(made.status, 201, made.text);
+    const found = await withIdentity(kioskId, (c) => c.query(`select full_name from kiosk_search('siobhan-ros')`));
+    assert.ok(found.rows.some((r) => r.full_name === "Siobhán-Rós O'Kioskleary"),
+      "a hyphen is an ordinary character to LIKE, unaffected by escaping % and _");
+    // Parameterised, not inlined, since the value itself contains a quote —
+    // proving the apostrophe reaches kiosk_search as data (as every other
+    // caller here passes it), not as SQL text.
+    const bySurname = await withIdentity(kioskId, (c) => c.query(`select full_name from kiosk_search($1)`, ["o'kioskleary"]));
+    assert.ok(bySurname.rows.some((r) => r.full_name === "Siobhán-Rós O'Kioskleary"),
+      "an apostrophe in the search term still matches the surname it belongs to");
+  });
+
+  await test("room search is exact only: the full label finds its adult residents, a partial label finds nothing", async () => {
+    const bld = await supC.fetch("/api/buildings", { method: "POST", body: { name: "Kioskbuild" } });
+    assert.equal(bld.status, 201, bld.text);
+    const rooms = await supC.fetch(`/api/buildings/${bld.json.id}/rooms`, {
+      method: "POST",
+      body: { rooms: [{ floor: "2F", number: "9", capacity: 2 }] },
+    });
+    assert.equal(rooms.status, 201, rooms.text);
+    const madeRoomer = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Roomtest", last_name: "Kioskroomer", date_of_birth: "1992-02-02" },
+    });
+    assert.equal(madeRoomer.status, 201, madeRoomer.text);
+    const moved = await supC.fetch(`/api/residents/${madeRoomer.json.id}`, { method: "PATCH", body: { room_id: rooms.json[0].id } });
+    assert.equal(moved.status, 200, moved.text);
+
+    const exact = await withIdentity(kioskId, (c) => c.query(`select full_name from kiosk_search('Kioskbuild · 2F · 9')`));
+    assert.deepEqual(exact.rows.map((r) => r.full_name), ["Roomtest Kioskroomer"], "the exact room label finds its adult resident");
+    const partial = await withIdentity(kioskId, (c) => c.query(`select full_name from kiosk_search('Kioskbuild · 2F')`));
+    assert.equal(partial.rows.length, 0, "a partial room label is neither a prefix nor a substring match");
+  });
+
   await test("identity number search is exact only — a partial number matches nothing", async () => {
     const exact = await withIdentity(kioskId, (c) => c.query(`select resident_id from kiosk_search('TRC5551234')`));
     assert.equal(exact.rows.length, 1);
@@ -3801,6 +3849,55 @@ async function main() {
     assert.equal(made.status, 201, made.text);
     const found = await withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('kidonly')`));
     assert.equal(found.rows.length, 0, "the daily register is an adult's duty; a child is never a candidate");
+  });
+
+  const supId = (await withOwner((c) =>
+    c.query(`select id from auth.users where email = 'sup2@hut.example'`))).rows[0].id;
+
+  // Fix round 1, Critical 2: absence_authorised(resident_id, day) was
+  // SECURITY DEFINER with no guard of its own and granted to `authenticated`
+  // outright — callable directly, naming any resident kiosk_search can find
+  // and any date, to learn whether they are away with the centre's
+  // agreement. Re-declared SECURITY INVOKER so it is now subject to
+  // authorised_absences' own is_staff() read policy.
+  await test("absence_authorised runs as invoker now: a kiosk learns nothing, a supervisor still sees the truth", async () => {
+    const madeAway = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Awaytest", last_name: "Kioskabsent", date_of_birth: "1993-03-03" },
+    });
+    assert.equal(madeAway.status, 201, madeAway.text);
+    const awayId = madeAway.json.id;
+    const authorised = await supC.fetch(`/api/residents/${awayId}/absences`, {
+      method: "POST",
+      body: { from_date: siteToday(), to_date: siteToday(), reason: "holiday" },
+    });
+    assert.equal(authorised.status, 201, authorised.text);
+
+    const asKiosk = await withIdentity(kioskId, (c) =>
+      c.query(`select absence_authorised($1, public.site_today()) as v`, [awayId]));
+    assert.equal(asKiosk.rows[0].v, false,
+      "a kiosk must never learn whether a resident it can name is away with permission");
+
+    const asSup = await withIdentity(supId, (c) =>
+      c.query(`select absence_authorised($1, public.site_today()) as v`, [awayId]));
+    assert.equal(asSup.rows[0].v, true, "a supervisor, whose own RLS context passes is_staff(), still sees the real answer");
+  });
+
+  // Fix round 1, Important 3: auth.users carried a standing column grant to
+  // `authenticated` with no row filter — any signed-in caller, kiosk
+  // included, could list every account's email on the platform.
+  await test("auth.users: a kiosk lists no accounts; a supervisor's own tenant is unaffected and the staff list still carries emails", async () => {
+    const asKiosk = await withIdentity(kioskId, (c) => c.query(`select email from auth.users`));
+    assert.equal(asKiosk.rows.length, 0, "a kiosk must not be able to list any account's email");
+
+    const asSup = await withIdentity(supId, (c) => c.query(`select count(*)::int as n from auth.users`));
+    assert.ok(asSup.rows[0].n > 0, "staff still see accounts in their own tenant");
+
+    const list = await supC.fetch("/api/staff");
+    assert.equal(list.status, 200);
+    const kioskRow = list.json.find((s) => s.id === kioskId);
+    assert.ok(kioskRow, "the kiosk account itself is still listed");
+    assert.equal(kioskRow.email, "kiosk@hut.example", "GET /api/staff still carries the email, unaffected by the new policy");
   });
 
   await test("kiosk_checkin records today's presentation with source='kiosk', and nothing else the kiosk does can write it", async () => {
@@ -3824,7 +3921,47 @@ async function main() {
       /permission denied for function record_checkin_at/i);
   });
 
-  await test("kiosk_checkin refuses a child and an inactive resident", async () => {
+  // Minor (b): a direct unit test of the changed guard LINE itself, not just
+  // the outer function-level revoke above. withOwner() bypasses that revoke
+  // (the owner may always call its own functions), so binding auth.uid() to
+  // the kiosk's id by hand and calling record_checkin_at with source='desk'
+  // reaches record_checkin_at's own body — and its own `if not (is_staff()
+  // or (my_role() = 'kiosk' and p_source = 'kiosk'))` is what refuses it.
+  // set_config(..., true) is transaction-scoped, so this opens and rolls
+  // back its own transaction on the borrowed connection rather than leaving
+  // request.jwt.claim.sub set for whichever request borrows it next.
+  await test("record_checkin_at's own guard line refuses a kiosk-identified caller naming any source but 'kiosk'", async () => {
+    await withOwner(async (c) => {
+      await c.query("BEGIN");
+      try {
+        await c.query(`select set_config('request.jwt.claim.sub', $1, true)`, [kioskId]);
+        await assert.rejects(
+          c.query(`select record_checkin_at($1, now(), false, null, 'desk')`, [aoifeId]),
+          /Not authorised to record check-ins/i);
+      } finally {
+        await c.query("ROLLBACK");
+      }
+    });
+  });
+
+  // Minor (c): the same door, used by a supervisor (the spec's "callable by
+  // supervisors/admins for testing") — the write it makes is still marked
+  // source='kiosk', because kiosk_checkin never asks the caller what to
+  // write, it always calls record_checkin_at with 'kiosk' hard-coded.
+  await test("a supervisor calling kiosk_checkin also writes source='kiosk'", async () => {
+    const madeForSup = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Supcheck", last_name: "Kiosktest", date_of_birth: "1991-01-01" },
+    });
+    assert.equal(madeForSup.status, 201, madeForSup.text);
+    const row = (await withIdentity(supId, (c) => c.query(`select * from kiosk_checkin($1)`, [madeForSup.json.id]))).rows[0];
+    assert.equal(row.presented, true);
+    const src = (await withOwner((c) => c.query(
+      `select source from checkin_events where resident_id = $1 order by id desc limit 1`, [madeForSup.json.id]))).rows[0].source;
+    assert.equal(src, "kiosk", "kiosk_checkin always writes source='kiosk', regardless of who is calling it");
+  });
+
+  await test("kiosk_checkin refuses a child and a resident departed before today, but allows check-in on the departure day itself", async () => {
     const childId = (await withOwner((c) =>
       c.query(`select id from public.residents where first_name = 'Kidonly' and last_name = 'Underage'`))).rows[0].id;
     await assert.rejects(
@@ -3841,9 +3978,23 @@ async function main() {
       `update public.residents set status = 'departed', departed_on = public.site_today() - 1 where id = $1`, [departedId]));
     await assert.rejects(
       withIdentity(kioskId, (c) => c.query(`select * from kiosk_checkin($1)`, [departedId])),
-      /Not a resident who checks in here/i);
+      /Not a resident who checks in here/i, "departed yesterday: refused");
     await withOwner((c) => c.query(
       `update public.residents set status = 'active', departed_on = null where id = $1`, [departedId]));
+
+    // Minor (a): mirrors record_checkin_at's own rule — the day a resident
+    // leaves is a day they must still be able to satisfy the duty for, so a
+    // departure dated today (or later) is not refused here.
+    const madeLeavingToday = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Finalday", last_name: "Kioskleaver", date_of_birth: "1985-07-07" },
+    });
+    assert.equal(madeLeavingToday.status, 201, madeLeavingToday.text);
+    const leavingId = madeLeavingToday.json.id;
+    await withOwner((c) => c.query(
+      `update public.residents set status = 'departed', departed_on = public.site_today() where id = $1`, [leavingId]));
+    const finalDay = (await withIdentity(kioskId, (c) => c.query(`select * from kiosk_checkin($1)`, [leavingId]))).rows[0];
+    assert.equal(finalDay.presented, true, "departing today: still allowed to check in, same as record_checkin_at's own rule");
   });
 
   await test("a kiosk profile cannot receive the weekly report or the safeguarding alert", async () => {
