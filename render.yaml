@@ -216,9 +216,11 @@ services:
   # arrangement recorded, named, to the staff ticked for the safeguarding
   # alert. Two UTC hours again because Ireland is not UTC: jobs.js sends on
   # the first run at or after 22:00 local and records "before 22:00" or
-  # "already sent today" on the other. When the first hour found nothing to
-  # report, the second looks again and can send — a parent who signs out
-  # between the two runs is caught by the second; a second look, by design.
+  # "already sent today" on the other. In summer only (UTC+1) the 21:00 UTC
+  # run is the 22:00 local send and the 22:00 UTC run is a second look an
+  # hour later: a parent who signs out between the two is caught by it. In
+  # winter the 21:00 UTC run records "before 22:00" and there is one look.
+  # Nothing watches the door after the last run — README §5, coverage.
   # Needs `feature_households` and `nightly_email` on under Settings, and
   # somebody ticked, or it records why it sent nothing; with no mail keys
   # it records a FAILURE, so the health banner shows an unconfigured cron

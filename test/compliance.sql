@@ -1322,6 +1322,13 @@ set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 select pg_temp.expect('054 guard cannot call guardian_gaps_now',
   pg_temp.try('x', 'select * from public.guardian_gaps_now()') like '%blocked%', true);
 select pg_temp.try('054 guard calls guardian_gaps_now', 'select * from public.guardian_gaps_now()');
+-- The kiosk (051) is not staff either: the one function in this app that
+-- names a household's children and off-site guardians is closed to the
+-- tablet at the door.
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+select pg_temp.expect('054 kiosk cannot call guardian_gaps_now',
+  pg_temp.try('x', 'select * from public.guardian_gaps_now()') like '%blocked%', true);
+select pg_temp.try('054 kiosk calls guardian_gaps_now', 'select * from public.guardian_gaps_now()');
 reset role;
 reset request.jwt.claim.sub;
 

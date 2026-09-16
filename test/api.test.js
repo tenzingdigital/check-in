@@ -3554,6 +3554,71 @@ async function main() {
     assert.deepEqual(order, ["nightly-email", "snapshot-guardian-gaps"], "the snapshot is written before the email that counts it");
     assert.equal(await count("overnight-safeguarding-alert"), 0, "the overnight safeguarding alert is no longer a job of its own");
     assert.equal(await count("notify-thresholds-email"), 0, "the House Rules reminder is no longer a job of its own");
+    // The snapshot's row says what it did: a count inside its window
+    // (00:00–05:59 site time), or that it was skipped — and then the email
+    // that counts it says so too, and does not go. Whatever the hour the
+    // suite runs at, the two rows agree.
+    const snap = (await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'snapshot-guardian-gaps' order by id desc limit 1`))).rows[0];
+    const email = (await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'nightly-email' order by id desc limit 1`))).rows[0];
+    assert.equal(snap.ok, true);
+    if (snap.result === "outside the snapshot window") {
+      assert.equal(email.result, "skipped: outside the snapshot window", "no nightly email on a skipped snapshot");
+    } else {
+      assert.match(snap.result, /^\d+$/, `inside the window the snapshot records a count, got: ${snap.result}`);
+      assert.notEqual(email.result, "skipped: outside the snapshot window");
+    }
+  });
+
+  await test("snapshotGate(): 00:00–05:59 site time, no force; schemaBehind(): names what a t_* schema lacks", async () => {
+    const { snapshotGate, schemaBehind } = require("../jobs");
+    for (const h of [0, 1, 5]) assert.equal(snapshotGate({ localHour: h }), null, `${h}:00 is inside the window`);
+    for (const h of [6, 12, 15, 23]) assert.equal(snapshotGate({ localHour: h }), "outside the snapshot window", `${h}:00 is outside`);
+    assert.equal(snapshotGate({ localHour: undefined }), "outside the snapshot window", "no app_settings row is not a night");
+    assert.equal(schemaBehind({ schema: "t_x", missing_functions: [] }), null);
+    assert.equal(schemaBehind({ schema: "t_x", missing_functions: ["guardian_gaps_now", "snapshot_guardian_gaps"] }), "schema behind: guardian_gaps_now, snapshot_guardian_gaps");
+    assert.equal(schemaBehind(undefined), "schema not provisioned");
+  });
+
+  // The leak this guards against: searchPath() is `t_x, public, extensions`,
+  // so on a tenant provisioned before 054 an unqualified guardian_gaps_now()
+  // does not fail — it runs public's, over the LEGACY centre's households,
+  // and the 22:00 email names them to the wrong centre's staff. A real
+  // tenant is provisioned and one 054 function dropped from it, as the
+  // tenant_schema_gaps() test above does, then both crons are run over it.
+  await test("a tenant schema behind public runs no job at all — the 22:00 alert, the nightly email and the purges included — and records schema-check ok=false", async () => {
+    const jobs = require("../jobs");
+    const tenancy = require("../lib/tenancy");
+    await withOwner(async (c) => {
+      await c.query(`delete from public.tenants where slug = 'behindfixture'`);
+      await c.query(`drop schema if exists t_behindfixture cascade`);
+      await c.query(`insert into public.tenants (name, slug, status, terms_accepted_at, terms_version)
+                     values ('Behind Fixture', 'behindfixture', 'active', now(), 'test')`);
+      await tenancy.provisionSchema(c, "behindfixture", { siteName: "Behind Fixture" });
+      await c.query(`update t_behindfixture.app_settings set nightly_email = true, feature_households = true`);
+      await c.query(`drop function t_behindfixture.guardian_gaps_now() cascade`);
+    });
+    const runs = async () => (await withOwner((c) => c.query(`select job, ok, result from t_behindfixture.job_runs order by id`))).rows;
+    const legacyBefore = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'schema-check'`))).rows[0].n;
+
+    const failedEvening = await jobs.main("evening", { keepPool: true, force: true });
+    assert.ok(failedEvening >= 1, "a behind tenant counts as a failed job, so the cron exits non-zero");
+    let rows = await runs();
+    assert.deepEqual(rows.map((r) => r.job), ["schema-check"], "the 22:00 alert did not run on the behind schema");
+    assert.equal(rows[0].ok, false);
+    assert.match(rows[0].result, /^schema behind: .*guardian_gaps_now/, rows[0].result);
+
+    const failedNightly = await jobs.main("nightly", { keepPool: true });
+    assert.ok(failedNightly >= 1);
+    rows = await runs();
+    assert.deepEqual([...new Set(rows.map((r) => r.job))], ["schema-check"], "nightly mode ran nothing on it either — purges included");
+    assert.equal(rows.length, 2, "one schema-check row per run");
+    // And the legacy centre's own job_runs did not receive the refusal.
+    assert.equal((await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'schema-check'`))).rows[0].n, legacyBefore, "public never gets a schema-check row");
+
+    await withOwner(async (c) => {
+      await c.query(`drop schema if exists t_behindfixture cascade`);
+      await c.query(`delete from public.tenants where slug = 'behindfixture'`);
+    });
   });
 
   console.log("\n== who viewed which record (migration 023) ==");
@@ -4462,16 +4527,17 @@ async function main() {
     const all = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "all", action: "stop" });
     assert.equal(all.status, 200);
     outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
-    // "All" is every kind in KINDS, the two 054 kinds and the two retired
-    // ones included: three of them share the safeguarding_alert tick, and one
-    // UPDATE clears it once (emailPrefs ticksFor), not three times.
-    assert.deepEqual(outs.map((o) => o.kind).sort(), ["guardian_alert", "house_rules", "nightly", "safeguarding_alert", "weekly_report"]);
+    // "All" is every kind still sent — the two 054 kinds and the Sunday
+    // report — and NOT the two retired ones, which would be staff-card lines
+    // for emails nobody sends. Two of the three share the safeguarding_alert
+    // tick, and one UPDATE clears it once (emailPrefs ticksFor), not twice.
+    assert.deepEqual(outs.map((o) => o.kind).sort(), ["guardian_alert", "nightly", "weekly_report"]);
 
     const back = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "weekly_report", action: "resume" });
     assert.equal(back.status, 200);
     assert.match(await back.text(), /will be sent to you again/i);
     outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
-    assert.deepEqual(outs.map((o) => o.kind).sort(), ["guardian_alert", "house_rules", "nightly", "safeguarding_alert"]);
+    assert.deepEqual(outs.map((o) => o.kind).sort(), ["guardian_alert", "nightly"]);
     const backAll = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "all", action: "resume" });
     assert.equal(backAll.status, 200);
     assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);

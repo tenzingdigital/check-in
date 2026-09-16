@@ -238,16 +238,29 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 6. Two new unsubscribe kinds; the two retired kinds fold into 'nightly'.
+-- 6. Two new unsubscribe kinds; the retired safeguarding alert folds into
+--    'nightly'; the retired House Rules reminder is left as history.
 -- ---------------------------------------------------------------------------
--- Someone who opted out of the safeguarding alert or the House Rules
--- reminder has opted out of the email that replaces them. The old rows
+-- Someone who opted out of the overnight safeguarding alert has opted out
+-- of the email that replaces it: 049's unsubscribe cleared their
+-- profiles.safeguarding_alert tick, which is the tick the nightly email
+-- reads, so the copied 'nightly' row and the tick agree. The old rows
 -- stay: Admin → Staff still says when they unsubscribed.
+--
+-- A 'house_rules' opt-out is NOT copied. The House Rules reminder went to
+-- every supervisor and admin with no tick behind it, so opting out of it
+-- cleared nothing; copying that row to 'nightly' would leave the person's
+-- safeguarding_alert tick true — they get the nightly email anyway — while
+-- their staff card says "Unsubscribed". A row that says one thing while the
+-- email does another is worse than no row. Their rows stay as history: the
+-- kind still resolves on an old link (lib/emailPrefs.js) and the staff card
+-- lists it under "(now the nightly email)"; stopping the nightly email is
+-- one click on that link, and it clears the tick this time.
 alter table public.email_opt_outs drop constraint if exists email_opt_outs_kind_check;
 alter table public.email_opt_outs add constraint email_opt_outs_kind_check
   check (kind in ('weekly_report', 'safeguarding_alert', 'house_rules', 'guardian_alert', 'nightly'));
 insert into public.email_opt_outs (profile_id, kind)
-select distinct o.profile_id, 'nightly' from public.email_opt_outs o where o.kind in ('safeguarding_alert', 'house_rules')
+select distinct o.profile_id, 'nightly' from public.email_opt_outs o where o.kind = 'safeguarding_alert'
 on conflict do nothing;
 -- The same for every tenant schema already provisioned (049 is in each
 -- one's copy of the template): a check constraint on an existing table is
@@ -259,7 +272,9 @@ begin
     execute format('alter table %I.email_opt_outs drop constraint if exists email_opt_outs_kind_check', s);
     execute format('alter table %I.email_opt_outs add constraint email_opt_outs_kind_check check (kind in (%L, %L, %L, %L, %L))',
                    s, 'weekly_report', 'safeguarding_alert', 'house_rules', 'guardian_alert', 'nightly');
-    execute format('insert into %I.email_opt_outs (profile_id, kind) select distinct o.profile_id, %L from %I.email_opt_outs o where o.kind in (%L, %L) on conflict do nothing',
-                   s, 'nightly', s, 'safeguarding_alert', 'house_rules');
+    -- safeguarding_alert only, for the reason above: a house_rules row has
+    -- no tick behind it and would disagree with the email.
+    execute format('insert into %I.email_opt_outs (profile_id, kind) select distinct o.profile_id, %L from %I.email_opt_outs o where o.kind = %L on conflict do nothing',
+                   s, 'nightly', s, 'safeguarding_alert');
   end loop;
 end $$;

@@ -10,7 +10,10 @@
    Same functions, same order, same idempotence — only the thing holding the
    clock has changed. Each function is safe to run twice and safe to miss and
    run late; close_out_compliance_days() explicitly backfills any day it
-   missed, which is what makes an external scheduler acceptable here.
+   missed, which is what makes an external scheduler acceptable here. The
+   one exception is snapshot_guardian_gaps() (054): it reads the gate as it
+   stands and labels the rows "last night", so it may only run in the small
+   hours (see snapshotGate()) — run late, it is skipped, not run wrong.
 
    Three crons run this file (render.yaml):
      hut-nightly   00:30 UTC daily      node jobs.js          close-out, purges, snapshots, the one nightly email
@@ -75,7 +78,9 @@ const TENANT_JOBS = [
   // step inside the nightly email: it reads the gate as it stands and
   // cannot be backfilled, so it must not be lost to an unrelated failure
   // in the step before it or to the email switch being off. Re-running a
-  // night already recorded is free (on conflict do nothing).
+  // night already recorded is free (on conflict do nothing) — but only
+  // inside the window: main() runs this one through snapshotGate(), since
+  // "the gate as it stands" at 15:00 is not last night (see there).
   ["snapshot-guardian-gaps", "select snapshot_guardian_gaps(site_today() - 1)", LIVE_ONLY],
   ["purge-expired-gate-events", "select purge_expired_gate_events()"],
   ["purge-expired-checkin-events", "select purge_expired_checkin_events()"],
@@ -292,6 +297,62 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
   }
 }
 
+// When the guardian-gap snapshot may be taken: 00:00–05:59 site time. The
+// function reads the gate AS IT STANDS and labels the rows site_today() - 1,
+// so it is only true of "last night" while the night is still recent: run
+// at 00:30 by hut-nightly it is; run at 15:00 by an operator re-running
+// `node jobs.js` after some other step failed, it would record the
+// afternoon's households as the night before's — false rows in the
+// Children-without-a-guardian report, under the night's date, with no way
+// to tell them from real ones. Six hours because Render's cron is UTC and
+// the site's clock is not, and because a retry a few hours late is still
+// a fair picture of the night. Outside the window the step is skipped,
+// recorded ok ("outside the snapshot window"), and the nightly email that
+// counts it does not go: an email built on a missing night would say
+// "nothing to report" about a child nobody has seen. There is no `force`:
+// there is nothing a forced run could record that would be true. A 055
+// follow-up should make the snapshot as-of-midnight with a seven-night
+// backfill like 027's, at which point this gate goes (docs/KNOWN-ISSUES.md).
+function snapshotGate({ localHour }) {
+  if (Number.isInteger(localHour) && localHour >= 0 && localHour <= 5) return null;
+  return 'outside the snapshot window';
+}
+
+// The snapshot-guardian-gaps step: the gate above, then the job. Answers
+// true (ran), false (failed) or the gate's reason (skipped, recorded ok).
+async function snapshotGuardianGaps(schema, label, name, sql) {
+  let stop;
+  try {
+    stop = await withOwnerIn(schema, async (client) => {
+      const { rows: [s] } = await client.query(
+        `select extract(hour from now() at time zone local_timezone)::int as local_hour from app_settings where id`);
+      const reason = snapshotGate({ localHour: s?.local_hour });
+      if (reason) await record(client, name, true, reason);
+      return reason;
+    });
+  } catch (err) {
+    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
+    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
+    return false;
+  }
+  if (stop) { console.log(`[jobs] ${label}${name}: skipped — ${stop}`); return stop; }
+  return runJob(schema, label, name, sql);
+}
+
+// Whether a tenant schema may be run at all. public.tenant_schema_gaps()
+// (048) names the functions `public` has that a given `t_*` schema does
+// not; a schema missing any is behind — provisioned before some migration
+// landed and never brought current (docs/KNOWN-ISSUES.md #4). Answers the
+// job_runs sentence, or null when the schema is current. A row that is not
+// there at all (a tenants row whose schema was never provisioned) is
+// behind too: Postgres silently skips a search_path entry that does not
+// exist, so every unqualified name would resolve in public.
+function schemaBehind(gapsRow) {
+  if (!gapsRow) return 'schema not provisioned';
+  const missing = Array.isArray(gapsRow.missing_functions) ? gapsRow.missing_functions : [];
+  return missing.length ? `schema behind: ${missing.join(', ')}` : null;
+}
+
 // When the 22:00 guardian alert may go: at 22:00 site time or later. One
 // gate, because the other things the Sunday return waits for do not apply —
 // it is every day, and it reads the gate as it stands rather than a
@@ -355,9 +416,13 @@ async function guardianAlert(schema, label, { force = false } = {}) {
       // gets it twice. Inherited from the weekly return deliberately (see
       // weeklyRegister()): for a child-welfare email a duplicate beats a
       // miss. The two cron hours make a second run a certainty, not a
-      // mishap — and a second look, by design: after "nothing to report"
-      // at the first hour, a parent who signs out between the two runs is
-      // caught by the second.
+      // mishap — and, in summer only, a second look: at UTC+1 the 21:00
+      // UTC run is 22:00 local and sends, and the 22:00 UTC run an hour
+      // later catches a parent who signed out in between. In winter the
+      // 21:00 UTC run records "before 22:00" and there is one look, at
+      // 22:00. Nothing watches the door after the last run: a household
+      // that becomes a gap later reaches the nightly email as a count and
+      // the morning's report by name (README §5).
       const { rows: already } = await client.query(
         `select 1 from job_runs
            where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
@@ -532,11 +597,41 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
 
   const { rows: tenants } = await withOwner((client) => client.query(
     "select slug, status from public.tenants where status <> 'closed' order by created_at"));
+  // Once per run, for the guard below: which t_* schemas are behind public.
+  const { rows: gapRows } = await withOwner((client) => client.query(
+    "select schema, missing_functions from public.tenant_schema_gaps()"));
+  const gapsBySchema = new Map(gapRows.map((r) => [r.schema, r]));
 
   for (const t of tenants) {
     let schema;
     try { schema = tenancy.schemaForSlug(t.slug); } catch (err) { console.error(`[jobs] ${t.slug}: ${err.message}`); failed += 1; continue; }
     const label = t.slug === tenancy.LEGACY_SLUG ? "" : `${t.slug} · `;
+
+    // A tenant schema that is behind runs NOTHING — not the email jobs,
+    // not the purges — in every mode. searchPath() is `t_x, public,
+    // extensions`, so an unqualified name the tenant's schema lacks does
+    // not fail: it falls through to public's copy, which reads public's
+    // tables. For a purge that is a harmless no-op against the legacy
+    // centre's own rows; for the email jobs it is another centre's data.
+    // guardian_gaps_now(), overnight_guardian_gaps, checkin_conflict_count()
+    // and snapshot_guardian_gaps() (054) are all unqualified in the jobs
+    // above, so on a tenant provisioned before 054 the 22:00 alert would
+    // have emailed the LEGACY centre's households — names — to this
+    // tenant's staff. A behind schema is an operator problem (bring it
+    // current or close it; docs/KNOWN-ISSUES.md #4), so it is refused whole
+    // and recorded ok=false as `schema-check`, which v_system_health shows.
+    if (schema !== 'public') {
+      const gapsRow = gapsBySchema.get(schema);
+      const behind = schemaBehind(gapsRow);
+      if (behind) {
+        console.error(`[jobs] ${label}schema-check: FAILED — ${behind}`);
+        // Nowhere to record a schema that does not exist: the insert would
+        // fall through to public.job_runs and show on the wrong centre.
+        if (gapsRow) await withOwnerIn(schema, (client) => record(client, 'schema-check', false, behind)).catch(() => {});
+        failed += 1;
+        continue;
+      }
+    }
 
     // The same question public.tenant_may_write() asks of the API, asked here
     // of the night's work: may this centre still record anything? A lapsed
@@ -574,18 +669,26 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
     // about a child nobody has seen. The weekly return no longer runs from
     // here at all — see 'weekly' mode above and hut-weekly in render.yaml,
     // which checks the overnight snapshot itself via sendGate().
+    // The guardian-gap snapshot has a third outcome — skipped, outside its
+    // window (snapshotGate()) — which is not a failure but still no night
+    // to count, so the email stays unsent for the same reason.
     let snapshotsOk = true;
+    let snapshotSkipped = null;
     for (const [name, sql, liveOnly] of TENANT_JOBS) {
       if (liveOnly && !live) continue;
-      const ok = await runJob(schema, label, name, sql);
-      if (!ok) failed += 1;
-      if (name === 'snapshot-overnight-absences' || name === 'snapshot-guardian-gaps') snapshotsOk = snapshotsOk && ok;
+      const ok = name === 'snapshot-guardian-gaps'
+        ? await snapshotGuardianGaps(schema, label, name, sql)
+        : await runJob(schema, label, name, sql);
+      if (ok === false) failed += 1;
+      if (typeof ok === 'string') snapshotSkipped = ok;
+      if (name === 'snapshot-overnight-absences' || name === 'snapshot-guardian-gaps') snapshotsOk = snapshotsOk && ok === true;
       if (name === 'snapshot-guardian-gaps') {
         if (snapshotsOk) {
           if (!(await nightlyEmail(schema, label))) failed += 1;
         } else {
-          console.log(`[jobs] ${label}nightly-email: skipped — a snapshot failed`);
-          await withOwnerIn(schema, (client) => record(client, 'nightly-email', true, 'skipped: snapshot failed')).catch(() => {});
+          const why = snapshotSkipped ? `skipped: ${snapshotSkipped}` : 'skipped: snapshot failed';
+          console.log(`[jobs] ${label}nightly-email: ${why}`);
+          await withOwnerIn(schema, (client) => record(client, 'nightly-email', true, why)).catch(() => {});
         }
       }
     }
@@ -605,7 +708,7 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
   return failed;
 }
 
-module.exports = { weeklyRegister, sendGate, guardianAlert, eveningGate, nightlyEmail, main };
+module.exports = { weeklyRegister, sendGate, guardianAlert, eveningGate, nightlyEmail, snapshotGate, schemaBehind, main };
 if (require.main === module) main().catch((err) => {
   console.error("[jobs] fatal:", err);
   process.exit(1);

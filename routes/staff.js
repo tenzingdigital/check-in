@@ -241,7 +241,7 @@ router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
     if (on && req.session.role === 'admin') {
       const { rows: [target] } = await client.query('select role from profiles where id = $1', [id]);
       if (target && (target.role === 'guard' || target.role === 'kiosk')) {
-        throw new HttpError(400, 'A guard or a self check-in tablet cannot receive the safeguarding alert. Promote them to supervisor or admin first.');
+        throw new HttpError(400, 'A guard or a self check-in tablet cannot receive the nightly email or the 22:00 alert. Promote them to supervisor or admin first.');
       }
     }
     const { rows } = await client.query(
@@ -251,8 +251,10 @@ router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
     // Ticking someone back on is also the admin's way of undoing an
     // unsubscribe (049): the row is what the staff card shows, so it must go.
     // Every kind that reads this tick (054: the 22:00 alert, the nightly
-    // email and the retired alert's own kind), or the tick and a row would
-    // disagree the moment the admin looked away.
+    // email, and the two retired kinds — the overnight safeguarding alert
+    // and the House Rules reminder — whose rows are history under "(now
+    // the nightly email)"), or the tick and a row would disagree the
+    // moment the admin looked away.
     if (on && rows[0]) {
       await client.query(`delete from email_opt_outs where profile_id = $1 and kind = any($2::text[])`,
         [id, prefs.kindsForTick('safeguarding_alert')]);

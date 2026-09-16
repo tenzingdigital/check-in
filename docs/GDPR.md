@@ -300,8 +300,8 @@ Nothing else leaves with it — no date of birth, identity number,
 evacuation need or free text — and the email says of itself that it names
 residents because it needs acting on tonight. It is off by default:
 `nightly_email` and `feature_households` must both be on, and somebody must
-be ticked. Recipients are supervisors and admins with a login, whose
-accounts already see the same households under Families; the exposure the
+be ticked. Recipients are supervisors and admins with a login who are
+ticked for it, whose accounts already see the same households under Families; the exposure the
 alert adds is the mail channel itself (the recipient's mailbox, its
 provider, and forwarding), as with the Sunday attachment. Resend retains
 sent messages by default, so the processor table lists it.

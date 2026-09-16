@@ -86,7 +86,7 @@ function choicePage(ctx, notice) {
     body.push(`<form method="post" action="/unsubscribe">${hidden}<input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="action" value="stop">
       <button class="btn" type="submit">Stop this email</button></form>`);
   }
-  if (stopped.size < Object.keys(prefs.KINDS).length) {
+  if (prefs.currentKinds().some((k) => !stopped.has(k))) {
     body.push(`<form method="post" action="/unsubscribe">${hidden}<input type="hidden" name="kind" value="all"><input type="hidden" name="action" value="stop">
       <button class="btn ghost" type="submit">Stop all site emails</button></form>`);
   }
@@ -136,7 +136,11 @@ router.post('/unsubscribe', wrap(async (req, res) => {
 
   const which = oneClick ? ctx.kind : String(req.body?.kind || '');
   const action = oneClick ? 'stop' : String(req.body?.action || '');
-  const kinds = which === 'all' ? Object.keys(prefs.KINDS) : prefs.isKind(which) ? [which] : null;
+  // "All" stops the kinds still sent (currentKinds); a row for a retired
+  // kind would be a staff-card line for an email nobody sends. Resuming
+  // all clears every kind, retired rows included — that is what "get all
+  // site emails again" means to the person clicking it.
+  const kinds = which === 'all' ? (action === 'stop' ? prefs.currentKinds() : Object.keys(prefs.KINDS)) : prefs.isKind(which) ? [which] : null;
   if (!kinds || !['stop', 'resume'].includes(action)) return send(res, 404, notValid());
 
   try {

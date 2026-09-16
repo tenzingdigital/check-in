@@ -43,6 +43,8 @@ test('KINDS names every kind the migrations accept (049 + 054), and only those',
   assert.equal(prefs.KINDS.house_rules.tick, 'safeguarding_alert');
   assert.deepEqual(prefs.kindsForTick('safeguarding_alert'), ['guardian_alert', 'nightly', 'safeguarding_alert', 'house_rules']);
   assert.deepEqual(prefs.kindsForTick('weekly_report'), ['weekly_report']);
+  // "Stop all" writes rows for the kinds still sent, not the retired two.
+  assert.deepEqual(prefs.currentKinds(), ['weekly_report', 'guardian_alert', 'nightly']);
   assert.ok(prefs.isKind('house_rules') && prefs.isKind('nightly') && !prefs.isKind('all') && !prefs.isKind(''));
 });
 

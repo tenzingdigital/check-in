@@ -170,6 +170,49 @@ with `public.` rewritten to the tenant schema — and the tab fills in on the
 next load. Until then the nightly purge on that tenant harmlessly runs
 `public`'s `purge_supervision_arrangements()` against `public`'s own table.
 
+**Migration 054 is the first whose fall-through would have carried another
+centre's data, and the first the jobs refuse to run on a behind tenant.**
+It adds four functions — `guardian_gap_households`, `guardian_gaps_now`,
+`snapshot_guardian_gaps`, `checkin_conflict_count` — plus
+`purge_guardian_gaps`, the table `overnight_guardian_gaps` and the view
+`v_checkin_conflicts`, and like 053 does not reach into existing `t_*`
+schemas (its `app_settings.nightly_email` column and the `email_opt_outs`
+constraint it does, 052-style). `tenant_schema_gaps()` reports the
+functions missing for a tenant provisioned before it. What made this one
+different: `jobs.js` calls `guardian_gaps_now()`, `overnight_guardian_gaps`,
+`checkin_conflict_count()` and `snapshot_guardian_gaps()` unqualified, and
+on a behind tenant every one of them would have resolved to `public`'s —
+so the 22:00 alert would have emailed the **legacy centre's households, by
+name,** to the behind tenant's staff, and its nightly email would have
+counted the legacy centre's nights. Not a 500, not an empty screen: a
+cross-centre disclosure. `jobs.js main()` now asks `tenant_schema_gaps()`
+once per run and, for any `t_*` tenant it reports behind (or whose schema
+does not exist at all), runs **nothing** — no email, no snapshot, no purge,
+in every mode — and records one `job_runs` row, `schema-check`, ok=false,
+naming the missing functions, which puts it in `v_system_health` and the
+red banner. The same guard covers 049–053's fall-throughs above from now
+on. Two consequences for the operator: **the pre-push `GET /api/tenants`
+check is mandatory for 054**, and any tenant it reports behind must be
+brought current (apply 054's objects against that schema with `public.`
+rewritten, as for 053) or closed **before `hut-evening`'s first run**,
+because a behind tenant is a failed cron every evening and every night
+until then, and its purges — the DPA's retention promise — do not run.
+
+Two follow-ups from the same review, for a migration 055: (1)
+`snapshot_guardian_gaps()` reads the gate *as it stands* and labels the
+rows `site_today() - 1`, so `jobs.js` only runs it between 00:00 and 05:59
+site time (`snapshotGate()`; a late manual re-run records "outside the
+snapshot window" and skips the nightly email too). 055 should make the
+snapshot as-of-midnight — the presence of each member at 00:00 from
+`gate_events`, not the latest event now — and take the last seven nights
+with `on conflict do nothing`, exactly as 027 did for
+`snapshot_overnight_absences()`, at which point the window and the hole a
+missed night leaves both go. (2) `guardian_gap_households()` counts an
+arrangement as covering the household whenever it is unended and its hours
+match; it should also require the carer to still be an active resident,
+so a departed carer's arrangement that the 053 trigger has not yet ended
+(or was ended and reinstated by hand) never hides a child left alone.
+
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every
 `t_*` schema at boot automatically, refusing to serve a schema still

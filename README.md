@@ -480,7 +480,7 @@ preference. Admin → Staff shows who used it and when, and re-ticking the
 box reinstates them. The nightly email and the 22:00 alert share one tick,
 so stopping either stops both. A link in an email sent before migration
 054 — the old overnight safeguarding alert or House Rules reminder — still
-works and stops the nightly email that replaced them.
+works and stops both the nightly email and the 22:00 alert.
 
 ### 4. Add the rest of the staff, and the residents
 
@@ -814,7 +814,17 @@ stopped; `job_runs` records it as `nightly-email` either way. The
 guardian-gap snapshot it counts is a job of its own, `snapshot-guardian-gaps`,
 run just before it — it reads the gate as it stands at 00:30 and cannot be
 backfilled, so it is not tied to the email's switch or to any other step
-failing. It replaced
+failing. For the same reason it only runs between 00:00 and 05:59 site
+time: the rows it writes are labelled with the night just ended, and the
+gate at three in the afternoon is not that night. So a manual `node
+jobs.js` re-run after about 05:00 site time — say, to re-run a purge that
+failed — skips the guardian-gap snapshot (`job_runs` says "outside the
+snapshot window") and skips the nightly email with it, since an email
+counting a night that was never recorded would say "nothing to report"
+about a child nobody has seen; everything else in the run is safe to
+repeat at any hour. A night missed this way is a hole in the
+Children-without-a-guardian report until migration 055 makes the snapshot
+as-of-midnight with a backfill (docs/KNOWN-ISSUES.md #4). It replaced
 two emails: the House Rules reminder (032, which went to every supervisor
 and admin) and the overnight safeguarding alert (041). Their job names
 (`notify-thresholds-email`, `overnight-safeguarding-alert`) are no longer
@@ -832,9 +842,11 @@ the Sunday return, Render's clock is UTC and Ireland's is not, so it runs
 `node jobs.js evening` at both 21:00 and 22:00 UTC every day: the first run
 at or after 22:00 local sends, the other records "before 22:00" or
 "already sent today". A clear evening records "nothing to report" and
-sends nothing — and then the second hour looks again and can send, since a
-parent who signs out between the two runs is exactly the case; a second
-look, by design. It needs `feature_households` and `nightly_email` on under
+sends nothing. In summer only, when Ireland is UTC+1, the 21:00 UTC run is
+the 22:00 local send and the 22:00 UTC run is a second look an hour later,
+which can send if a parent signed out in between; in winter the 21:00 UTC
+run is before 22:00 local and there is one look, at 22:00. It needs
+`feature_households` and `nightly_email` on under
 Settings and at least one person ticked, or it records why it sent
 nothing. With no mail keys it records "mail not configured" as a
 *failure*, unlike the other jobs, so the health banner shows an
@@ -846,6 +858,30 @@ for `RESEND_API_KEY` and `MAIL_FROM` on the new cron (they are `sync:
 false` in the blueprint), the same as `hut-weekly`; then tick *Gets the
 nightly email and the 22:00 alert* on each manager's staff card, since
 that one tick is the audience for both.
+
+What the alert covers, and what it does not: it looks at the gate at 22:00
+site time, and again an hour later in summer only — the two cron hours are
+UTC and do not move with the clocks. A household that becomes a gap after
+the last evening run (a parent who goes out at 23:00) is not named to
+anyone that night. It reaches the nightly email as a count, around 01:30
+in summer and 00:30 in winter, and the *Children on site without a
+guardian* report the next morning by name; the next email that names it is
+the following day's 22:00 alert, if the household is still in that state.
+Nobody should assume the app watches the door all night — it looks at
+22:00, tells the managers who are ticked, and stops.
+
+When to push: the crons run `node jobs.js` directly, and only the web
+service migrates first (`database.js` at boot). A deploy that lands while a
+cron is running, or that has migrated `public` while the cron's own image
+is still the old code, can make that one run fail against the mismatched
+schema — a red "maintenance job failed" banner on every terminal for two
+days, which the next successful run clears. The windows to avoid are
+21:00–23:00 UTC (`hut-evening`) and roughly 00:15–00:45 UTC
+(`hut-nightly`), plus 09:00–10:15 UTC on a Sunday (`hut-weekly`); push
+outside them. A failed evening run is the one that matters — it is the
+alert that names a child — so if a push did land in that window, check
+`hut-evening`'s log in Render and run `node jobs.js evening --force` from
+its shell if it did not send.
 
 ### 6. Point the front ends at the API
 
