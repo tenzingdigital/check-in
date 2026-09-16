@@ -607,6 +607,7 @@
   .hint.centre { margin: 12px 2px 0; text-align: center; }
   .hint a      { color: var(--accent); }
   .btn.sm      { padding: 8px 12px; }
+  .btn.xs      { padding: 5px 9px; font-size: 12px; }
   /* A button that reads as a link: "Show everyone", "remove". */
   .linkish {
     background: none; border: 0; padding: 0 0 0 8px;

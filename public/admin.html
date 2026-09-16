@@ -202,6 +202,28 @@
 
   .pill.departed { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
   .notice { padding: 14px 16px; }
+
+  /* Families tab: one card per household. */
+  .card.fam { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  .famHead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .famHead b { font-size: 16px; }
+  .famMembers { display: flex; flex-direction: column; gap: 4px; }
+  .famMembers .person { width: 100%; justify-content: flex-start; }
+  .famMembers .person .linkish { padding-left: 0; }
+  .famMembers .person .btn.ghost.xs { margin-left: auto; }
+  .famAddResults { display: flex; flex-direction: column; gap: 4px; }
+  .famAddResults:empty { display: none; }
+  .famCare { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-top: 8px; border-top: 1px dashed var(--line); }
+  #famUnassigned .check.person { align-items: center; }
+
+  /* The supervision form opens over whichever tab or sheet is behind it —
+     the Families tab or the resident edit sheet — so it is fixed and
+     centred rather than sitting in either one's flow. */
+  .formcard.modal {
+    position: fixed; z-index: 50; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0;
+    width: min(92vw, 480px); max-height: 86vh; overflow-y: auto;
+    box-shadow: 0 14px 44px var(--shadow), 0 0 0 100vmax var(--scrim);
+  }
   .card.staff .who .check { margin-top: 6px; font-size: 13px; }
   .card.staff .meta.unsub { display: block; color: var(--warn); }
   /* Staff cards on a phone: the actions get a row of their own. */
@@ -299,6 +321,7 @@
     <nav class="tabs" role="tablist" id="adminTabs" hidden>
       <button role="tab" id="tabResidents" aria-selected="true"  aria-controls="panelResidents">Residents</button>
       <button role="tab" id="tabAbsences"  aria-selected="false" aria-controls="panelAbsences">Absences</button>
+      <button role="tab" id="tabFamilies"  aria-selected="false" aria-controls="panelFamilies" hidden>Families</button>
       <button role="tab" id="tabBuildings" aria-selected="false" aria-controls="panelBuildings">Buildings</button>
       <button role="tab" id="tabReports"   aria-selected="false" aria-controls="panelReports">Reports</button>
       <button role="tab" id="tabStaff"     aria-selected="false" aria-controls="panelStaff" hidden>Staff</button>
@@ -425,6 +448,18 @@
         <button class="btn sm" type="submit">Download</button>
       </form>
       <div class="tablewrap mt14"><table id="absTable"></table></div>
+    </section>
+
+    <!-- ---- families (supervisors and admins): one card per household,
+         who is responsible for whom, and the Appendix 5 arrangement that
+         says another resident is minding the children for a while. ---- -->
+    <section id="panelFamilies" role="tabpanel" aria-labelledby="tabFamilies" hidden>
+      <p class="hint flush">A family is who shares a household. Its adults are the children's guardians. A supervision arrangement records that another adult resident is minding the children for a period — the fact security need at the door. The paper Appendix 5 form keeps the rest.</p>
+      <div id="famList" class="list mt14"></div>
+      <h2 class="mt14">Not in a family</h2>
+      <p class="hint flush">Tick two or more and make them a family, or add one person to an existing family from its card.</p>
+      <div id="famUnassigned" class="list"></div>
+      <div id="famUnassignedBar" class="multibar" hidden><b id="famUnCount">0 selected</b><button class="btn primary-in sm" type="button" id="famUnMake">Make a family</button></div>
     </section>
 
     <!-- ---- buildings and rooms (supervisors and admins) ---- -->
@@ -586,6 +621,23 @@
 
     <!-- ---- resident edit sheet ---- -->
     <div id="detail" class="detail" hidden></div>
+
+    <!-- ---- supervision arrangement (Appendix 5), opened from a family
+         card or the edit sheet's Household section ---- -->
+    <form id="careForm" class="formcard modal" hidden autocomplete="off">
+      <h2>Supervision arrangement</h2>
+      <p class="hint flush">Another adult resident minding this family's children for a period, as on the Appendix 5 form. Record the facts here; the signed form stays on file.</p>
+      <label class="lbl" for="cfCarer">Nominated carer</label>
+      <input id="cfCarer" class="field" type="search" placeholder="Name…" autocomplete="off" aria-label="Nominated carer">
+      <div id="cfCarerResults"></div>
+      <input type="hidden" id="cfCarerId">
+      <div class="grid2">
+        <div><label class="lbl" for="cfFrom">From</label><input id="cfFrom" class="field" type="datetime-local" required></div>
+        <div><label class="lbl" for="cfTo">Until</label><input id="cfTo" class="field" type="datetime-local" required></div>
+      </div>
+      <label class="check"><input id="cfOvernight" type="checkbox"> <span><b>Overnight approved by the manager.</b> <span id="cfOvernightHint" class="hint">Care by another resident overnight is exceptional and needs the manager's prior approval (House Rules 3.5.4).</span></span></label>
+      <div class="actions"><button class="btn primary-in" type="submit">Record</button> <button class="btn ghost" type="button" id="cfCancel">Cancel</button></div>
+    </form>
   </main>
 </div>
 
@@ -612,11 +664,20 @@ const state = {
   buildings: [],        // GET /api/buildings, for the room selectors and the Buildings tab,
   famSelecting: false,
   famIds: new Set(),
+  famUnIds: new Set(),  // ticked in the Families tab's "Not in a family" list
+  families: null,       // last GET /api/households; null until loadFamilies()/ensureFamilies() has run once
+  careFor: null,        // { householdId } — which household #careForm is currently recording for
   deepLink: null,       // readDeepLink(): which report and which nights an emailed link asked for
 };
 
 const canResidents = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
 const canStaff = () => !!state.profile && state.profile.role === "admin";
+
+// Re-runs whichever edit sheet's supervision widget is currently on screen,
+// so a change made through the Families tab or #careForm is reflected there
+// too. renderDetail(rec) replaces this with the real thing while a sheet
+// with a household section is open; a no-op otherwise, or once it's closed.
+let refreshHhCare = () => {};
 
 function todayISODate() {
   const n = new Date();
@@ -705,27 +766,251 @@ async function departMany() {
   setFamilySelecting(false);
   loadResidents();
 }
-async function makeFamily() {
-  const ids = [...state.famIds];
-  if (ids.length < 2) return toast("Tick at least two people", "err");
-  // Join an existing family when one of them is already in one; otherwise
-  // the first ticked person anchors the new one.
-  const anchor = ids.find((id) => state.rows.get(id)?.household_id) || ids[0];
-  $("famMake").disabled = true;
+// Shared by the Residents tab's "Select several → Family" and the Families
+// tab's "Not in a family" list: join two or more ticked people into one
+// household, anchored on whichever of them is already in a family (or the
+// first ticked, if none is). `personOf(id)` looks the ticked id up in
+// whichever list the caller ticked it from, for the name in the progress
+// line and the household it may already be in.
+async function joinIntoFamily(ids, personOf) {
+  const anchor = ids.find((id) => personOf(id)?.household_id) || ids[0];
   let done = 0;
   const failed = [];
   for (const [i, id] of ids.entries()) {
     if (id === anchor) continue;
-    progress(`Linking ${i + 1} of ${ids.length}${state.rows.get(id)?.full_name ? ` — ${state.rows.get(id).full_name}` : ""}`, i, ids.length);
-    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { household_with: anchor }), (err) => failed.push(`${state.rows.get(id)?.full_name || "One person"}: ${err.message}`));
+    progress(`Linking ${i + 1} of ${ids.length}${personOf(id)?.full_name ? ` — ${personOf(id).full_name}` : ""}`, i, ids.length);
+    const out = await guarded(() => apiPatch(`/api/residents/${id}`, { household_with: anchor }), (err) => failed.push(`${personOf(id)?.full_name || "One person"}: ${err.message}`));
     if (out) done += 1;
   }
+  return { done, failed };
+}
+async function makeFamily() {
+  const ids = [...state.famIds];
+  if (ids.length < 2) return toast("Tick at least two people", "err");
+  $("famMake").disabled = true;
+  const { done, failed } = await joinIntoFamily(ids, (id) => state.rows.get(id));
   toast(failed.length
     ? `${done ? `Family of ${done + 1} made. ` : "No family made. "}Not added: ${failed.join("; ")}`
     : (done ? `Family of ${done + 1} made` : "No family made"), failed.length ? "err" : "ok");
   setFamilySelecting(false);
   loadResidents();
 }
+
+/* ======================================================================
+   Families (supervisors and admins) — migration 053
+   ====================================================================== */
+async function loadFamilies() {
+  const out = await guarded(() => apiGet("/api/households"), (err) => showError("Could not load families: " + err.message));
+  if (!out) return;
+  showError("");
+  state.families = out;
+  renderFamilies();
+}
+// Loads once and caches on state.families; used by the edit sheet, which
+// may open before the Families tab ever has (or while another tab is
+// showing), so it fails quietly rather than raising the shared error banner.
+async function ensureFamilies() {
+  if (state.families) return state.families;
+  const out = await guarded(() => apiGet("/api/households"), () => {});
+  if (out) state.families = out;
+  return out;
+}
+function careLine(c) {
+  return `Children with ${esc(c.carer_name)}${c.carer_room_label ? ` · ${esc(c.carer_room_label)}` : ""} until ${esc(dayTime(c.until))}${c.overnight ? " · overnight approved" : ""}`;
+}
+function renderFamilies() {
+  const { households, unassigned } = state.families;
+  state.famUnIds = new Set(); // a fresh render means fresh (unchecked) checkboxes
+  $("famList").innerHTML = households.length ? households.map((h) => `
+    <div class="card fam" data-hh="${esc(h.id)}">
+      <div class="famHead"><b>${esc(h.label || "Family")}</b><span class="hint">${h.room_labels.map(esc).join(", ")}</span></div>
+      <div class="famMembers">${h.members.map((m) => `
+        <div class="person ${m.presence === "in" ? "in" : "out"}"><i class="dot"></i><button class="linkish" type="button" data-open="${esc(m.id)}">${esc(m.full_name)}</button>
+          <span class="hint">${m.is_adult ? "guardian" : `child · ${m.age_years}`}</span>
+          <button class="btn ghost xs" type="button" data-remove="${esc(m.id)}" aria-label="Remove ${esc(m.full_name)} from the family">Remove</button></div>`).join("")}
+      </div>
+      <div class="row mt8">
+        <input class="field grow" type="search" placeholder="Add a member…" data-addsearch="${esc(h.id)}" aria-label="Add a member to ${esc(h.label || "this family")}" autocomplete="off">
+      </div>
+      <div class="famAddResults" data-addresults="${esc(h.id)}"></div>
+      ${h.children ? `<div class="famCare mt8">${h.care
+        ? `<span>${careLine(h.care)}</span> <button class="btn ghost sm" type="button" data-endcare="${esc(h.care.arrangement_id)}">End early</button>`
+        : `<span class="hint">No supervision arrangement running.</span> <button class="btn sm" type="button" data-newcare="${esc(h.id)}">Supervision…</button>`}</div>` : ""}
+    </div>`).join("") : `<p class="hint">No families yet. Tick people below and make one.</p>`;
+  $("famUnassigned").innerHTML = unassigned.map((u) => `
+    <label class="check person ${u.presence === "in" ? "in" : "out"}"><input type="checkbox" data-un="${esc(u.id)}"> <i class="dot"></i><span>${esc(u.full_name)} <span class="hint">${u.is_adult ? "adult" : `child · ${u.age_years}`}${u.room_label ? ` · ${esc(u.room_label)}` : ""}</span></span></label>`).join("") || `<p class="hint">Everyone is in a family.</p>`;
+  updateUnassignedBar();
+}
+function updateUnassignedBar() {
+  const n = state.famUnIds.size;
+  $("famUnassignedBar").hidden = n === 0;
+  $("famUnCount").textContent = `${n} selected`;
+  $("famUnMake").disabled = n < 2;
+}
+// Every unassigned person plus every member of every OTHER household — the
+// pool a family's "Add a member…" search may pick from.
+function addCandidates(excludeHouseholdId) {
+  if (!state.families) return [];
+  const others = state.families.households.filter((h) => h.id !== excludeHouseholdId).flatMap((h) => h.members);
+  return [...state.families.unassigned, ...others];
+}
+function personOfFamilies(id) {
+  if (!state.families) return undefined;
+  const all = [...state.families.unassigned, ...state.families.households.flatMap((h) => h.members)];
+  return all.find((m) => m.id === id);
+}
+
+$("panelFamilies").addEventListener("input", (e) => {
+  const inp = e.target.closest("[data-addsearch]");
+  if (!inp) return;
+  const hhId = inp.dataset.addsearch;
+  const box = inp.closest(".card.fam")?.querySelector("[data-addresults]");
+  if (!box) return;
+  const q = inp.value.trim().toLowerCase();
+  if (q.length < 2) { box.innerHTML = ""; return; }
+  const matches = addCandidates(hhId).filter((m) => m.full_name.toLowerCase().includes(q)).slice(0, 8);
+  box.innerHTML = matches.length
+    ? matches.map((m) => `<button class="btn ghost sm" type="button" data-join="${esc(m.id)}" data-into="${esc(hhId)}">${esc(m.full_name)}${m.room_label ? ` · ${esc(m.room_label)}` : ""}</button>`).join("")
+    : `<p class="hint tight">No match.</p>`;
+});
+
+$("panelFamilies").addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-un]");
+  if (!cb) return;
+  if (cb.checked) state.famUnIds.add(cb.dataset.un); else state.famUnIds.delete(cb.dataset.un);
+  updateUnassignedBar();
+});
+
+$("panelFamilies").addEventListener("click", async (e) => {
+  const openBtn = e.target.closest("[data-open]");
+  if (openBtn) {
+    const id = openBtn.dataset.open;
+    if (!state.rows.has(id)) state.rows.set(id, { id });
+    openResident(id);
+    $("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  const removeBtn = e.target.closest("[data-remove]");
+  if (removeBtn) {
+    const out = await guarded(() => apiPatch(`/api/residents/${removeBtn.dataset.remove}`, { household_id: null }), (err) => toast("Not changed: " + err.message, "err"));
+    if (!out) return;
+    toast("Removed from the family", "ok");
+    loadFamilies();
+    return;
+  }
+  const joinBtn = e.target.closest("[data-join]");
+  if (joinBtn) {
+    const hh = state.families?.households.find((h) => h.id === joinBtn.dataset.into);
+    const anchor = hh?.members?.[0]?.id;
+    if (!anchor) return;
+    const out = await guarded(() => apiPatch(`/api/residents/${joinBtn.dataset.join}`, { household_with: anchor }), (err) => toast("Not added: " + err.message, "err"));
+    if (!out) return;
+    toast("Added to the family", "ok");
+    loadFamilies();
+    return;
+  }
+  const endBtn = e.target.closest("[data-endcare]");
+  if (endBtn) {
+    if (!confirm("End this arrangement now? The record stays.")) return;
+    const out = await guarded(() => apiPost(`/api/supervision/${endBtn.dataset.endcare}/end`), (err) => toast("Not ended: " + err.message, "err"));
+    if (!out) return;
+    toast("Arrangement ended", "ok");
+    loadFamilies();
+    refreshHhCare();
+    return;
+  }
+  const newBtn = e.target.closest("[data-newcare]");
+  if (newBtn) { openCareForm(newBtn.dataset.newcare); return; }
+});
+
+$("famUnMake").addEventListener("click", async () => {
+  const ids = [...state.famUnIds];
+  if (ids.length < 2) return toast("Tick at least two people", "err");
+  $("famUnMake").disabled = true;
+  const { done, failed } = await joinIntoFamily(ids, personOfFamilies);
+  toast(failed.length
+    ? `${done ? `Family of ${done + 1} made. ` : "No family made. "}Not added: ${failed.join("; ")}`
+    : (done ? `Family of ${done + 1} made` : "No family made"), failed.length ? "err" : "ok");
+  loadFamilies();
+});
+
+/* ---- the supervision form: one shared element, opened from a family
+   card's "Supervision…" button or the edit sheet's Household section ---- */
+function localInputValue(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+// Active adults not already in this household: every other household's
+// adult members, plus the adults with no household at all.
+function carerCandidates(householdId) {
+  if (!state.families) return [];
+  const otherMembers = state.families.households.filter((h) => h.id !== householdId).flatMap((h) => h.members);
+  return [...otherMembers, ...state.families.unassigned].filter((m) => m.is_adult);
+}
+function updateOvernightForce() {
+  const from = $("cfFrom").value, to = $("cfTo").value;
+  const crosses = !!(from && to && from.slice(0, 10) !== to.slice(0, 10));
+  $("cfOvernight").disabled = crosses;
+  if (crosses) $("cfOvernight").checked = true;
+}
+function openCareForm(householdId) {
+  state.careFor = { householdId };
+  $("cfCarer").value = "";
+  $("cfCarerId").value = "";
+  $("cfCarerResults").innerHTML = "";
+  const now = new Date();
+  $("cfFrom").value = localInputValue(now);
+  $("cfTo").value = localInputValue(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0));
+  $("cfOvernight").checked = false;
+  $("cfOvernight").disabled = false;
+  updateOvernightForce();
+  $("careForm").hidden = false;
+  $("careForm").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("cfCarer").focus();
+}
+function closeCareForm() {
+  $("careForm").hidden = true;
+  state.careFor = null;
+}
+$("cfCancel").addEventListener("click", closeCareForm);
+$("cfFrom").addEventListener("change", updateOvernightForce);
+$("cfTo").addEventListener("change", updateOvernightForce);
+$("cfCarer").addEventListener("input", () => {
+  $("cfCarerId").value = "";
+  const box = $("cfCarerResults");
+  const q = $("cfCarer").value.trim().toLowerCase();
+  if (!state.careFor || q.length < 2) { box.innerHTML = ""; return; }
+  const matches = carerCandidates(state.careFor.householdId).filter((m) => m.full_name.toLowerCase().includes(q)).slice(0, 8);
+  box.innerHTML = matches.length
+    ? matches.map((m) => `<button class="btn ghost sm" type="button" data-pick="${esc(m.id)}" data-name="${esc(m.full_name)}" data-room="${esc(m.room_label || "")}">${esc(m.full_name)}${m.room_label ? ` · ${esc(m.room_label)}` : ""}</button>`).join("")
+    : `<p class="hint tight">No match.</p>`;
+});
+$("cfCarerResults").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-pick]");
+  if (!btn) return;
+  $("cfCarerId").value = btn.dataset.pick;
+  $("cfCarer").value = btn.dataset.name + (btn.dataset.room ? ` · ${btn.dataset.room}` : "");
+  $("cfCarerResults").innerHTML = "";
+});
+$("careForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const cf = state.careFor;
+  if (!cf) return;
+  const carerId = $("cfCarerId").value;
+  if (!carerId) { toast("Choose the nominated carer from the list", "err"); return; }
+  const from = $("cfFrom").value, to = $("cfTo").value;
+  if (!from || !to) { toast("Give both times", "err"); return; }
+  const body = { carer_id: carerId, from_at: new Date(from).toISOString(), to_at: new Date(to).toISOString(), overnight: $("cfOvernight").checked };
+  const submitBtn = $("careForm").querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  const out = await guarded(() => apiPost(`/api/households/${cf.householdId}/supervision`, body), (err) => toast(err.message, "err"));
+  submitBtn.disabled = false;
+  if (!out) return;
+  toast("Arrangement recorded", "ok");
+  closeCareForm();
+  loadFamilies();
+  refreshHhCare();
+});
 
 let searchToken = 0;
 // Sample data: ask once per load of the Residents tab whether any is left.
@@ -1105,6 +1390,7 @@ function renderDetail(rec, summary) {
         <button class="btn sm" type="button" id="hhJoin">Join</button>
       </div>
       <p class="hint flush">Holds only which residents share a household. Nothing else about the family is recorded.</p>
+      <div id="hhCare"></div>
     </div>` : ""}
 
     ${!departed ? `
@@ -1210,16 +1496,53 @@ function renderDetail(rec, summary) {
       $("hhLeave").onclick = async () => {
         const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { household_id: null }), (err) => toast("Not changed: " + err.message, "err"));
         if (!out) return;
-        toast("Removed from the family", "ok"); renderMembers(); loadResidents();
+        toast("Removed from the family", "ok");
+        rec.household_id = out.household_id ?? null;
+        state.families = null;
+        renderMembers(); renderCare(); loadResidents();
       };
     };
+    // The supervision widget: only shown once the resident is in a
+    // household, and only when that household has children (matches the
+    // Families tab card, which hides the whole care line for a
+    // childless/guardians-only household).
+    const renderCare = async () => {
+      const box = $("hhCare");
+      if (!box) return; // the sheet closed while a request was out
+      if (!rec.household_id) { box.innerHTML = ""; return; }
+      const fam = state.families || await ensureFamilies();
+      const box2 = $("hhCare");
+      if (!box2) return; // the sheet closed while the request was out
+      if (!fam) { box2.innerHTML = ""; return; }
+      const hh = fam.households.find((h) => h.id === rec.household_id);
+      if (!hh || !hh.children) { box2.innerHTML = ""; return; }
+      box2.innerHTML = hh.care
+        ? `<p class="hint flush mt8">${careLine(hh.care)} <button class="linkish" type="button" id="hhEndCare">End early</button></p>`
+        : `<p class="hint flush mt8">No supervision arrangement running. <button class="linkish" type="button" id="hhNewCare">Supervision…</button></p>`;
+      const endBtn = $("hhEndCare");
+      if (endBtn) endBtn.onclick = async () => {
+        if (!confirm("End this arrangement now? The record stays.")) return;
+        const out = await guarded(() => apiPost(`/api/supervision/${hh.care.arrangement_id}/end`), (err) => toast("Not ended: " + err.message, "err"));
+        if (!out) return;
+        toast("Arrangement ended", "ok");
+        state.families = null;
+        renderCare();
+      };
+      const newBtn = $("hhNewCare");
+      if (newBtn) newBtn.onclick = () => openCareForm(rec.household_id);
+    };
     renderMembers();
+    refreshHhCare = renderCare;
+    renderCare();
     $("hhJoin").addEventListener("click", async () => {
       const withId = $("hhWith").value;
       if (!withId) return toast("Choose whose family to join", "err");
       const out = await guarded(() => apiPatch(`/api/residents/${rec.id}`, { household_with: withId }), (err) => toast("Not changed: " + err.message, "err"));
       if (!out) return;
-      toast("Added to the family", "ok"); $("hhWith").value = ""; renderMembers(); loadResidents();
+      toast("Added to the family", "ok"); $("hhWith").value = "";
+      rec.household_id = out.household_id;
+      state.families = null;
+      renderMembers(); renderCare(); loadResidents();
     });
   }
 
@@ -2014,6 +2337,7 @@ function applyFeatures() {
   $("tabBuildings").hidden = !featureOn("feature_buildings");
   if (!featureOn("feature_buildings")) $("afRoomWrap").hidden = true;
   $("afEvacWrap").hidden = !featureOn("feature_evacuation");
+  $("tabFamilies").hidden = !featureOn("feature_households");
   $("famHint").hidden = false;
 }
 
@@ -2108,7 +2432,7 @@ $("awList").addEventListener("click", async (e) => {
 // trusted: the tab and report names are matched against the ones this page
 // actually has, and the dates must be plain ISO days. A link that says
 // anything else simply opens the page as normal.
-const TABS = ["residents", "absences", "buildings", "reports", "staff", "settings"];
+const TABS = ["residents", "absences", "families", "buildings", "reports", "staff", "settings"];
 function readDeepLink() {
   let q;
   try { q = new URLSearchParams(location.search); } catch (_) { return null; }
@@ -2121,7 +2445,7 @@ function readDeepLink() {
 
 function selectTab(name) {
   state.tab = name;
-  for (const t of ["residents", "absences", "buildings", "reports", "staff", "settings"]) {
+  for (const t of ["residents", "absences", "families", "buildings", "reports", "staff", "settings"]) {
     const cap = t[0].toUpperCase() + t.slice(1);
     $("tab" + cap).setAttribute("aria-selected", String(t === name));
     $("panel" + cap).hidden = t !== name;
@@ -2129,6 +2453,7 @@ function selectTab(name) {
   renderDetail(null);
   if (name === "residents") { loadResidents(); refreshDemoBar(); }
   if (name === "absences") loadAbsences();
+  if (name === "families") loadFamilies();
   if (name === "buildings") loadBuildings();
   if (name === "reports") loadReports();
   if (name === "staff") { loadRoster(); if (canStaff()) loadStaff(); }
@@ -2270,6 +2595,7 @@ document.addEventListener("click", (e) => {
 });
 $("tabResidents").addEventListener("click", () => selectTab("residents"));
 $("tabAbsences").addEventListener("click", () => selectTab("absences"));
+$("tabFamilies").addEventListener("click", () => selectTab("families"));
 let absQTimer = null;
 $("absQ").addEventListener("input", () => { clearTimeout(absQTimer); absQTimer = setTimeout(renderAbsences, 120); });
 $("absRange").addEventListener("submit", (e) => { e.preventDefault(); loadAbsences(); });
