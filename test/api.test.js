@@ -2696,7 +2696,7 @@ async function main() {
 
   console.log("\n== the nightly House Rules reminder by email (migration 032) ==");
 
-  await test("with the switch on, supervisors and admins are emailed the residents at a figure; off, nothing goes", async () => {
+  await test("with the switch on, supervisors and admins are emailed a count of residents at a figure, never a name; off, nothing goes", async () => {
     const { notifyThresholds } = require("../jobs");
     const made = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Missing", last_name: "Nights", date_of_birth: "1979-05-05" } });
     assert.equal(made.status, 201, made.text);
@@ -2716,7 +2716,7 @@ async function main() {
     assert.ok(sent.length >= 2, `expected an email per supervisor and admin, got ${sent.length}`);
     assert.ok(sent.every((m) => /House Rules/.test(m.subject)), "subject");
     assert.ok(sent.every((m) => !/Missing Nights/.test(m.text) && !/Missing Nights/.test(m.html || "")), "no resident is named in the House Rules email");
-    assert.ok(sent.every((m) => /1 resident|residents at or over/.test(m.text) && /admin\.html\?tab=absences/.test(m.text)), "counts and a link to Absences");
+    assert.ok(sent.every((m) => /At the consecutive-nights figure: \d+/.test(m.text) && /admin\.html\?tab=absences/.test(m.text) && /from=\d{4}-\d{2}-\d{2}&to=/.test(m.text)), "counts and a link to Absences");
     assert.ok(sent.some((m) => /sup2@hut.example/.test(m.to)), "the supervisor should be a recipient");
     const { rows } = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'notify-thresholds-email' order by id desc limit 1`));
     assert.equal(rows[0].ok, true); assert.match(rows[0].result, /listed/);

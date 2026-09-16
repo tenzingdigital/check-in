@@ -236,9 +236,9 @@ data: a staff member's own address, name and a single-use link. All three
 recurring reports below carry counts and a link only — no resident is ever
 named in an outbound email.
 
-The nightly House Rules reminder (migration 032, rewritten for this GDPR
-property), where the centre has turned it on, goes to the centre's own
-active supervisors and administrators: two counts against the site's House
+The nightly House Rules reminder (migration 032), where the centre has
+turned it on, goes to the centre's own active supervisors and
+administrators: two counts against the site's House
 Rules settings — how many residents are at the consecutive-nights figure,
 and how many are at the days-in-window figure — and a link to the
 pre-filled Absences report for the night just closed. The names and room
@@ -266,10 +266,8 @@ works without a login and stops that one email or all three; the fact is
 recorded against the staff record and shown to administrators, who may
 reinstate. Login codes, invitations and password resets carry no such link.
 
-Neither message carries a date of birth, an identity-document number, an
-evacuation need, or any free text about a person. The House Rules reminder
-is the only one of the two that names a resident, and it carries nothing
-beyond a name, a room label and the two night counts above.
+None of the three carries a date of birth, an identity-document number, an
+evacuation need, any free text about a person — or a name.
 
 **How those messages are built.** Each is sent as plain text and as a
 styled part carrying the same words, laid out by `layout()` in
@@ -313,7 +311,7 @@ may be in dispute with staff, that matters.
 | Processor | Purpose | Where |
 |---|---|---|
 | Render Services, Inc. | Hosting, the managed database, backups, the nightly scheduler | Frankfurt (EU); fixed at creation in `render.yaml` |
-| Resend, Inc. | Invitation and password-reset email to staff; the nightly House Rules reminder to the centre's own supervisors and administrators; the Sunday Weekly register update, which carries no resident data, to the centre's own staff ticked to receive it | EU/US; see DPA section 6 |
+| Resend, Inc. | Invitation and password-reset email to staff; all three recurring reports — the nightly House Rules reminder, the nightly overnight safeguarding alert, and the Sunday Weekly register update — carry counts and a link only, to the centre's own supervisors, administrators or ticked staff | EU/US; see DPA section 6 |
 
 Both are US companies with EU data residency, so the transfer basis (Standard
 Contractual Clauses plus the EU–US Data Privacy Framework, as each provider

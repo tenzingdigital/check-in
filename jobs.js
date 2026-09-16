@@ -149,8 +149,7 @@ async function notifyThresholds(schema, label) {
       // the streak counts days after the latest presented day).
       const { rows } = await client.query(
         `with t as (
-           select btrim(r.first_name) || ' ' || btrim(r.last_name) as full_name, room_label_of(r.room_id) as room_label,
-                  (select count(*)::int from daily_compliance x
+           select (select count(*)::int from daily_compliance x
                     where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
                       and x.compliance_date > coalesce((select max(y.compliance_date) from daily_compliance y
                                                          where y.resident_id = r.id and y.required and y.presented and y.closed_at is not null), '1900-01-01'::date)) as consecutive_missed,
@@ -158,15 +157,14 @@ async function notifyThresholds(schema, label) {
                     where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
                       and x.compliance_date > site_today() - $3::int) as absent_in_window
              from residents r where r.status = 'active')
-         select * from t where consecutive_missed >= $1 or absent_in_window >= $2
-         order by consecutive_missed desc, absent_in_window desc, full_name`, [s.nights, s.win_limit, s.win_days]);
+         select * from t where consecutive_missed >= $1 or absent_in_window >= $2`, [s.nights, s.win_limit, s.win_days]);
       if (!rows.length) { await record(client, name, true, 'nobody at a figure'); return 'nobody'; }
       const { rows: to } = await client.query(
         `select p.id, u.email, p.full_name from profiles p join auth.users u on u.id = p.id
           where p.active and p.role in ('supervisor', 'admin') and u.email is not null
             and not exists (select 1 from email_opt_outs o where o.profile_id = p.id and o.kind = 'house_rules')`);
       if (!to.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
-      const figures = `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}.`;
+      const figures = `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}. A resident can be at both figures.`;
       const decision = 'The app records the facts; whether a letter or a breach report follows is the manager\'s decision. ' +
         'Authorised absences are already left out. The names behind these counts are in the app under Admin → Absences.';
       const nConsecutive = rows.filter((r) => r.consecutive_missed >= s.nights).length;
@@ -187,7 +185,7 @@ async function notifyThresholds(schema, label) {
       // Admin → Absences.
       const layoutArgs = {
         siteName: s.site_name,
-        heading: `${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure`,
+        heading: `House Rules reminder, ${safeguarding.dayMonth(s.night)}`,
         figure: { value: String(rows.length), label: 'residents at or over a House Rules figure', tone: 'attention' },
         paragraphs: [`After last night's close-out. ${figures}`],
         rows: rowsForLayout,
