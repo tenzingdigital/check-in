@@ -70,6 +70,13 @@ const TENANT_JOBS = [
                            (public.site_today() - 1)::timestamp,
                            interval '1 day') g(d)`,
    LIVE_ONLY],
+  // Which households had children on site and no guardian at midnight
+  // (054), for the Children-without-a-guardian report. Its own row, not a
+  // step inside the nightly email: it reads the gate as it stands and
+  // cannot be backfilled, so it must not be lost to an unrelated failure
+  // in the step before it or to the email switch being off. Re-running a
+  // night already recorded is free (on conflict do nothing).
+  ["snapshot-guardian-gaps", "select snapshot_guardian_gaps(site_today() - 1)", LIVE_ONLY],
   ["purge-expired-gate-events", "select purge_expired_gate_events()"],
   ["purge-expired-checkin-events", "select purge_expired_checkin_events()"],
   ["purge-expired-compliance", "select purge_expired_compliance()"],
@@ -324,13 +331,33 @@ async function guardianAlert(schema, label, { force = false } = {}) {
            from app_settings where id`);
       if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
       if (!s.households) { await record(client, name, true, 'households off'); return 'households off'; }
+      // Mail not configured is recorded as a FAILURE here, where the other
+      // jobs tolerate it (mail.send() logs and answers not delivered). A
+      // hut-evening created at blueprint sync without RESEND_API_KEY and
+      // MAIL_FROM pasted in would otherwise record "nothing to report",
+      // ok, every quiet evening, and show itself only on the first night a
+      // child was left — as a 22:00 email that never arrived. ok=false puts
+      // it in v_system_health's recent_failures, and the health banner on
+      // every terminal is the one early warning there is. The nightly
+      // email does the same, for the same reason. The test sink is exempt:
+      // it stands in for a configured provider.
+      if (!mail.isConfigured() && process.env.HUT_MAIL_SINK !== '1') {
+        await record(client, name, false, 'mail not configured');
+        return 'mail not configured';
+      }
       const staff = await safeguarding.recipients(client);
       if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
       const stop = eveningGate({ localHour: s.local_hour, force });
       if (stop) { await record(client, name, true, stop); return stop; }
-      // Once a day, and "once" means delivered to somebody: the same guard
-      // as the weekly return, for the same reasons (see weeklyRegister()).
-      // The two cron hours make a second run a certainty, not a mishap.
+      // Once a day, and "once" means a run recorded ok — everyone reached.
+      // A partial delivery is recorded ok=false and so counts as not sent:
+      // the next run resends to all, and the one person who already had it
+      // gets it twice. Inherited from the weekly return deliberately (see
+      // weeklyRegister()): for a child-welfare email a duplicate beats a
+      // miss. The two cron hours make a second run a certainty, not a
+      // mishap — and a second look, by design: after "nothing to report"
+      // at the first hour, a parent who signs out between the two runs is
+      // caught by the second.
       const { rows: already } = await client.query(
         `select 1 from job_runs
            where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
@@ -411,15 +438,11 @@ async function nightlyEmail(schema, label) {
                 to_char(site_today(), 'YYYY-MM-DD') as today,
                 extract(isodow from site_today())::int as dow
            from app_settings where id`);
-      if (!s) { await record(client, name, true, 'no settings'); return 'no settings'; }
-
-      // The night's record of children on site with no guardian, for the
-      // Children-without-a-guardian report, taken before any switch is
-      // read: the report is kept whether or not anyone is emailed about it.
-      // A re-run is free (on conflict do nothing).
-      await client.query('select snapshot_guardian_gaps($1::date)', [s.night]);
-
-      if (!s.on) { await record(client, name, true, 'off'); return 'off'; }
+      if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
+      if (!mail.isConfigured() && process.env.HUT_MAIL_SINK !== '1') {
+        await record(client, name, false, 'mail not configured');
+        return 'mail not configured';
+      }
       const staff = await safeguarding.recipients(client);
       if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
 
@@ -463,7 +486,9 @@ async function nightlyEmail(schema, label) {
       if (!total && s.dow !== 7) { await record(client, name, true, 'nothing to report'); return 'nothing to report'; }
 
       // Each link lands on the page that has the names, for the night the
-      // count is about — see reportLink() above.
+      // count is about — see reportLink() above. The guardian-gap count
+      // reads the table the snapshot-guardian-gaps step wrote earlier in
+      // this same run.
       const links = {
         families: reportLink({ tab: 'families' }),
         overnight: reportLink({ tab: 'reports', report: 'overnight', from: s.night, to: s.night }),
@@ -540,24 +565,26 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
 
     if (!live) console.log(`[jobs] ${label}${t.status} — purges only`);
 
+    // The nightly email reads both snapshots — who was off site at midnight,
+    // and which households had children and no guardian — so it runs after
+    // the second and only if both succeeded. A failed snapshot is already
+    // counted; the point is not to send on a missing one: a missing night
+    // is indistinguishable from "nobody was away" or "no household was in
+    // the state", and an email built on it would say "nothing to report"
+    // about a child nobody has seen. The weekly return no longer runs from
+    // here at all — see 'weekly' mode above and hut-weekly in render.yaml,
+    // which checks the overnight snapshot itself via sendGate().
+    let snapshotsOk = true;
     for (const [name, sql, liveOnly] of TENANT_JOBS) {
       if (liveOnly && !live) continue;
       const ok = await runJob(schema, label, name, sql);
       if (!ok) failed += 1;
-      if (name === 'snapshot-overnight-absences') {
-        // A failed snapshot already counted above. The weekly return no
-        // longer runs from here at all — see 'weekly' mode above and
-        // hut-weekly in render.yaml, which checks this same snapshot itself
-        // via sendGate(). Only the nightly email is decided here now.
-        if (ok) {
-          // The email reads the snapshot the step above just wrote, so it
-          // depends on it exactly as the weekly return does: a missing night
-          // is indistinguishable from "nobody was away", and an email built
-          // on one would say "nothing to report" about a child nobody has
-          // seen. Skip and record the skip rather than send that.
+      if (name === 'snapshot-overnight-absences' || name === 'snapshot-guardian-gaps') snapshotsOk = snapshotsOk && ok;
+      if (name === 'snapshot-guardian-gaps') {
+        if (snapshotsOk) {
           if (!(await nightlyEmail(schema, label))) failed += 1;
         } else {
-          console.log(`[jobs] ${label}nightly-email: skipped — snapshot-overnight-absences failed`);
+          console.log(`[jobs] ${label}nightly-email: skipped — a snapshot failed`);
           await withOwnerIn(schema, (client) => record(client, 'nightly-email', true, 'skipped: snapshot failed')).catch(() => {});
         }
       }

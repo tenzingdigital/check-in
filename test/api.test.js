@@ -3339,6 +3339,25 @@ async function main() {
     await withOwner((c) => c.query(`update public.app_settings set feature_households = true`));
     assert.equal((global.__mailSink || []).length, before, "nothing goes while either switch is off");
 
+    // No mail provider is a failure here, not a shrug: a hut-evening
+    // created without its mail keys must light the health banner on its
+    // first quiet evening, not on the first night a child is left.
+    const sink = process.env.HUT_MAIL_SINK;
+    try {
+      delete process.env.HUT_MAIL_SINK;
+      assert.equal(await guardianAlert("public", "", { force: true }), true);
+      let notConfigured = await lastRun();
+      assert.equal(notConfigured.result, "mail not configured"); assert.equal(notConfigured.ok, false, "recorded as a failure, so recent_failures sees it");
+      await withOwner((c) => c.query(`update public.app_settings set nightly_email = true`));
+      const { nightlyEmail } = require("../jobs");
+      assert.equal(await nightlyEmail("public", ""), true);
+      notConfigured = (await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'nightly-email' order by id desc limit 1`))).rows[0];
+      assert.equal(notConfigured.result, "mail not configured"); assert.equal(notConfigured.ok, false, "the nightly email fails loud the same way");
+    } finally {
+      process.env.HUT_MAIL_SINK = sink;
+    }
+    assert.equal((global.__mailSink || []).length, before, "nothing reached the sink while it was off");
+
     // Unforced: the clock decides. Whatever the hour in the test cluster, an
     // unforced run either sends or records the gate; it never errors.
     assert.equal(await guardianAlert("public", ""), true);
@@ -3427,10 +3446,13 @@ async function main() {
     await withOwner((c) => c.query(`update public.app_settings set nightly_email = true`));
     await withOwner((c) => c.query(`delete from public.job_runs where job = 'nightly-email'`));
     // The parent is still out and the child in from the test above (the
-    // arrangement has ended), so the snapshot the job takes has our
-    // household in it, and the counts are known before the run.
+    // arrangement has ended), so the snapshot has our household in it. The
+    // snapshot is the snapshot-guardian-gaps job's, run before the email in
+    // the nightly loop; taken here as that job takes it, so the counts are
+    // known before the run.
     const counts = (await withOwner((c) => c.query(
       `select (select count(*)::int from public.guardian_gap_households()) as gaps_now,
+              public.snapshot_guardian_gaps($1::date) as snapshotted,
               public.overnight_safeguarding_count($1::date) as children_away,
               public.checkin_conflict_count($1::date) as conflicts`, [lastNight]))).rows[0];
     assert.ok(counts.gaps_now >= 1, "the Gapfixture household is in the state the snapshot records");
@@ -3441,7 +3463,7 @@ async function main() {
     assert.equal(sent[0].to, "sup2@hut.example");
     assert.match(sent[0].subject, /: tonight — \d+ to look at$/);
     const gapsRecorded = (await withOwner((c) => c.query(`select count(*)::int as n from public.overnight_guardian_gaps where night = $1`, [lastNight]))).rows[0].n;
-    assert.ok(gapsRecorded >= counts.gaps_now, "the job snapshotted last night's gaps before counting them");
+    assert.ok(gapsRecorded >= counts.gaps_now, "the email counts the night's snapshot rows");
     const m = (re) => { const x = sent[0].text.match(re); assert.ok(x, `${re} in:\n${sent[0].text}`); return Number(x[1]); };
     assert.equal(m(/Children on site without a guardian: (\d+) — https:\/\/hut-check-in\.onrender\.com\/admin\.html\?tab=families\n/), gapsRecorded);
     assert.equal(m(new RegExp(`Children away overnight without authorisation: (\\d+) — https://hut-check-in\\.onrender\\.com/admin\\.html\\?tab=reports&report=overnight&from=${lastNight}&to=${lastNight}\\n`)), counts.children_away);
@@ -3496,9 +3518,12 @@ async function main() {
     await jobs.main("evening", { keepPool: true });
     assert.equal(await count("guardian-alert-email"), alertBefore + 1, "evening mode ran the 22:00 alert once");
     assert.equal(await count("close-out-compliance-days"), closeBefore, "evening mode runs no other job");
-    const nightlyBefore = await count("nightly-email");
+    const nightlyBefore = await count("nightly-email"), gapSnapBefore = await count("snapshot-guardian-gaps");
     await jobs.main("nightly", { keepPool: true });
     assert.equal(await count("nightly-email"), nightlyBefore + 1, "the nightly run wrote its one email's row");
+    assert.equal(await count("snapshot-guardian-gaps"), gapSnapBefore + 1, "the guardian-gap snapshot is a job of its own");
+    const order = (await withOwner((c) => c.query(`select job from public.job_runs where job in ('snapshot-guardian-gaps', 'nightly-email') order by id desc limit 2`))).rows.map((r) => r.job);
+    assert.deepEqual(order, ["nightly-email", "snapshot-guardian-gaps"], "the snapshot is written before the email that counts it");
     assert.equal(await count("overnight-safeguarding-alert"), 0, "the overnight safeguarding alert is no longer a job of its own");
     assert.equal(await count("notify-thresholds-email"), 0, "the House Rules reminder is no longer a job of its own");
   });

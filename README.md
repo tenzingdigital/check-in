@@ -810,7 +810,11 @@ authorisation**, **Check-ins recorded while signed out** and **At the House
 Rules figures** — each a count and a link to the page that has the names,
 never a name itself. It goes on any night a count is non-zero and every
 Sunday regardless, so a silent week is never mistaken for a job that
-stopped; `job_runs` records it as `nightly-email` either way. It replaced
+stopped; `job_runs` records it as `nightly-email` either way. The
+guardian-gap snapshot it counts is a job of its own, `snapshot-guardian-gaps`,
+run just before it — it reads the gate as it stands at 00:30 and cannot be
+backfilled, so it is not tied to the email's switch or to any other step
+failing. It replaced
 two emails: the House Rules reminder (032, which went to every supervisor
 and admin) and the overnight safeguarding alert (041). Their job names
 (`notify-thresholds-email`, `overnight-safeguarding-alert`) are no longer
@@ -827,9 +831,15 @@ from this app that names residents, to the same ticked staff, because at
 the Sunday return, Render's clock is UTC and Ireland's is not, so it runs
 `node jobs.js evening` at both 21:00 and 22:00 UTC every day: the first run
 at or after 22:00 local sends, the other records "before 22:00" or
-"already sent today". It needs `feature_households` and `nightly_email` on
-under Settings and at least one person ticked, or it records why it sent
-nothing; a clear evening records "nothing to report" and sends nothing.
+"already sent today". A clear evening records "nothing to report" and
+sends nothing — and then the second hour looks again and can send, since a
+parent who signs out between the two runs is exactly the case; a second
+look, by design. It needs `feature_households` and `nightly_email` on under
+Settings and at least one person ticked, or it records why it sent
+nothing. With no mail keys it records "mail not configured" as a
+*failure*, unlike the other jobs, so the health banner shows an
+unconfigured cron from its first evening rather than on the first night a
+child is left; the nightly email fails the same way.
 `node jobs.js evening --force` from a Render shell sends it now, by hand —
 still once a day. After the blueprint sync that creates it, Render prompts
 for `RESEND_API_KEY` and `MAIL_FROM` on the new cron (they are `sync:
