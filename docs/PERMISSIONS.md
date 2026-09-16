@@ -139,8 +139,7 @@ validation.
 | Disable or re-enable a staff account<br><code>POST /api/staff/:id/active</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Change a staff member's role<br><code>POST /api/staff/:id/role</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Tick or untick whether a staff member receives the weekly report<br><code>POST /api/staff/:id/weekly-report</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
-| Tick or untick whether a staff member receives the overnight safeguarding alert<br><code>POST /api/staff/:id/safeguarding-alert</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
-| Put a staff member back on the nightly House Rules reminder after they unsubscribed<br><code>POST /api/staff/:id/house-rules</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Tick or untick whether a staff member receives the nightly email and the 22:00 alert<br><code>POST /api/staff/:id/safeguarding-alert</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Set a staff member's password<br><code>POST /api/staff/:id/password</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 
 ## Organisation

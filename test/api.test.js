@@ -2038,6 +2038,34 @@ async function main() {
     }
   });
 
+  // The same fact on the register's own sheet, where the guard who recorded
+  // the check-in reads it: each of today's events says whether the gate had
+  // the person out at the time. Two fresh residents so the fixture above
+  // cannot leak in: one signed in then out before the check-in, one in.
+  await test("the detail sheet marks each of today's check-ins as a conflict or not, from v_checkin_conflicts", async () => {
+    const made = {};
+    for (const [k, first] of [["out", "Conor"], ["in", "Cara"]]) {
+      const res = await supC.fetch("/api/residents", { method: "POST", body: { first_name: first, last_name: "Conflictfixture", date_of_birth: "1987-07-07" } });
+      assert.equal(res.status, 201, res.text); made[k] = res.json.id;
+    }
+    for (const [who, direction] of [[made.out, "in"], [made.out, "out"], [made.in, "in"]]) {
+      assert.equal((await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: who, direction } })).status, 200);
+    }
+    for (const id of [made.out, made.in]) {
+      const ci = await api.fetch("/api/checkins", { method: "POST", body: { resident_id: id } });
+      assert.equal(ci.status, 200, ci.text);
+    }
+    const out = await api.fetch(`/api/residents/${made.out}/compliance`);
+    assert.equal(out.status, 200, out.text);
+    assert.equal(out.json.checkins_today_events.length, 1);
+    assert.equal(out.json.checkins_today_events[0].conflict, true, "recorded while the gate had them out");
+    const inn = await api.fetch(`/api/residents/${made.in}/compliance`);
+    assert.equal(inn.status, 200, inn.text);
+    assert.equal(inn.json.checkins_today_events.length, 1);
+    assert.equal(inn.json.checkins_today_events[0].conflict, false, "recorded while the gate had them in");
+    assert.equal((await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: made.out, direction: "in" } })).status, 200);
+  });
+
   await test("nightly_email is a setting an admin switches; the two new unsubscribe kinds mint links the unsubscribe page accepts, and the old kinds still work", async () => {
     const nAdmin = client(base);
     const login = await nAdmin.fetch("/api/session", { method: "POST", body: { email: "dooradmin@hut.example", password: PASSWORD } });
@@ -4293,13 +4321,13 @@ async function main() {
       /permission denied/i, "the table itself is owner-only");
   });
 
-  await test("optOut inserts the row and clears the tick; optIn reverses both; House Rules has no tick to clear", async () => {
+  await test("optOut inserts the row and clears the tick; optIn reverses both; the old House Rules kind sits on the safeguarding_alert tick (054)", async () => {
     const prefs = require("../lib/emailPrefs");
     assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: true } })).status, 200);
     await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report", "house_rules"]));
     let p = (await withOwner((c) => c.query(`select weekly_report, safeguarding_alert from public.profiles where id = $1`, [unsubSupId]))).rows[0];
     assert.equal(p.weekly_report, false, "the tick follows the opt-out");
-    assert.equal(p.safeguarding_alert, false, "a weekly_report/house_rules opt-out leaves safeguarding_alert untouched");
+    assert.equal(p.safeguarding_alert, false, "a house_rules opt-out clears safeguarding_alert, the tick the nightly email reads (054)");
     let outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
     assert.deepEqual(outs.map((o) => o.kind).sort(), ["house_rules", "weekly_report"]);
     await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report"]));
@@ -4313,10 +4341,12 @@ async function main() {
     assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);
     await withOwner((c) => prefs.optOut(c, unsubSupId, ["house_rules"]));
     p = (await withOwner((c) => c.query(`select weekly_report, safeguarding_alert from public.profiles where id = $1`, [unsubSupId]))).rows[0];
-    assert.equal(p.weekly_report, true, "a House-Rules-only opt-out has no tick, so weekly_report reads back unchanged");
-    assert.equal(p.safeguarding_alert, false, "a House-Rules-only opt-out has no tick, so safeguarding_alert reads back unchanged");
+    assert.equal(p.weekly_report, true, "a House-Rules-only opt-out touches only the safeguarding_alert tick, so weekly_report reads back unchanged");
+    assert.equal(p.safeguarding_alert, false, "a House-Rules-only opt-out clears safeguarding_alert");
     await withOwner((c) => prefs.optIn(c, unsubSupId, ["house_rules"]));
     assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);
+    p = (await withOwner((c) => c.query(`select safeguarding_alert from public.profiles where id = $1`, [unsubSupId]))).rows[0];
+    assert.equal(p.safeguarding_alert, true, "a House-Rules-only optIn sets safeguarding_alert back on: the old link puts them back on the nightly email");
     assert.equal(await withOwner((c) => prefs.slugForSchema(c, "public")), "default");
     assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
   });
@@ -4480,7 +4510,7 @@ async function main() {
     auth.clearFailures("unsubscribe", "::1");
   });
 
-  await test("the staff list shows who unsubscribed themselves; an admin re-ticking, or reinstating House Rules, clears it", async () => {
+  await test("the staff list shows who unsubscribed themselves; an admin re-ticking clears it; the House Rules reinstate route is gone (054)", async () => {
     const prefs = require("../lib/emailPrefs");
     await withOwner((c) => prefs.optOut(c, unsubSupId, ["weekly_report", "house_rules"]));
     let list = await unsubAdmin.fetch("/api/staff");
@@ -4507,14 +4537,17 @@ async function main() {
     assert.deepEqual(me.opt_outs.map((o) => o.kind), ["house_rules"], "re-ticking clears the opt-out");
     assert.equal(me.weekly_report, true);
 
-    const asSup = await unsubSup.fetch(`/api/staff/${unsubSupId}/house-rules`, { method: "POST", body: { on: true } });
-    assert.equal(asSup.status, 403, "only an admin reinstates");
-    const back = await unsubAdmin.fetch(`/api/staff/${unsubSupId}/house-rules`, { method: "POST", body: { on: true } });
+    // The old House Rules kind sits on the safeguarding_alert tick now, so
+    // re-ticking the alert is how an admin puts them back; the route that
+    // used to do it on its own is gone, not merely refused.
+    const gone = await unsubAdmin.fetch(`/api/staff/${unsubSupId}/house-rules`, { method: "POST", body: { on: true } });
+    assert.equal(gone.status, 404, gone.text);
+    assert.match(gone.json.error, /No such endpoint/);
+    const back = await unsubAdmin.fetch(`/api/staff/${unsubSupId}/safeguarding-alert`, { method: "POST", body: { on: true } });
     assert.equal(back.status, 200, back.text);
     list = await unsubAdmin.fetch("/api/staff");
-    assert.deepEqual(list.json.find((s) => s.id === unsubSupId).opt_outs, []);
-    const gone = await unsubAdmin.fetch(`/api/staff/00000000-0000-0000-0000-000000000000/house-rules`, { method: "POST", body: { on: true } });
-    assert.equal(gone.status, 404);
+    assert.deepEqual(list.json.find((s) => s.id === unsubSupId).opt_outs, [], "re-ticking the alert clears the old House Rules row too");
+    assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/safeguarding-alert`, { method: "POST", body: { on: false } })).status, 200);
     assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
   });
 

@@ -382,13 +382,20 @@ check-ins from the old app; the hut unchanged); go-live Thursday 1 October
   login* — **built 16 September** (migration 052, `node jobs.js weekly`,
   `hut-weekly` cron, the Word button on the report).
 - *One nightly email to the manager instead of two* (the child safeguarding
-  alert and the House Rules reminder) — open.
+  alert and the House Rules reminder) — **built 16 September** (migration
+  054, `node jobs.js evening`, `hut-evening`, the nightly email, the two
+  reports).
 - *An overnight alert when a parent from a one- or two-parent household is
-  off site and children remain* — open; the highest-stakes item on this
-  list (a real incident went unflagged until Monday).
+  off site and children remain* — **built 16 September** (migration 054,
+  `node jobs.js evening`, `hut-evening`, the nightly email, the two
+  reports); the highest-stakes item on this list (a real incident went
+  unflagged until Monday). The 22:00 alert names the household to the
+  ticked managers; the midnight snapshot feeds the report.
 - *A conflict flag in the nightly email when a resident's In & out status
   contradicts the day's register* (out at the gate, verified present) —
-  open.
+  **built 16 September** (migration 054, `node jobs.js evening`,
+  `hut-evening`, the nightly email, the two reports); also on the
+  register's detail sheet.
 - *Families: link parents and children properly, so the two items above
   can be computed* — **built 16 September** (migration 053, the Families
   tab, the care line at the door, the "Child supervision arrangements"

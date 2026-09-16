@@ -264,28 +264,6 @@ router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
   res.json(row);
 }));
 
-// POST /api/staff/:id/house-rules { on: true } — put someone back on the
-// nightly House Rules reminder after they unsubscribed themselves (049).
-// There is no tick for this email — every active supervisor and admin gets
-// it — so "on" means deleting their opt-out row, and there is no "off":
-// an admin who wants someone off it disables or demotes them. Admins only,
-// by the same shape as the siblings: the delete matches no rows for anyone
-// else, whether or not an opt-out row existed to remove — that is a 200
-// no-op. Only a missing profile is a 404 for an admin.
-router.post('/:id/house-rules', wrap(async (req, res) => {
-  const id = uuidParam(req.params.id, 'staff id');
-  if (req.body?.on !== true) throw new HttpError(400, 'Only { on: true } is accepted here.');
-  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can change who receives the House Rules reminder.');
-  const row = await db.withIdentity(req.session.userId, async (client) => {
-    const { rows: [exists] } = await client.query('select id from profiles where id = $1', [id]);
-    if (!exists) return null;
-    await client.query(`delete from email_opt_outs where profile_id = $1 and kind = 'house_rules'`, [id]);
-    return { id, house_rules: true };
-  });
-  if (!row) throw new HttpError(404, 'No such account.');
-  res.json(row);
-}));
-
 // POST /api/staff/:id/password — reset a password. Ends every session the
 // account holds, so "they know the old password" stops being useful now.
 router.post('/:id/password', wrap(async (req, res) => {
