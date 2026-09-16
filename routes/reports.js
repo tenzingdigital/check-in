@@ -16,6 +16,7 @@
 //   room-history     every room each resident has had
 //   breaches    breach reports issued to IPAS in the range (migration 029)
 //   weekly      the Sunday Weekly Register Update: absence spans, weekend, removals, rooms (migration 035)
+//   missed      who missed the daily register over a range, one row per resident with the dates (the Absences tab's export)
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -34,6 +35,15 @@
 // "inspection-pack"; it is JSON-only, since the point is a single printed
 // document, not a spreadsheet. No migration: note_report() already accepts
 // any report name, so nothing in the database needed to change.
+//
+//   GET /api/absences?from=&to=
+//
+// The Absences tab's range: the same query as the "missed" report, without
+// the reason or the audit row — looking at the tab is not audited, as the
+// resident list it read before was not. It also returns closed_through, the
+// last register date the nightly job has closed, so the tab can say when a
+// range reaches into a night that is not closed yet rather than show an
+// empty table that reads as "nobody missed".
 
 const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
@@ -41,6 +51,60 @@ const db = require('../database');
 const { HttpError, dateParam } = require('../lib/api');
 
 const router = express.Router();
+
+// from/to for a ranged query: YYYY-MM-DD each, to defaults to from, at most
+// a year. Shared by /reports/:name and /absences so the two never drift.
+function rangeParams(query) {
+  const from = dateParam(query.from, 'from');
+  const to = dateParam(query.to || query.from, 'to');
+  if (to < from) throw new HttpError(400, 'to must not be before from');
+  const days = (Date.parse(to) - Date.parse(from)) / 86400000;
+  if (days > 366) throw new HttpError(400, 'A report covers at most a year');
+  return { from, to };
+}
+
+// Who missed the daily register between $1 and $2, one row per active
+// resident with at least one miss. A miss is a closed day that was required
+// and not presented — nothing else decides it: an authorised absence is
+// written required = false by close_out_compliance_days(), a child is never
+// required, and today's row is open until the nightly job closes it, so
+// none of them can appear here. nights_required is the resident's own
+// closed required days in the range, so someone who arrived on Thursday
+// reads "2 of 3", not "2 of 7". `flat` swaps the text[] of dates for one
+// comma-separated column, for csv/xlsx.
+function missedSql({ flat = false } = {}) {
+  return `
+    with days as (
+      select dc.resident_id,
+             count(*) filter (where dc.required and not dc.presented)::int as nights_missed,
+             count(*) filter (where dc.required)::int                     as nights_required,
+             array_agg(dc.compliance_date::text order by dc.compliance_date)
+               filter (where dc.required and not dc.presented)            as missed_dates
+        from daily_compliance dc
+       where dc.compliance_date between $1 and $2
+         and dc.closed_at is not null
+       group by dc.resident_id
+    ),
+    breach as (
+      select distinct on (resident_id) resident_id, kind, issued_on
+        from breach_reports order by resident_id, issued_on desc, id desc
+    )
+    select ${flat ? '' : 'r.id, '}r.ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as ${flat ? 'resident' : 'full_name'},
+           rm.building, rm.room,
+           d.nights_missed, d.nights_required,
+           ${flat ? "array_to_string(d.missed_dates, ', ') as dates" : 'd.missed_dates'},
+           c.consecutive_missed, c.absent_in_window,
+           c.last_seen_on::text as ${flat ? 'last_seen' : 'last_seen_on'},
+           ${flat ? '' : 'c.seen_today, '}
+           b.kind as last_breach_kind, b.issued_on::text as last_breach_on
+      from days d
+      join residents r on r.id = d.resident_id and r.status = 'active'
+      left join v_resident_room rm on rm.id = r.id
+      left join v_resident_compliance c on c.id = r.id
+      left join breach b on b.resident_id = r.id
+     where d.nights_missed > 0
+     order by d.nights_missed desc, c.consecutive_missed desc nulls last, r.last_name, r.first_name`;
+}
 
 const REPORTS = {
   register: {
@@ -249,6 +313,14 @@ REPORTS.weekly = {
   sql: `select * from weekly_register_rows($1, $2)`,
 };
 
+// The Absences tab's export: who missed the register over the range, with
+// the dates (migration-free; see missedSql above).
+REPORTS.missed = {
+  title: 'Missed register',
+  ranged: true,
+  sql: missedSql({ flat: true }),
+};
+
 // Authorised absences overlapping the range, and who was marked safe on
 // each roll call, and every room a resident has had (migration 028).
 REPORTS.absences = {
@@ -381,6 +453,26 @@ router.get('/reports/inspection-pack', wrap(async (req, res) => {
   res.json({ title: 'Inspection pack', from, to, sections });
 }));
 
+router.get('/absences', wrap(async (req, res) => {
+  if (req.session.role !== 'supervisor' && req.session.role !== 'admin') {
+    throw new HttpError(403, 'Only a supervisor or admin can see who missed the register');
+  }
+  const { from, to } = rangeParams(req.query);
+  const out = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(missedSql(), [from, to]);
+    const closed = await client.query(
+      `select max(compliance_date)::text as d from daily_compliance where closed_at is not null`);
+    return { closed_through: closed.rows[0].d, rows };
+  });
+  res.json({
+    from, to, closed_through: out.closed_through,
+    rows: out.rows.map(({ last_breach_kind, last_breach_on, ...r }) => ({
+      ...r,
+      last_breach: last_breach_kind ? { kind: last_breach_kind, issued_on: last_breach_on } : null,
+    })),
+  });
+}));
+
 router.get('/reports/:name', wrap(async (req, res) => {
   const def = REPORTS[req.params.name];
   if (!def) throw new HttpError(404, 'No such report');
@@ -390,13 +482,7 @@ router.get('/reports/:name', wrap(async (req, res) => {
               : req.query.format === 'xlsx' ? 'xlsx'
               : 'csv';
   let from = null, to = null;
-  if (def.ranged) {
-    from = dateParam(req.query.from, 'from');
-    to = dateParam(req.query.to || req.query.from, 'to');
-    if (to < from) throw new HttpError(400, 'to must not be before from');
-    const days = (Date.parse(to) - Date.parse(from)) / 86400000;
-    if (days > 366) throw new HttpError(400, 'A report covers at most a year');
-  }
+  if (def.ranged) ({ from, to } = rangeParams(req.query));
 
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     await client.query('select note_report($1, $2, $3, $4)', [req.params.name, reason, from, to]);

@@ -1604,7 +1604,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 17);
+    assert.equal(list.json.length, 18);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1685,6 +1685,109 @@ async function main() {
     const { rows } = await withOwner((c) => c.query(`select row_id, note from public.admin_audit where table_name = 'reports' order by at`));
     assert.ok(rows.length >= 5, "report exports were not logged");
     assert.match(rows[0].note, /HIQA inspection \[/);
+  });
+
+  console.log("\n== absences by date ==");
+
+  // Dates as the site counts them. siteToday() is YYYY-MM-DD in
+  // Europe/Dublin; shifting it by whole days at noon avoids DST edges.
+  const siteDay = (offset) => {
+    const d = new Date(`${siteToday()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + offset);
+    return d.toISOString().slice(0, 10);
+  };
+  const absIds = {};
+  await test("the Absences range lists who missed the register, one row per resident, with the dates", async () => {
+    for (const [key, first, last] of [["missy", "Missy", "Rangefixture"], ["twice", "Twice", "Rangefixture"], ["gone", "Gone", "Rangefixture"]]) {
+      const res = await supC.fetch("/api/residents", { method: "POST", body: { first_name: first, last_name: last, date_of_birth: "1988-02-02" } });
+      assert.equal(res.status, 201, res.text);
+      absIds[key] = res.json.id;
+    }
+    await withOwner(async (c) => {
+      const put = (id, offset, required, presented, closed) => c.query(
+        `insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
+         values ($1, public.site_today() + $2::int, $3, $4, case when $4 then now() end, case when $4 then 1 else 0 end, case when $5 then now() end)
+         on conflict (resident_id, compliance_date) do update
+           set required = excluded.required, presented = excluded.presented, first_seen_at = excluded.first_seen_at,
+               checkin_count = excluded.checkin_count, closed_at = excluded.closed_at`,
+        [id, offset, required, presented, closed]);
+      // Missy: missed yesterday; presented the day before; authorised
+      // (required = false) the day before that; today still open.
+      await put(absIds.missy, -1, true, false, true);
+      await put(absIds.missy, -2, true, true, true);
+      await put(absIds.missy, -3, false, false, true);
+      await put(absIds.missy, 0, true, false, false);
+      // Twice: missed the last two nights, and one nine nights ago.
+      await put(absIds.twice, -1, true, false, true);
+      await put(absIds.twice, -2, true, false, true);
+      await put(absIds.twice, -9, true, false, true);
+      // Gone: missed yesterday, then left.
+      await put(absIds.gone, -1, true, false, true);
+      await c.query(`update public.residents set status = 'departed', departed_on = public.site_today() where id = $1`, [absIds.gone]);
+    });
+
+    const week = await supC.fetch(`/api/absences?from=${siteDay(-7)}&to=${siteDay(-1)}`);
+    assert.equal(week.status, 200, week.text);
+    assert.equal(week.json.from, siteDay(-7));
+    assert.equal(week.json.to, siteDay(-1));
+    const ours = week.json.rows.filter((r) => Object.values(absIds).includes(r.id));
+    assert.deepEqual(ours.map((r) => r.id), [absIds.twice, absIds.missy], "most missed first; the departed resident must not be listed");
+    const missy = ours[1];
+    assert.equal(missy.full_name, "Missy Rangefixture");
+    assert.equal(missy.nights_missed, 1);
+    assert.equal(missy.nights_required, 2, "the authorised (required = false) day must not be in the denominator");
+    assert.deepEqual(missy.missed_dates, [siteDay(-1)]);
+    assert.equal(missy.last_breach, null);
+    assert.equal(typeof missy.consecutive_missed, "number");
+    const twice = ours[0];
+    assert.equal(twice.nights_missed, 2, "the miss nine nights ago is outside a 7-night range");
+    assert.deepEqual(twice.missed_dates, [siteDay(-2), siteDay(-1)]);
+
+    const month = await supC.fetch(`/api/absences?from=${siteDay(-28)}&to=${siteDay(-1)}`);
+    assert.equal(month.json.rows.find((r) => r.id === absIds.twice).nights_missed, 3);
+  });
+
+  await test("today's open row never counts, and the response says how far the register is closed", async () => {
+    const res = await supC.fetch(`/api/absences?from=${siteDay(-7)}&to=${siteToday()}`);
+    assert.equal(res.status, 200, res.text);
+    const missy = res.json.rows.find((r) => r.id === absIds.missy);
+    assert.equal(missy.nights_missed, 1, "the open row for today was counted as missed");
+    assert.equal(missy.nights_required, 2, "the open row for today was counted as required");
+    const { rows } = await withOwner((c) => c.query(`select max(compliance_date)::text as d from public.daily_compliance where closed_at is not null`));
+    assert.equal(res.json.closed_through, rows[0].d);
+  });
+
+  await test("the Absences range is for supervisors and admins, and checks its dates", async () => {
+    assert.equal((await api.fetch(`/api/absences?from=${siteDay(-1)}&to=${siteDay(-1)}`)).status, 403);
+    assert.equal((await supC.fetch(`/api/absences?to=${siteDay(-1)}`)).status, 400, "from is required");
+    assert.equal((await supC.fetch(`/api/absences?from=${siteDay(-1)}&to=${siteDay(-2)}`)).status, 400, "to before from");
+    assert.equal((await supC.fetch(`/api/absences?from=2020-01-01&to=2021-06-01`)).status, 400, "more than a year");
+    const one = await supC.fetch(`/api/absences?from=${siteDay(-1)}`);
+    assert.equal(one.status, 200, "to should default to from");
+    assert.equal(one.json.to, siteDay(-1));
+  });
+
+  await test("the Missed register report is the same rows with the dates flattened, and asks for a reason", async () => {
+    const from = siteDay(-7), to = siteDay(-1);
+    assert.equal((await supC.fetch(`/api/reports/missed?from=${from}&to=${to}`)).status, 400, "no reason");
+    assert.equal((await api.fetch(`/api/reports/missed?from=${from}&to=${to}&reason=test`)).status, 403, "a guard");
+    const rep = await supC.fetch(`/api/reports/missed?from=${from}&to=${to}&reason=House+Rules+letter&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.equal(rep.json.title, "Missed register");
+    const twice = rep.json.rows.find((r) => r.resident === "Twice Rangefixture");
+    assert.ok(twice, "Twice is missing from the report");
+    assert.equal(twice.nights_missed, 2);
+    assert.equal(twice.dates, `${siteDay(-2)}, ${siteDay(-1)}`);
+    assert.equal("missed_dates" in twice, false, "the array column must not reach a spreadsheet");
+    assert.equal("id" in twice, false, "the report carries the ref, not the uuid");
+    const xl = await supC.fetch(`/api/reports/missed?from=${from}&to=${to}&reason=House+Rules+letter&format=xlsx`);
+    assert.equal(xl.status, 200);
+    assert.match(xl.headers.get("content-type"), /spreadsheetml/);
+    assert.ok(xl.text.startsWith("PK"), "not a zip/xlsx");
+    const listed = await supC.fetch("/api/reports");
+    assert.ok(listed.json.some((r) => r.name === "missed" && r.title === "Missed register" && r.ranged === true));
+    const { rows } = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'missed' order by at`));
+    assert.equal(rows.length, 2, "both exports (json and xlsx) should be on the record");
+    assert.match(rows[0].note, /^House Rules letter \[/);
   });
 
   console.log("\n== audit trail ==");

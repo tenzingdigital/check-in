@@ -113,6 +113,7 @@ module.exports = [
   // ---- reports (supervisors and admins; one is the admin's) ---------------
   { area: 'Reports', name: 'See which reports exist', method: 'GET', path: () => '/api/reports', expect: STAFF },
   { area: 'Reports', name: 'Export a report (register, attendance, movements, occupancy, evacuation, drills); logged', method: 'GET', path: (fx) => `/api/reports/register?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: SUPERVISOR },
+  { area: 'Reports', name: 'Who missed the register over a range (the Absences tab); not logged', method: 'GET', path: (fx) => `/api/absences?from=${fx.today}&to=${fx.today}`, expect: SUPERVISOR },
   { area: 'Reports', name: 'Who viewed which record (the access log)', method: 'GET', path: (fx) => `/api/reports/access?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: ADMIN },
 
   // ---- the resident's rights and the site (admins) ------------------------
