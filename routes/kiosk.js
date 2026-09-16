@@ -25,8 +25,8 @@ const router = express.Router();
 // per-tablet) prefixed by which route ('search:'/'checkin:'), so a tablet
 // exhausting one does not touch the other's budget, swept on an unref'd
 // interval so a quiet tablet's entry does not linger forever. checkin is
-// limited too — fix round 1: without it, a kiosk session could otherwise
-// insert checkin_events rows without bound, one per call, forever.
+// limited too: without it, a kiosk session could otherwise insert
+// checkin_events rows without bound, one per call, forever.
 // ---------------------------------------------------------------------------
 const RATE_LIMIT = 60;
 const RATE_WINDOW_MS = 60_000;
@@ -91,13 +91,13 @@ router.post('/search', wrap(async (req, res) => {
 // resident who checks in here" is the record not existing, the same
 // message migration 051 gives an unknown id).
 //
-// No full_name here (fix round 1): a kiosk session cannot read the
-// residents table directly (RLS), and kiosk_checkin() returns only a
-// daily_compliance row, which carries no name — the only way this route
-// could put one in the response was to echo back whatever the caller sent,
-// which is not this route's to assert. The page already has the name: it
-// is the same one kiosk_search() showed on the screen the resident was
-// tapped from, and keeps it for the confirmation screen itself.
+// No full_name here: a kiosk session cannot read the residents table
+// directly (RLS), and kiosk_checkin() returns only a daily_compliance row,
+// which carries no name — the only way this route could put one in the
+// response was to echo back whatever the caller sent, which is not this
+// route's to assert. The page already has the name: it is the same one
+// kiosk_search() showed on the screen the resident was tapped from, and
+// keeps it for the confirmation screen itself.
 //
 // checked_in_at is the day's FIRST presentation (daily_compliance's
 // first_seen_at), not necessarily this call's own moment — a repeat tap
@@ -106,12 +106,12 @@ router.post('/search', wrap(async (req, res) => {
 // UTC ISO timestamp (whatever the pg driver/JSON.stringify gives a
 // timestamptz column); the page is what formats it in site time.
 router.post('/checkin', wrap(async (req, res) => {
-  // Rate-limited too (fix round 1): without this a kiosk session could
-  // insert checkin_events rows without bound, one per call, forever. Same
-  // budget and message as /search, just under its own key so exhausting one
-  // route never costs the other its budget.
+  // Rate-limited too: without this a kiosk session could insert
+  // checkin_events rows without bound, one per call, forever. Same budget as
+  // /search, worded for a tap rather than a search, under its own key so
+  // exhausting one route never costs the other's budget.
   if (overLimit(`checkin:${req.session.userId}`)) {
-    throw new HttpError(429, 'Too many searches — wait a moment.');
+    throw new HttpError(429, 'Too many taps — wait a moment.');
   }
   const id = uuidParam(req.body?.id, 'id');
 

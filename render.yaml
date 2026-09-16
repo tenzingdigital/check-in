@@ -106,6 +106,15 @@ services:
       # inherits.
       - key: HUT_SESSION_HOURS
         value: "12"
+      # The one deliberate exception to the line above: the resident
+      # self check-in tablet (role `kiosk`) is unattended and left running
+      # for days, so a 12-hour session would show the staff login on it
+      # twice a day. Long life is defensible here specifically because the
+      # session can reach only two routes — search and record a check-in
+      # (routes/kiosk.js) — never the register, settings, or anyone's
+      # history. Default 30 days.
+      - key: HUT_KIOSK_SESSION_DAYS
+        value: "30"
 
       # The first administrator, created on an empty database at first boot.
       #

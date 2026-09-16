@@ -85,6 +85,10 @@
     background: var(--surface-2); border: 1px solid var(--line-hover); color: var(--text);
   }
 
+  /* The whole panel is the tap target — see the click handler in the inline
+     script — so it should read as tappable, not just as a message. */
+  #failView { cursor: pointer; }
+
   .kioskStaffLink {
     display: block; text-align: center; padding: 18px 12px calc(18px + env(safe-area-inset-bottom));
     font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 2px;
@@ -122,12 +126,23 @@
 
     <section id="confirmView" class="confirmPanel" hidden>
       <div class="confirmName" id="confirmName"></div>
-      <p class="confirmSub">Checked in — goodnight.</p>
+      <p class="confirmSub" id="confirmSub">Checking you in — stay for ten seconds</p>
       <button class="btn notMeBtn" id="notMeBtn" type="button">That's not me (<span id="notMeCount">10</span>)</button>
     </section>
 
     <section id="thanksView" class="confirmPanel" hidden>
       <div class="confirmName">Thank you</div>
+    </section>
+
+    <!-- A 5xx or an unreachable server (status 0) from POST /api/kiosk/checkin
+         lands here instead of a transient toast: the tablet is unattended, so
+         "maybe it worked, maybe it didn't" must never be shown as a fleeting
+         message a resident can miss. It stays up until tapped — see doCheckin
+         below — rather than timing itself out, because nobody is watching to
+         notice it clear on its own. -->
+    <section id="failView" class="confirmPanel" hidden>
+      <div class="confirmName">Not checked in</div>
+      <p class="confirmSub">Please ask a member of staff</p>
     </section>
   </main>
 
@@ -146,17 +161,18 @@
    ====================================================================== */
 const state = {
   profile: null,
-  view: "search",      // search | confirm | thanks
+  view: "search",      // search | confirm | thanks | fail
   pending: null,        // { id, full_name } awaiting the 10s window
   posting: false,       // true once the countdown has fired and the POST is in flight
 };
 
-let searchTimer  = null;   // 250ms debounce
-let idleTimer    = null;   // 30s idle clears the search
-let confirmTimer = null;   // the "That's not me (n)" countdown
-let doneTimer    = null;   // "Thank you" for 3s
-let searchToken  = 0;      // ignores a stale response that lands after a newer search
-let searchAbort  = null;   // aborts a stale request outright, belt and braces with the token above
+let searchTimer    = null;   // 250ms debounce
+let idleTimer      = null;   // 30s idle clears the search
+let confirmTimer   = null;   // the "That's not me (n)" countdown
+let goodnightTimer = null;   // "Checked in — goodnight." pause before "Thank you"
+let doneTimer      = null;   // "Thank you" for 3s
+let searchToken    = 0;      // ignores a stale response that lands after a newer search
+let searchAbort    = null;   // aborts a stale request outright, belt and braces with the token above
 
 /* ========================================================================
    Small helpers
@@ -166,6 +182,7 @@ function showView(name) {
   $("searchView").hidden  = name !== "search";
   $("confirmView").hidden = name !== "confirm";
   $("thanksView").hidden  = name !== "thanks";
+  $("failView").hidden    = name !== "fail";
 }
 
 function resetSearch() {
@@ -181,6 +198,7 @@ function resetSearch() {
 
 function backToSearch() {
   clearInterval(confirmTimer);
+  clearTimeout(goodnightTimer);
   clearTimeout(doneTimer);
   state.pending = null;
   state.posting = false;
@@ -253,6 +271,9 @@ function startConfirm(resident) {
   state.pending = resident;
   state.posting = false;
   $("confirmName").textContent = resident.full_name;
+  // Reset in case the last resident's confirm ran all the way to "Checked
+  // in — goodnight." — this is a fresh countdown, not a result yet.
+  $("confirmSub").textContent = "Checking you in — stay for ten seconds";
   $("notMeBtn").disabled = false;
 
   let remaining = 10;
@@ -278,13 +299,29 @@ async function doCheckin(resident) {
     await apiPost("/api/kiosk/checkin", { id: resident.id });
   } catch (err) {
     if (err.status === 401 || err.status === 403) return handleUnauthenticated();
+    // A 5xx, or status 0 (the request never reached the server at all — see
+    // app-common.js's api()): the write may or may not have happened, and a
+    // toast that fades on its own is the wrong shape for that uncertainty on
+    // an unattended tablet. Stay on a persistent panel until a person taps
+    // it (see the click handler below), rather than time it out.
+    if (err.status === 0 || err.status >= 500) {
+      showView("fail");
+      return;
+    }
     toast(err.message, "err");
     backToSearch();
     return;
   }
-  showView("thanks");
-  clearTimeout(doneTimer);
-  doneTimer = setTimeout(backToSearch, 3000);
+  // The write has actually succeeded now — this is the first point the copy
+  // is allowed to say so. "Checked in — goodnight." replaces the countdown
+  // text for a moment before the screen moves on to "Thank you".
+  $("confirmSub").textContent = "Checked in — goodnight.";
+  clearTimeout(goodnightTimer);
+  goodnightTimer = setTimeout(() => {
+    showView("thanks");
+    clearTimeout(doneTimer);
+    doneTimer = setTimeout(backToSearch, 3000);
+  }, 1200);
 }
 
 /* ========================================================================
@@ -329,7 +366,8 @@ if ("serviceWorker" in navigator) {
 let bootRetryTimer = null;
 
 // A network/deploy outage (ApiError status 0 — see app-common.js's api())
-// is never a reason to leave this page: the tablet sits by a door with no
+// or the server itself failing (5xx — a bad deploy, the database down) is
+// never a reason to leave this page: the tablet sits by a door with no
 // staff member watching it, and an offline reload used to fall through
 // sw.js's cached shell to the staff In & out app (fixed there too — see
 // sw.js's SHELL list). Show the reconnect message in its place and try
@@ -340,7 +378,7 @@ async function boot() {
   try {
     session = await apiGet("/api/session");
   } catch (err) {
-    if (err.status === 0) {
+    if (err.status === 0 || err.status >= 500) {
       $("app").hidden = true;
       $("reconnect").hidden = false;
       bootRetryTimer = setTimeout(boot, 10000);
@@ -400,6 +438,13 @@ $("results").addEventListener("click", (e) => {
 $("notMeBtn").addEventListener("click", () => {
   if (state.posting) return;
   backToSearch();
+});
+
+// The failure panel has no button of its own — the whole panel is the
+// target, since a resident who just read "please ask a member of staff" is
+// about to do exactly that, not hunt for a labelled control.
+$("failView").addEventListener("click", () => {
+  if (state.view === "fail") backToSearch();
 });
 
 $("staffLink").addEventListener("click", async (e) => {

@@ -457,6 +457,14 @@ back — once `profiles.weekly_report` exists, the old column only has to be
 present, not populated — and the Settings tab recovers immediately. There
 is no down-migration script; migrations here only ever run forward.
 
+### 19. `lib/` and `routes/` have no linter and no type checking
+
+`check.sh` runs `node --check` on each file, which catches syntax errors and
+nothing else. The suites cover behaviour, but a typo in a rarely-taken error
+path — `err.staus` instead of `err.status` — would pass everything and fail at
+3am. Worth adding `tsc --checkJs` with JSDoc types, or at least a linter,
+across both apps together.
+
 ### 20. Two side channels that predated the kiosk role, closed while building it — *found and fixed 16 September, morning*
 
 Neither of these is a kiosk bug: both existed for every login before
@@ -490,13 +498,12 @@ Both fixes are in migration 051 itself (unapplied anywhere live at the time
 of the fix), not a follow-up migration — see its header and the "2." and
 "4." sections of the file for the full reasoning.
 
-### 19. `lib/` and `routes/` have no linter and no type checking
-
-`check.sh` runs `node --check` on each file, which catches syntax errors and
-nothing else. The suites cover behaviour, but a typo in a rarely-taken error
-path — `err.staus` instead of `err.status` — would pass everything and fail at
-3am. Worth adding `tsc --checkJs` with JSDoc types, or at least a linter,
-across both apps together.
+The same review went the other way once, deliberately: the kiosk session
+lifetime is thirty days (`HUT_KIOSK_SESSION_DAYS`, `lib/auth.js
+createSession`) against the twelve-hour staff default, because an
+unattended tablet re-showing the staff login twice a day was judged worse
+than the exposure — a stolen kiosk cookie reaches only the two routes
+above, never the register, settings, or anyone's history.
 
 ---
 

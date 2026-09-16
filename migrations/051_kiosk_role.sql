@@ -99,10 +99,10 @@ revoke all on function auth.create_user_invited(text, text, text, uuid) from pub
 -- ---------------------------------------------------------------------------
 -- 2. auth.users: closing the account-listing side channel.
 -- ---------------------------------------------------------------------------
--- Fix round 1, Important 3. auth.users grants `authenticated` a standing
--- column-level SELECT — id, email, created_at, last_sign_in_at
--- (001_platform.sql) — with no row filter at all, because until this role
--- existed every member of `authenticated` was staff, and staff already see
+-- auth.users grants `authenticated` a standing column-level SELECT — id,
+-- email, created_at, last_sign_in_at (001_platform.sql) — with no row
+-- filter at all, because until this role existed every member of
+-- `authenticated` was staff, and staff already see
 -- each other's email on the Staff tab (profiles are staff-visible by
 -- design, same file). A kiosk session is the first member of
 -- `authenticated` that is not staff, and unguarded could simply run
@@ -272,9 +272,9 @@ revoke all on function public.record_checkin_at(uuid, timestamptz, boolean, uuid
 -- ---------------------------------------------------------------------------
 -- 4. absence_authorised() stops being a side channel.
 -- ---------------------------------------------------------------------------
--- Fix round 1, Critical 2. absence_authorised(resident_id, day) (028) is
--- SECURITY DEFINER, has no role guard of its own, and is granted to
--- `authenticated` outright — every caller so far has been staff (035, 039,
+-- absence_authorised(resident_id, day) (028) is SECURITY DEFINER, has no
+-- role guard of its own, and is granted to `authenticated` outright — every
+-- caller so far has been staff (035, 039,
 -- 041, routes/checkins.js, routes/reports.js), so nobody noticed it is
 -- callable directly, by anybody with any session, naming any resident and
 -- any date. A kiosk can already name a resident (kiosk_search returns
@@ -463,8 +463,8 @@ begin
   select * into v_res from public.residents where id = p_resident_id;
   -- Missing and inactive share one message and one errcode: from the
   -- tablet's point of view both are "nobody here to check in", and neither
-  -- should say more than that to a screen nobody is guarding. Fix round 1
-  -- (Minor a): mirrors record_checkin_at's own rule exactly — a departed
+  -- should say more than that to a screen nobody is guarding. This mirrors
+  -- record_checkin_at's own rule exactly — a departed
   -- resident may still check in on their departure day itself (the day
   -- they leave is a day they must still be able to satisfy the duty for;
   -- see record_checkin_at's comment on the same condition above), so this

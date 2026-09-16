@@ -1163,8 +1163,8 @@ begin
   select * into v_res from __TENANT__.residents where id = p_resident_id;
   -- Missing and inactive share one message and one errcode: from the
   -- tablet's point of view both are "nobody here to check in", and neither
-  -- should say more than that to a screen nobody is guarding. Fix round 1
-  -- (Minor a): mirrors record_checkin_at's own rule exactly — a departed
+  -- should say more than that to a screen nobody is guarding. This mirrors
+  -- record_checkin_at's own rule exactly — a departed
   -- resident may still check in on their departure day itself (the day
   -- they leave is a day they must still be able to satisfy the duty for;
   -- see record_checkin_at's comment on the same condition above), so this

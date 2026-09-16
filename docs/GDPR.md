@@ -90,10 +90,11 @@ The other residual risk is the search itself: it needs only two letters, so
 someone standing at the tablet could type prefix after prefix ("aa", "ab", …)
 and walk the whole roster five names at a time inside the 60-a-minute limit —
 what comes back is a name only (a room too, but only when two adults share
-that name; never a date of birth or an ID number), and the search volume is
-visible to staff only in the access log, and only if the centre thinks to
-look. A PIN or a staff-witnessed check-in is the stronger option where either
-risk matters to the centre.
+that name; never a date of birth or an ID number), and nothing is recorded
+about a search — only the check-ins that follow are, each attributed to the
+tablet account — so a centre cannot see search volume after the fact. A PIN
+or a staff-witnessed check-in is the stronger option where either risk
+matters to the centre.
 
 **The evacuation need is the one special-category field.** It exists because
 a centre has a fire-safety duty to know who needs help to get out, and a

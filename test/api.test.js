@@ -3792,10 +3792,10 @@ async function main() {
     assert.ok(six.rows.every((r) => r.full_name.startsWith("Sixtest")));
   });
 
-  // Fix round 1, Critical 1: LIKE metacharacters in the query used to reach
-  // the LIKE clause unescaped, so '%%', '__' or 'a%' would each return (up
-  // to) the first five adults on the site — walking the whole roster five
-  // rows at a time from a shared, unattended tablet.
+  // LIKE metacharacters in the query used to reach the LIKE clause
+  // unescaped, so '%%', '__' or 'a%' would each return (up to) the first
+  // five adults on the site — walking the whole roster five rows at a time
+  // from a shared, unattended tablet.
   await test("kiosk_search refuses LIKE wildcards outright, and a real name with an apostrophe or hyphen still matches", async () => {
     await assert.rejects(withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('%%')`)), /two letters/i);
     await assert.rejects(withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('__')`)), /two letters/i);
@@ -3863,9 +3863,9 @@ async function main() {
   const supId = (await withOwner((c) =>
     c.query(`select id from auth.users where email = 'sup2@hut.example'`))).rows[0].id;
 
-  // Fix round 1, Critical 2: absence_authorised(resident_id, day) was
-  // SECURITY DEFINER with no guard of its own and granted to `authenticated`
-  // outright — callable directly, naming any resident kiosk_search can find
+  // absence_authorised(resident_id, day) was SECURITY DEFINER with no guard
+  // of its own and granted to `authenticated` outright — callable directly,
+  // naming any resident kiosk_search can find
   // and any date, to learn whether they are away with the centre's
   // agreement. Re-declared SECURITY INVOKER so it is now subject to
   // authorised_absences' own is_staff() read policy.
@@ -3892,9 +3892,9 @@ async function main() {
     assert.equal(asSup.rows[0].v, true, "a supervisor, whose own RLS context passes is_staff(), still sees the real answer");
   });
 
-  // Fix round 1, Important 3: auth.users carried a standing column grant to
-  // `authenticated` with no row filter — any signed-in caller, kiosk
-  // included, could list every account's email on the platform.
+  // auth.users carried a standing column grant to `authenticated` with no
+  // row filter — any signed-in caller, kiosk included, could list every
+  // account's email on the platform.
   await test("auth.users: a kiosk lists no accounts; a supervisor's own tenant is unaffected and the staff list still carries emails", async () => {
     const asKiosk = await withIdentity(kioskId, (c) => c.query(`select email from auth.users`));
     assert.equal(asKiosk.rows.length, 0, "a kiosk must not be able to list any account's email");
@@ -4046,6 +4046,50 @@ async function main() {
     assert.equal(session.json.profile.role, "kiosk");
   });
 
+  // The unattended tablet must not fall back to the staff login mid-shift:
+  // createSession() (lib/auth.js) gives the kiosk role HUT_KIOSK_SESSION_DAYS
+  // (default 30) instead of the twelve-hour staff default, because a kiosk
+  // session can reach only the two routes above, plus its own GET/DELETE
+  // /api/session. Logs in fresh (its own client, not kioskC/guardHttp above)
+  // so the Set-Cookie response header — the same one the browser reads — is
+  // still available to inspect.
+  await test("a kiosk's session cookie lasts about thirty days; a guard's lasts about a shift", async () => {
+    // The response also sets the trusted-device cookie on a new device
+    // (rememberDevice(), lib/auth.js), so this cannot just read "set-cookie"
+    // singular — that collapses multiple Set-Cookie headers into one
+    // comma-joined string, and the session cookie's own Expires value
+    // contains a comma ("Wed, 16 Oct ..."), which corrupts a naive parse.
+    // getSetCookie() (used by client()'s own jar, above) keeps them separate.
+    const sessionCookieOf = (res) => {
+      const all = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [res.headers.get("set-cookie")].filter(Boolean);
+      const mine = all.find((sc) => /^(__Host-)?hut_session=/.test(sc));
+      assert.ok(mine, `no session cookie among: ${JSON.stringify(all)}`);
+      return mine;
+    };
+    const loginCapturingCookie = async (email) => {
+      const cl = client(base);
+      const res = await cl.fetch("/api/session", { method: "POST", body: { email, password: PASSWORD } });
+      assert.equal(res.status, 200, `${email}: ${res.text}`);
+      if (!res.json.mfa_required) return sessionCookieOf(res);
+      const done = await cl.fetch("/api/session/mfa", { method: "POST", body: { challenge: res.json.challenge, code: lastCode() } });
+      assert.equal(done.status, 200, `${email} code: ${done.text}`);
+      return sessionCookieOf(done);
+    };
+    const expiresOf = (setCookieHeader) => {
+      const m = /(?:^|;\s*)Expires=([^;]+)/i.exec(setCookieHeader);
+      assert.ok(m, `no Expires attribute on: ${setCookieHeader}`);
+      return new Date(m[1]);
+    };
+
+    const kioskCookie = await loginCapturingCookie("kiosk@hut.example");
+    const kioskHours = (expiresOf(kioskCookie) - Date.now()) / 3600_000;
+    assert.ok(kioskHours >= 29 * 24, `kiosk session should last at least 29 days, lasted ${kioskHours.toFixed(1)}h`);
+
+    const guardCookie = await loginCapturingCookie(EMAIL);
+    const guardHours = (expiresOf(guardCookie) - Date.now()) / 3600_000;
+    assert.ok(guardHours <= 24, `a guard session should last about a shift (whatever HUT_SESSION_HOURS is in this test env, well under a day), lasted ${guardHours.toFixed(1)}h`);
+  });
+
   await test("POST /api/kiosk/search: two letters minimum, and never a date of birth or an id number", async () => {
     const short = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: "a" } });
     assert.equal(short.status, 400, short.text);
@@ -4081,7 +4125,7 @@ async function main() {
     const checkin = await kioskC.fetch("/api/kiosk/checkin", { method: "POST", body: { id: residentId } });
     assert.equal(checkin.status, 200, checkin.text);
     assert.deepEqual(Object.keys(checkin.json).sort(), ["checked_in_at", "ok"],
-      "fix round 1: no full_name here — the page keeps the name from the search row it tapped");
+      "no full_name here — the page keeps the name from the search row it tapped");
     assert.equal(checkin.json.ok, true);
     assert.ok(checkin.json.checked_in_at, "checked_in_at was not carried in the response");
     assert.ok(!Number.isNaN(Date.parse(checkin.json.checked_in_at)), "checked_in_at must be a real ISO timestamp");
@@ -4111,12 +4155,12 @@ async function main() {
     assert.equal(last.json.error, "Too many searches — wait a moment.");
   });
 
-  // Fix round 1: /checkin was not rate-limited at all — a kiosk session
-  // could otherwise insert checkin_events rows without bound. Repeating the
-  // same resident is harmless (record_checkin_at's own 60-second de-dupe
-  // just returns the same row each time), so this only has to prove the
-  // 61st call is refused, on its own account so it does not spend the
-  // budget the checkin test above needs.
+  // /checkin has its own rate limit, separate from /search's — without it a
+  // kiosk session could otherwise insert checkin_events rows without bound.
+  // Repeating the same resident is harmless (record_checkin_at's own
+  // 60-second de-dupe just returns the same row each time), so this only
+  // has to prove the 61st call is refused, on its own account so it does
+  // not spend the budget the checkin test above needs.
   await test("checkin is rate-limited too, on its own budget separate from search's", async () => {
     await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["kiosk-limit2@hut.example", PASSWORD, "Gate tablet 3", "kiosk"]));
     const limitC = await loginAs("kiosk-limit2@hut.example");
@@ -4126,7 +4170,7 @@ async function main() {
       if (i < 60) assert.equal(last.status, 200, `checkin ${i + 1}: ${last.text}`);
     }
     assert.equal(last.status, 429, last.text);
-    assert.equal(last.json.error, "Too many searches — wait a moment.");
+    assert.equal(last.json.error, "Too many taps — wait a moment.");
     // Its own search budget is untouched by the checkins above.
     const search = await limitC.fetch("/api/kiosk/search", { method: "POST", body: { q: "ailb" } });
     assert.equal(search.status, 200, search.text);
