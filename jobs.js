@@ -158,10 +158,11 @@ const mail = require('./lib/mail');
 // The Sunday Weekly Register Update (migration 035): on a Sunday, after
 // Saturday night's snapshot, the staff ticked to receive it (migration 037)
 // are emailed counts and a link, never a resident name (migration 038 — see
-// lib/weeklyReport.js compose()) in the body; the Word attachment (052) is
-// the exception, where the centre has turned it on. The rows come from
-// weekly_register_rows_unchecked(), the owner's copy: the checked one asks
-// is_supervisor(), which a job is not.
+// lib/weeklyReport.js compose()) in the body; the Word attachment (052),
+// which does carry the names and rooms the body leaves out, goes by default
+// since 055 — a centre that wants counts only can still turn it off under
+// Settings. The rows come from weekly_register_rows_unchecked(), the
+// owner's copy: the checked one asks is_supervisor(), which a job is not.
 const weekly = require('./lib/weeklyReport');
 const safeguarding = require('./lib/safeguardingAlert');
 const nightly = require('./lib/nightlyEmail');
@@ -355,11 +356,19 @@ function schemaBehind(gapsRow) {
 // after close-out, and the overnight safeguarding alert (041), which went
 // to the ticked staff after the snapshot. One message now, after the
 // snapshot, to the ticked staff, with four sections in a fixed order — each
-// a count and a link, never a name (lib/nightlyEmail.js):
+// a heading, the names behind it, and a link (lib/nightlyEmail.js). Names
+// since 055: the owner's ruling of 16 September 2026, reversing ec793da for
+// this email — the manager reads it at breakfast and must not need a login
+// to know which family. The rows are read here, as the owner, on base
+// tables, rather than through overnight_safeguarding_count() and
+// checkin_conflict_count(): both stay, for the compliance suite and anyone
+// else that only wants the count, but neither feeds this email any more —
+// their predicates are spelled out below so a name can ride along with each
+// row:
 //
 //   children on site without a guardian        overnight_guardian_gaps, written below
-//   children away overnight without authorisation   overnight_safeguarding_count() (041)
-//   check-ins recorded while signed out        checkin_conflict_count() (054)
+//   children away overnight without authorisation   the predicate of overnight_safeguarding_count() (041), spelled out
+//   check-ins recorded while signed out        the predicate of checkin_conflict_count() (054), spelled out
 //   at the House Rules figures                 the thresholds of 032, computed here
 //
 // An under-18 away overnight with no authorised absence recorded reaches no
@@ -405,16 +414,82 @@ async function nightlyEmail(schema, label) {
         [name, s.local_timezone, s.today]);
       if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
 
-      const { rows: [gaps] } = await client.query('select count(*)::int as n from overnight_guardian_gaps where night = $1::date', [s.night]);
-      const { rows: [away] } = await client.query('select overnight_safeguarding_count($1::date) as n', [s.night]);
-      const { rows: [conflicts] } = await client.query('select checkin_conflict_count($1::date) as n', [s.night]);
-      // The register views filter on is_staff(), which the nightly job is
-      // not; the same two figures are computed here from the ledger, with
-      // the definitions of migration 015 (closed, required, not presented;
-      // the streak counts days after the latest presented day).
-      const { rows: figures } = await client.query(
+      // Room label as v_resident_room writes it (016/018): the view filters on
+      // is_staff(), which the owner is not, so the label is spelled out here.
+      const ROOM = `(select b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number
+                       from rooms rm join buildings b on b.id = rm.building_id where rm.id = r.room_id)`;
+
+      // 1. Children on site without a guardian: the snapshot's own
+      // households, named and roomed as the register reads today —
+      // routes/reports.js REPORTS['guardian-gaps'] does the same, for a
+      // staff reader with the household_label view; this is that shape on
+      // base tables, for the owner, who has no such view to read.
+      const { rows: gapRows } = await client.query(
+        `with s as (select local_timezone as tz, adult_age_years as adult from app_settings where id)
+         select
+           (select string_agg(distinct btrim(r.last_name), ' / ') from residents r
+              where r.household_id = g.household_id and r.status = 'active') || ' family' as household,
+           (select string_agg(distinct ${ROOM}, ', ') from residents r
+              where r.household_id = g.household_id and r.status = 'active' and r.room_id is not null) as room,
+           (select string_agg(btrim(r.first_name) || ' ' || btrim(r.last_name) || ' (' || date_part('year', age(r.date_of_birth))::int || ')', ', ' order by r.date_of_birth)
+              from residents r
+             where r.household_id = g.household_id and r.status = 'active'
+               and r.date_of_birth > current_date - make_interval(years => s.adult)) as children,
+           g.guardians_out,
+           to_char(g.first_out_at at time zone s.tz, 'HH24:MI') as first_out
+         from overnight_guardian_gaps g cross join s
+         where g.night = $1::date
+         order by household`,
+        [s.night]);
+
+      // 2. Children away overnight without authorisation: the predicate of
+      // overnight_safeguarding_count() (041), spelled out so the child can
+      // be named and roomed alongside it.
+      const { rows: awayRows } = await client.query(
+        `with s as (select local_timezone as tz, adult_age_years as adult from app_settings where id)
+         select btrim(r.first_name) || ' ' || btrim(r.last_name) as name,
+                date_part('year', age(o.night, r.date_of_birth))::int as age,
+                ${ROOM} as room
+           from overnight_absences o
+           join residents r on r.id = o.resident_id
+           cross join s
+          where o.night = $1::date
+            and r.date_of_birth > (o.night - make_interval(years => s.adult))::date
+            and not absence_authorised(r.id, o.night)
+          order by r.last_name, r.first_name`,
+        [s.night]);
+
+      // 3. Check-ins recorded while signed out: the predicate of
+      // checkin_conflict_count() (054), spelled out.
+      const { rows: conflictRows } = await client.query(
+        `with s as (select local_timezone as tz from app_settings where id)
+         select btrim(r.first_name) || ' ' || btrim(r.last_name) as name,
+                ${ROOM} as room,
+                to_char(e.occurred_at at time zone s.tz, 'HH24:MI') as at,
+                g.kind,
+                to_char(g.occurred_at at time zone s.tz, 'HH24:MI') as gate_at
+           from checkin_events e
+           join residents r on r.id = e.resident_id
+           cross join s
+           left join lateral (
+             select ge.kind, ge.occurred_at from gate_events ge
+              where ge.resident_id = e.resident_id and ge.occurred_at <= e.occurred_at
+              order by ge.occurred_at desc, ge.id desc limit 1) g on true
+          where (e.occurred_at at time zone s.tz)::date = $1::date
+            and (g.kind is null or g.kind = 'out')
+          order by e.occurred_at`,
+        [s.night]);
+
+      // 4. At the House Rules figures: the register views filter on
+      // is_staff(), which the nightly job is not; the same streak/window
+      // figures as migration 015 defines them (closed, required, not
+      // presented; the streak counts days after the latest presented day),
+      // extended here with the resident's name and room.
+      const { rows: figureRows } = await client.query(
         `with t as (
-           select (select count(*)::int from daily_compliance x
+           select r.first_name, r.last_name,
+                  ${ROOM} as room,
+                  (select count(*)::int from daily_compliance x
                     where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
                       and x.compliance_date > coalesce((select max(y.compliance_date) from daily_compliance y
                                                          where y.resident_id = r.id and y.required and y.presented and y.closed_at is not null), '1900-01-01'::date)) as consecutive_missed,
@@ -422,14 +497,27 @@ async function nightlyEmail(schema, label) {
                     where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
                       and x.compliance_date > site_today() - $3::int) as absent_in_window
              from residents r where r.status = 'active')
-         select * from t where consecutive_missed >= $1 or absent_in_window >= $2`, [s.nights, s.win_limit, s.win_days]);
-      const counts = {
-        guardian_gaps: Number(gaps.n) || 0,
-        children_away: Number(away.n) || 0,
-        conflicts: Number(conflicts.n) || 0,
-        at_figures: figures.length,
+         select btrim(first_name) || ' ' || btrim(last_name) as name, room, consecutive_missed, absent_in_window
+           from t
+          where consecutive_missed >= $1 or absent_in_window >= $2
+          order by last_name, first_name`,
+        [s.nights, s.win_limit, s.win_days]);
+
+      const items = {
+        guardian_gaps: gapRows.map((r) =>
+          `${r.household}${r.room ? ' · ' + r.room : ''} — ${r.children || 'children on site'}; ${r.guardians_out} adult${r.guardians_out === 1 ? '' : 's'} signed out${r.first_out ? ', first at ' + r.first_out : ''}`),
+        children_away: awayRows.map((r) =>
+          `${r.name} (${r.age})${r.room ? ' · ' + r.room : ''} — off site at midnight, no authorised absence`),
+        conflicts: conflictRows.map((r) =>
+          `${r.name}${r.room ? ' · ' + r.room : ''} — checked in ${r.at}, ${r.kind ? 'the In & out register had them out since ' + r.gate_at : 'no sign-in on record'}`),
+        at_figures: figureRows.map((r) => {
+          const parts = [];
+          if (r.consecutive_missed >= s.nights) parts.push(`${r.consecutive_missed} nights in a row missed`);
+          if (r.absent_in_window >= s.win_limit) parts.push(`${r.absent_in_window} missed in the last ${s.win_days} nights`);
+          return `${r.name}${r.room ? ' · ' + r.room : ''} — ${parts.join('; ')}`;
+        }),
       };
-      const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+      const total = Object.values(items).reduce((sum, arr) => sum + arr.length, 0);
       if (!total && s.dow !== 7) { await record(client, name, true, 'nothing to report'); return 'nothing to report'; }
 
       // Each link lands on the page that has the names, for the night the
@@ -450,7 +538,7 @@ async function nightlyEmail(schema, label) {
       for (const r of staff) {
         // One compose per person: the footer link is theirs alone.
         const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'nightly' });
-        const { subject, text, html } = nightly.compose({ siteName: s.site_name, night: s.night, counts, links, unsubscribe });
+        const { subject, text, html } = nightly.compose({ siteName: s.site_name, night: s.night, items, links, unsubscribe });
         const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
         if (out.delivered) delivered += 1;
       }

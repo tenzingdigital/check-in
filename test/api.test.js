@@ -1924,7 +1924,7 @@ async function main() {
 
   console.log("\n== the one nightly email: composer, reports, the switch, unsubscribe kinds (migration 054) ==");
 
-  await test("nightlyEmail.compose carries four counts in a fixed order and four links, never a resident name; the subject sums the counts or says nothing to report", async () => {
+  await test("nightlyEmail.compose lists each section's lines in a fixed order with its link; the subject sums the lines or says nothing to report", async () => {
     const { compose } = require("../lib/nightlyEmail");
     const links = {
       guardianGaps: "https://hut-check-in.onrender.com/admin.html#report-guardian-gaps",
@@ -1933,7 +1933,13 @@ async function main() {
       absences:  "https://hut-check-in.onrender.com/admin.html#absences",
     };
     const unsubscribe = "https://hut-check-in.onrender.com/unsubscribe?t=default&k=abc&e=nightly";
-    const out = compose({ siteName: "Slaney", night: "2026-09-15", counts: { guardian_gaps: 2, children_away: 1, conflicts: 3, at_figures: 0 }, links, unsubscribe });
+    const items = {
+      guardian_gaps: ["Kovalenko family · Main · 12 — Sofia Kovalenko (6), Danylo Kovalenko (9); 1 adult signed out, first at 19:42", "Brennan family · Main · 4 — Ava Brennan (3); 2 adults signed out, first at 21:05"],
+      children_away: ["Amina Al-Sayed (7) · Annex · 2 — off site at midnight, no authorised absence"],
+      conflicts: ["Tomasz Nowak · Main · 8 — checked in 21:10, the In & out register had him out since 18:30", "Lee Lonerfixture — checked in 09:02, no sign-in on record", "Pat Famfixture · Main · 1 — checked in 22:40, the In & out register had them out since 20:00"],
+      at_figures: [],
+    };
+    const out = compose({ siteName: "Slaney", night: "2026-09-15", items, links, unsubscribe });
     assert.equal(out.subject, "Slaney: tonight — 6 to look at");
     const labels = ["Children on site without a guardian", "Children away overnight without authorisation", "Check-ins recorded while signed out", "At the House Rules figures"];
     for (const part of [out.text, out.html]) {
@@ -1941,26 +1947,35 @@ async function main() {
       assert.ok(at.every((i) => i >= 0), "every section is named");
       assert.deepEqual([...at].sort((a, b) => a - b), at, "in the fixed order");
       for (const u of Object.values(links)) assert.ok(part.includes(u), `carries ${u}`);
-      // The fixtures this suite seeds are the names an implementation might
-      // let slip through; none of them, nor anything like a name, is here.
-      assert.ok(!/Famfixture|Gapfixture|Kim|Gil|Pat\b/.test(part), "no resident name anywhere in the nightly email");
     }
-    assert.match(out.text, /Children on site without a guardian: 2 — https:\/\/hut-check-in\.onrender\.com\/admin\.html#report-guardian-gaps/, "the link is the named report for that night, not the live Families tab");
-    assert.match(out.text, /Children away overnight without authorisation: 1 — /);
-    assert.match(out.text, /Check-ins recorded while signed out: 3 — /);
-    assert.match(out.text, /At the House Rules figures: 0 — /);
+    const { escapeHtml } = require("../lib/mail");
+    for (const line of [...items.guardian_gaps, ...items.children_away, ...items.conflicts]) {
+      assert.ok(out.text.includes(line), `text carries: ${line}`);
+      assert.ok(out.html.includes(escapeHtml(line)), `html carries, HTML-escaped where needed: ${line}`);
+    }
+    assert.ok(out.text.includes(
+`Children on site without a guardian: 2 — https://hut-check-in.onrender.com/admin.html#report-guardian-gaps
+  - Kovalenko family · Main · 12 — Sofia Kovalenko (6), Danylo Kovalenko (9); 1 adult signed out, first at 19:42
+  - Brennan family · Main · 4 — Ava Brennan (3); 2 adults signed out, first at 21:05`),
+      "the first section's lines follow its header, in order, with its own link and no other section's lines mixed in");
+    assert.ok(out.text.includes("At the House Rules figures: 0 — https://hut-check-in.onrender.com/admin.html#absences"));
+    assert.ok(!out.text.includes("#absences\n  - "), "the empty fourth section carries no lines");
     assert.match(out.html, /Open Children on site without a guardian/, "the button opens the first section with something in it");
-    assert.match(out.html, /counts only/, "the default footer: counts and links, the detail behind the login");
+    assert.match(out.html, /It names residents — treat it as you would the register itself\./);
+    assert.ok(!/counts only/.test(out.html), "the counts-only footer is gone now the body names residents");
     assert.ok(out.text.endsWith(`To stop these emails: ${unsubscribe}`));
 
-    const later = compose({ siteName: "Slaney", night: "2026-09-15", counts: { guardian_gaps: 0, children_away: 0, conflicts: 3, at_figures: 0 }, links });
+    const esc = compose({ siteName: "Slaney", night: "2026-09-15", items: { guardian_gaps: ["O'Brien <family> & co"], children_away: [], conflicts: [], at_figures: [] }, links });
+    assert.ok(esc.html.includes("O&#39;Brien &lt;family&gt; &amp; co"), "escaped for HTML — see escapeHtml in lib/mail.js for the exact apostrophe entity");
+
+    const later = compose({ siteName: "Slaney", night: "2026-09-15", items: { guardian_gaps: [], children_away: [], conflicts: items.conflicts, at_figures: [] }, links });
     assert.equal(later.subject, "Slaney: tonight — 3 to look at");
     assert.match(later.html, /Open Check-ins recorded while signed out/, "the button follows the first non-zero section");
 
-    const nil = compose({ siteName: "Slaney", night: "2026-09-20", counts: { guardian_gaps: 0, children_away: 0, conflicts: 0, at_figures: 0 }, links });
+    const nil = compose({ siteName: "Slaney", night: "2026-09-20", items: { guardian_gaps: [], children_away: [], conflicts: [], at_figures: [] }, links });
     assert.equal(nil.subject, "Slaney: tonight — nothing to report");
     for (const l of labels) assert.ok(nil.text.includes(l) && nil.html.includes(l), "a nil email still lists the four sections, so a Sunday's silence reads as a check that ran");
-    assert.equal(compose({ night: "2026-09-20", counts: {}, links: {} }).subject, "CheckSteady: tonight — nothing to report");
+    assert.equal(compose({ night: "2026-09-20", items: {}, links: {} }).subject, "CheckSteady: tonight — nothing to report");
   });
 
   await test("the guardian-gaps and checkin-conflicts reports: 200 for a supervisor with a reason, audited; a guard is refused; no reason is a 400", async () => {
@@ -2897,6 +2912,10 @@ async function main() {
   });
 
   await test("send now emails every recipient ticked on the staff record, and is on the audit record; refused without recipients or to a supervisor", async () => {
+    // 055 made the attachment the default; this test starts from "off" on
+    // purpose, to prove the off case still works, and restores the default
+    // (on) at the end rather than leaving the switch off for later tests.
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_attach_document = false`));
     const mick = await wkAdmin.fetch("/api/staff", { method: "POST", body: { email: "mick@example.ie", full_name: "Mick Weekly", role: "supervisor" } });
     assert.equal(mick.status, 201, mick.text);
     const niamh = await wkAdmin.fetch("/api/staff", { method: "POST", body: { email: "niamh@example.ie", full_name: "Niamh Weekly", role: "admin" } });
@@ -2942,7 +2961,9 @@ async function main() {
       assert.equal(m.attachments[0].contentType, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }
     assert.ok(onMails[0].attachments[0].content.equals(onMails[1].attachments[0].content), "one document, built once, sent to each");
-    assert.equal((await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_attach_document: false } })).status, 200);
+    // Leave the default-on state (055) as this test found it, not the "off"
+    // it deliberately started from.
+    assert.equal((await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_attach_document: true } })).status, 200);
 
     assert.equal((await wkAdmin.fetch(`/api/staff/${mick.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
     assert.equal((await wkAdmin.fetch(`/api/staff/${niamh.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
@@ -3007,6 +3028,9 @@ async function main() {
     const mickId = (await withOwner((c) => c.query(`select id from auth.users where email = 'mick@example.ie'`))).rows[0].id;
     await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false`));
     await withOwner((c) => c.query(`update public.profiles set weekly_report = true where id = $1`, [mickId]));
+    // 055 made the attachment the default; start from "off" on purpose, to
+    // prove that case still works.
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_attach_document = false`));
     const before = (global.__mailSink || []).length;
     assert.equal(await weeklyRegister("public", "", { force: true }), true);
     assert.equal((global.__mailSink || []).length, before, "nothing goes while the switch is off");
@@ -3023,7 +3047,10 @@ async function main() {
     const withDoc = (global.__mailSink || []).at(-1);
     assert.equal(withDoc.attachments.length, 1, "the job attaches the document when the switch is on");
     assert.match(withDoc.attachments[0].filename, /\.docx$/);
-    await withOwner((c) => c.query(`update public.app_settings set weekly_report_attach_document = false`));
+    // The rest of this test only cares about delivery counts, not the
+    // attachment; leave the default-on state (055) restored rather than the
+    // "off" this test deliberately started from.
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_attach_document = true`));
     run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
     // The sink always answers not delivered, so this run reached nobody —
     // and a Sunday return that reached nobody must not read back as ok=true
@@ -3344,7 +3371,7 @@ async function main() {
     await withOwner((c) => c.query(`update public.profiles set safeguarding_alert = false where id = $1`, [supId]));
   });
 
-  await test("the nightly email is one message of four counts and four links, never a name, to the same staff; off, or nothing to report on a weekday, nothing goes", async () => {
+  await test("the nightly email names the residents behind its four counts, with the links, to the ticked staff; off, or nothing to report on a weekday, nothing goes", async () => {
     const { nightlyEmail } = require("../jobs");
     const supId = (await withOwner((c) => c.query(`select id from auth.users where email = 'sup2@hut.example'`))).rows[0].id;
     await withOwner((c) => c.query(`update public.profiles set safeguarding_alert = true where id = $1`, [supId]));
@@ -3396,8 +3423,21 @@ async function main() {
     const total = gapsRecorded + counts.children_away + counts.conflicts + atFigures;
     assert.match(sent[0].subject, new RegExp(`tonight — ${total} to look at$`));
     for (const part of [sent[0].text, sent[0].html]) {
-      assert.doesNotMatch(part, /Gapfixture|Famfixture|Missing Nights|Gil\b|Gia\b/, "no resident is named in the nightly email");
+      assert.match(part, /Gapfixture family/, "the guardian-gap household is named");
+      assert.match(part, /Missing Nights/, "the resident at a House Rules figure is named");
     }
+    assert.match(sent[0].text, /^  - Gapfixture family.* — .*Gil Gapfixture \(\d+\)/m, "the household line carries the children with ages, the child by name");
+    // Don't hard-code the streak: build the expected phrase from the same
+    // consecutive-missed count jobs.js computes, in case warn_after_consecutive_nights
+    // is not 3 in this fixture's app_settings.
+    const consecutiveMissed = (await withOwner((c) => c.query(
+      `select count(*)::int as n from public.daily_compliance x
+        where x.resident_id = $1 and x.required and not x.presented and x.closed_at is not null
+          and x.compliance_date > coalesce((select max(y.compliance_date) from public.daily_compliance y
+                                             where y.resident_id = $1 and y.required and y.presented and y.closed_at is not null), '1900-01-01'::date)`,
+      [made.json.id]))).rows[0].n;
+    assert.match(sent[0].text, new RegExp(`^  - Missing Nights.* — ${consecutiveMissed} nights in a row missed`, "m"), "the figures line says which figure");
+    assert.match(sent[0].html, /It names residents — treat it as you would the register itself\./);
     assert.ok(sent[0].headers && /e=nightly>$/.test(sent[0].headers["List-Unsubscribe"]), "the unsubscribe headers carry the nightly kind");
     assert.equal(sent[0].attachments, undefined);
     let run = await lastRun();

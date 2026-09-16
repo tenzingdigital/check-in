@@ -1362,6 +1362,8 @@ select pg_temp.expect('054 nightly_email column exists',
   (select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'nightly_email'), 1);
 select pg_temp.expect('054 notify_thresholds_email is kept',
   (select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'notify_thresholds_email'), 1);
+select pg_temp.expect('055: the Sunday document attaches by default',
+  (select column_default from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'weekly_report_attach_document'), 'true');
 insert into public.email_opt_outs (profile_id, kind) values ('22222222-2222-2222-2222-222222222222', 'nightly');
 select pg_temp.expect('054 nightly is a kind', (select count(*)::int from public.email_opt_outs where kind = 'nightly'), 1);
 select pg_temp.expect('054 an unknown kind is still refused',
