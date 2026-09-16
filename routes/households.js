@@ -100,7 +100,10 @@ router.get('/households/:id/supervision', wrap(async (req, res) => {
          join v_resident_status v on v.id = a.carer_id
          left join v_resident_room rm on rm.id = a.carer_id
          left join profiles p on p.id = a.recorded_by
-        where a.household_id = $1 and a.from_at::date <= $3::date and a.to_at::date >= $2::date
+         cross join (select local_timezone from app_settings where id) tz
+        where a.household_id = $1
+          and (a.from_at at time zone tz.local_timezone)::date <= $3::date
+          and (a.to_at at time zone tz.local_timezone)::date >= $2::date
         order by a.from_at desc`, [household, from, to]);
     return rows;
   });

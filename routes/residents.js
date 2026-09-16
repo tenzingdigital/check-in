@@ -136,8 +136,7 @@ router.get('/', wrap(async (req, res) => {
       });
     }
     // Who is minding whom (migration 053): a guardian, a child or the carer
-    // of a running arrangement carries one line for the door. Only when the
-    // household feature is on — nothing is joined otherwise.
+    // of a running arrangement carries one line for the door.
     const { rows: care } = await client.query(
       `select c.household_id, c.carer_id, c.carer_name, c.carer_room_label, c.until, c.overnight, rm.household_label
          from v_household_care c
@@ -149,9 +148,17 @@ router.get('/', wrap(async (req, res) => {
     const careByHousehold = new Map(care.map(c => [c.household_id, c]));
     const careByCarer = new Map(care.map(c => [c.carer_id, c]));
     for (const r of found) {
+      // A departed resident's row still carries a household_id (the join is
+      // to v_resident_room, which does not care about status), but they are
+      // not on today's door: no care line for the Departed view.
+      if (r.status !== 'active') { r.care = null; continue; }
       const asMember = r.household_id ? careByHousehold.get(r.household_id) : null;
       const asCarer = careByCarer.get(r.id);
-      const c = asMember || asCarer;
+      // The carer's own facts win: a resident can be an adult member of one
+      // household (with its own arrangement) while minding another's
+      // children at the same time, and the role decides which arrangement's
+      // facts belong on the line.
+      const c = asCarer || asMember;
       r.care = c ? {
         role: asCarer ? 'carer' : (r.is_adult === false ? 'child' : 'guardian'),
         carer_name: c.carer_name, carer_room_label: c.carer_room_label, until: c.until, overnight: c.overnight,

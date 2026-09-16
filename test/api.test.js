@@ -1879,6 +1879,40 @@ async function main() {
     assert.match(rows[0].note, /^Tusla query \[/);
   });
 
+  await test("the carer's own care line follows the arrangement they carer for, not their own household's", async () => {
+    // Cara minds nobody right now (the crossing-midnight arrangement above
+    // starts in the future); give her a currently-running arrangement on the
+    // Famfixture household, and — the case this guards — make her ALSO an
+    // adult member of her own household, itself under someone else's care at
+    // the same time, so the two running arrangements could be confused for
+    // one another on her own /api/residents row.
+    const from = new Date(Date.now() - 1800e3).toISOString(), to = new Date(Date.now() + 1800e3).toISOString();
+    const asFamCarer = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    assert.equal(asFamCarer.status, 201, asFamCarer.text);
+    const famArrId = asFamCarer.json.id;
+
+    const kit = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Kit", last_name: "Carerfixture", date_of_birth: "2019-01-01" } });
+    assert.equal(kit.status, 201, kit.text);
+    const join = await supC.fetch(`/api/residents/${kit.json.id}`, { method: "PATCH", body: { household_with: fam.carer } });
+    assert.equal(join.status, 200, join.text);
+    const caraHh = join.json.household_id;
+    assert.ok(caraHh);
+
+    const asLee = await supC.fetch(`/api/households/${caraHh}/supervision`, { method: "POST", body: { carer_id: fam.loner, from_at: from, to_at: to, overnight: false } });
+    assert.equal(asLee.status, 201, asLee.text);
+    const caraArrId = asLee.json.id;
+
+    const rows = (await api.fetch("/api/residents?q=fixture&limit=50")).json;
+    const cara = rows.find((r) => r.id === fam.carer);
+    assert.equal(cara.care.role, "carer");
+    assert.match(cara.care.household_label, /Famfixture/, "the family Cara minds, not her own");
+    assert.ok(!/Carerfixture/.test(cara.care.household_label), "must not be her own household's arrangement");
+
+    // Clean up: end both so later tests see no running arrangement here.
+    assert.equal((await supC.fetch(`/api/supervision/${famArrId}/end`, { method: "POST" })).status, 200);
+    assert.equal((await supC.fetch(`/api/supervision/${caraArrId}/end`, { method: "POST" })).status, 200);
+  });
+
   console.log("\n== audit trail ==");
 
   await test("a supervisor's edit is on the record, with before and after", async () => {
