@@ -4078,10 +4078,11 @@ async function main() {
     assert.equal(made.status, 201, made.text);
     const residentId = made.json.id;
 
-    const checkin = await kioskC.fetch("/api/kiosk/checkin", { method: "POST", body: { id: residentId, full_name: "Httpflow Kiosktester" } });
+    const checkin = await kioskC.fetch("/api/kiosk/checkin", { method: "POST", body: { id: residentId } });
     assert.equal(checkin.status, 200, checkin.text);
+    assert.deepEqual(Object.keys(checkin.json).sort(), ["checked_in_at", "ok"],
+      "fix round 1: no full_name here — the page keeps the name from the search row it tapped");
     assert.equal(checkin.json.ok, true);
-    assert.equal(checkin.json.full_name, "Httpflow Kiosktester");
     assert.ok(checkin.json.checked_in_at, "checked_in_at was not carried in the response");
     assert.ok(!Number.isNaN(Date.parse(checkin.json.checked_in_at)), "checked_in_at must be a real ISO timestamp");
 
@@ -4108,6 +4109,27 @@ async function main() {
     }
     assert.equal(last.status, 429, last.text);
     assert.equal(last.json.error, "Too many searches — wait a moment.");
+  });
+
+  // Fix round 1: /checkin was not rate-limited at all — a kiosk session
+  // could otherwise insert checkin_events rows without bound. Repeating the
+  // same resident is harmless (record_checkin_at's own 60-second de-dupe
+  // just returns the same row each time), so this only has to prove the
+  // 61st call is refused, on its own account so it does not spend the
+  // budget the checkin test above needs.
+  await test("checkin is rate-limited too, on its own budget separate from search's", async () => {
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["kiosk-limit2@hut.example", PASSWORD, "Gate tablet 3", "kiosk"]));
+    const limitC = await loginAs("kiosk-limit2@hut.example");
+    let last;
+    for (let i = 0; i < 61; i++) {
+      last = await limitC.fetch("/api/kiosk/checkin", { method: "POST", body: { id: aoifeId } });
+      if (i < 60) assert.equal(last.status, 200, `checkin ${i + 1}: ${last.text}`);
+    }
+    assert.equal(last.status, 429, last.text);
+    assert.equal(last.json.error, "Too many searches — wait a moment.");
+    // Its own search budget is untouched by the checkins above.
+    const search = await limitC.fetch("/api/kiosk/search", { method: "POST", body: { q: "ailb" } });
+    assert.equal(search.status, 200, search.text);
   });
 
   await test("DELETE /api/session as kiosk ends the session, unaffected by the gate", async () => {
