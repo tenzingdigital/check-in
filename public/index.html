@@ -292,6 +292,10 @@ function careLine(care) {
 // Would this adult's household be left with no guardian on site — every
 // other adult already out, and a child still in? Read from state.rows as it
 // stands right now; this never blocks anything, it only says what is true.
+// This is this terminal's last-rendered rows, not a live query: a sibling
+// signed out on another terminal a moment ago counts here only once this
+// list has been re-fetched — bounded, and the sentence is a prompt for the
+// guard in front of the person, not the record.
 function leavesChildrenUnaccompanied(r) {
   if (!state.settings?.feature_households || !r || !r.household_id || r.is_adult === false) return false;
   const household = [...state.rows.values()].filter((x) => x.household_id === r.household_id);
@@ -326,6 +330,10 @@ function residentCard(r, { clickable = true } = {}) {
   if (r.room_label && state.settings?.feature_buildings) bits.push(esc(r.room_label));
   bits.push(r.last_event_at ? `${r.presence === "in" ? "on site" : "off site"} ${sinceLabel(r.last_event_at)}` : "no movement on record");
   if (r.away) bits.push(`<span class="away">away until ${esc(dayLabel(r.away.until))}</span>`);
+  if (state.settings?.feature_households && r.care) {
+    const line = careLine(r.care);
+    if (line) bits.push(`<span class="care">${esc(line)}</span>`);
+  }
 
   const card = `
     <${tag} class="${cls}" ${clickable ? `data-id="${esc(r.id)}" type="button"` : ""}>
@@ -833,7 +841,7 @@ async function renderRoll() {
           <span class="meta">${[
             r.room_label && state.settings?.feature_buildings ? esc(r.room_label) : "",
             households && r.household_label ? esc(r.household_label) + (r.is_adult === false ? " · child" : "") : "",
-            households && r.care ? `<span class="care">${esc(careLine(r.care))}</span>` : "",
+            households && r.care && careLine(r.care) ? `<span class="care">${esc(careLine(r.care))}</span>` : "",
           ].filter(Boolean).join(" · ")}${(r.room_label && state.settings?.feature_buildings) || (households && r.household_label) || (households && r.care) ? (r.evac_need && r.evac_need !== "none" ? " · " : "") : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : ""}</span>
         </span>
         ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}" aria-label="${roll.marks[r.id] ? "Marked safe" : "Mark safe"}">${roll.marks[r.id] ? "Safe ✓" : "Safe"}</button>` : ""}
@@ -1353,8 +1361,11 @@ async function recordMany(direction) {
                "A recorded day cannot be undone.");
   }
   if (direction === "out") {
-    const unaccompanied = ids.filter((id) => leavesChildrenUnaccompanied(state.rows.get(id))).length;
-    if (unaccompanied) lines.push("", `${unaccompanied} of these leave children on site with no supervision arrangement recorded.`);
+    const affected = ids.map((id) => state.rows.get(id)).filter((r) => leavesChildrenUnaccompanied(r));
+    const covered = affected.filter((r) => r.care && r.care.role === "guardian").length;
+    const uncovered = affected.length - covered;
+    if (uncovered) lines.push("", `${uncovered} of these leave children on site with no supervision arrangement recorded.`);
+    if (covered) lines.push("", `${covered} of these leave children in a recorded carer's care.`);
   }
   if (!confirm(lines.join("\n"))) return;
 
