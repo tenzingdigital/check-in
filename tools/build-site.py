@@ -443,7 +443,7 @@ faqs = [
  ("Where is the data held?",
   "In the European Union — Frankfurt — encrypted in transit and at rest. Each centre's records live in their own separate database schema, so one centre's staff cannot reach another's data even by accident."),
  ("What is the weekly register update?",
-  "A Sunday-morning email to the staff you choose with counts of resident absences, weekend updates, removals and room updates over the past week, and a link to the full report. The email carries counts only; the names, rooms and dates are in the app, where the report also downloads as a spreadsheet."),
+  "A Sunday-morning email to the staff you choose with counts of resident absences, weekend updates, removals and room updates over the past week, and a link to the full report. The email carries counts and a link; a centre can also choose to attach the update as a Word document — the same five sections, one sentence per resident, ready to review and forward — and the report downloads from the app as a spreadsheet or a Word document."),
  ("Is this built for direct provision centres specifically?",
   "It was built with the feedback of an accommodation centre manager, and the vocabulary — permitted absences, house rules, TRC and IRP, contracted beds — is that of IPAS-contracted accommodation. The same register works for any residential centre that keeps a daily record of who was seen."),
 ]
@@ -674,7 +674,7 @@ faqs = [
  ("Does the app hold the refuge's address or location?",
   "No. A site is a name, with buildings and rooms under it — there is no postal-address field for a site, a building or a resident anywhere in the app."),
  ("Does anyone outside the service see the data?",
-  "No. Each site's records live in their own separate database schema in the EU, the Sunday email carries counts only, and the app itself holds no analytics or tracking."),
+  "No. Each site's records live in their own separate database schema in the EU, the Sunday email carries counts only unless your service chooses to attach the full update, and the app itself holds no analytics or tracking."),
  ("Can a resident's record be removed when they leave?",
   "A departed resident is archived, with their history kept for the retention period you set. If a service wants a record erased sooner, an administrator can erase it."),
  ("Is it a case-management or treatment-record system?",
@@ -695,7 +695,7 @@ body = (
     <p>The register holds as little as the job needs, and what it holds is described here precisely, not summarised.</p>
     <div class="pairs">
       <div><h3>No postal address, anywhere</h3><p>The app has no postal-address field for a site, a building or a resident.</p></div>
-      <div><h3>Counts only, never a name</h3><p>The Sunday email to your own staff carries counts and a link into the app. No resident's name ever appears in it.</p></div>
+      <div><h3>Counts only, unless you choose otherwise</h3><p>The Sunday email to your own staff carries counts and a link into the app. Attaching the full update as a document, with names, is a switch your service turns on — or never does.</p></div>
       <div><h3>Identity documents, optional</h3><p>TRC or IRP can be recorded as printed if a service needs it. It is an optional field, left blank by any service that does not use it.</p></div>
       <div><h3>Logged, on a connected phone</h3><p>Opening a resident's record on a connected phone — the register sheet, the edit sheet, an export — is logged with who and when. A sheet read from a phone's offline copy is not.</p></div>
       <div><h3>One schema per site, in the EU</h3><p>Hosted in Frankfurt, encrypted in transit and at rest, with each site's records in their own separate database schema.</p></div>

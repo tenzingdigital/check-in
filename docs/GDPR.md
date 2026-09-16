@@ -21,11 +21,12 @@ about this and are corrected.
 Updated again 10 September 2026 against migration 037 and the same day's
 rewrite of the email's content (`lib/weeklyReport.js`). The disclosure above
 lasted less than a day. Recipients of the Weekly register update are now a
-tick on the staff record, offered only to supervisors and admins, and the
-email itself carries counts and a link only — no resident name, room, date
-or child marker. The email now goes only to the centre's own staff, and no
-resident data leaves by it at all. The Resend section and processor table
-below are corrected again.
+tick on the staff record, offered only to supervisors and admins. The email
+itself carries counts and a link only. Since migration 052 a centre may
+additionally attach the update as a Word document — names, rooms, dates and
+the child marker, exactly what the in-app report shows — to the same
+recipients; it is off by default and is the centre's decision. The Resend
+section and processor table below are corrected again.
 
 **This is not legal advice.** A system that records the daily presence of
 residents in accommodation, some of whom are in the international protection
@@ -256,8 +257,9 @@ officer should know a third party is in the browser on that domain.
 
 **What leaves by email.** Invitations and password resets carry no resident
 data: a staff member's own address, name and a single-use link. All three
-recurring reports below carry counts and a link only — no resident is ever
-named in an outbound email.
+recurring reports below carry counts and a link only — no resident is named
+in the email body. One exception, chosen per centre: the Sunday update can
+be attached as a Word document (below).
 
 The nightly House Rules reminder (migration 032), where the centre has
 turned it on, goes to the centre's own active supervisors and
@@ -284,13 +286,30 @@ removals and room updates, and a link into the app. The names, rooms and
 dates behind those counts stay in the app, under Admin → Reports, where
 they can also be downloaded as a spreadsheet.
 
+**Where the centre turns on `weekly_report_attach_document` (migration 052),
+the same email carries the Weekly Register Update as a Word document: the
+five sections, one sentence per resident — name, building and room, the
+dates and nights, back-on date, approval — and the child marker the report
+already shows, with the not-approved rows highlighted and the instruction
+"please mark as unauthorised absence". Nothing the report does not show: no
+date of birth, identity number or evacuation need. It goes only to the
+ticked supervisors and admins, whose accounts already see the same report;
+the exposure it adds is the mail channel itself (the recipient's mailbox,
+its provider, and forwarding), which is why it is off by default and the
+Settings copy says what it names. The attachment travels to Resend, the
+email provider, as part of the message, and Resend retains sent messages by
+default; the DPA's processor table must list that. The nightly House Rules
+reminder and the overnight safeguarding alert never carry an attachment.
+
 Every recurring email carries an Unsubscribe link (migration 049) that
 works without a login and stops that one email or all three; the fact is
 recorded against the staff record and shown to administrators, who may
 reinstate. Login codes, invitations and password resets carry no such link.
 
-None of the three carries a date of birth, an identity-document number, an
-evacuation need, any free text about a person — or a name.
+None of the three emails carries a date of birth, an identity-document
+number, an evacuation need or free text about a person; the body never
+carries a name, and only the Sunday attachment, where a centre has turned
+it on, does.
 
 **How those messages are built.** Each is sent as plain text and as a
 styled part carrying the same words, laid out by `layout()` in
@@ -334,7 +353,7 @@ may be in dispute with staff, that matters.
 | Processor | Purpose | Where |
 |---|---|---|
 | Render Services, Inc. | Hosting, the managed database, backups, the nightly scheduler | Frankfurt (EU); fixed at creation in `render.yaml` |
-| Resend, Inc. | Invitation and password-reset email to staff; all three recurring reports — the nightly House Rules reminder, the nightly overnight safeguarding alert, and the Sunday Weekly register update — carry counts and a link only, to the centre's own supervisors, administrators or ticked staff | EU/US; see DPA section 6 |
+| Resend, Inc. | Invitation and password-reset email to staff; all three recurring reports — the nightly House Rules reminder, the nightly overnight safeguarding alert, and the Sunday Weekly register update — carry counts and a link only, to the centre's own supervisors, administrators or ticked staff; where a centre turns it on, the Sunday Word document (resident names, rooms, dates) — retained by Resend as sent-message content | EU/US; see DPA section 6 |
 
 Both are US companies with EU data residency, so the transfer basis (Standard
 Contractual Clauses plus the EU–US Data Privacy Framework, as each provider
@@ -374,7 +393,7 @@ list of people holding either is kept in
 - [ ] Render's and Resend's DPAs and SCCs on file; transfer impact assessment written
 - [ ] Database confirmed in Frankfurt on a paid plan with point-in-time recovery, and not the smallest plan (`docs/KNOWN-ISSUES.md` 19c)
 - [ ] Email configured (`RESEND_API_KEY`), so invitation links go to their owner and not to an administrator's screen
-- [ ] If the Weekly register update is turned on, the staff ticked "Gets the Sunday report" (Admin → Staff) are the right supervisors and admins — the email itself carries no resident data, so this is a check on who holds those roles rather than on what leaves by email
+- [ ] If the Weekly register update is turned on, the staff ticked "Gets the Sunday report" (Admin → Staff) are the right supervisors and admins — the email body carries no resident data (the Word attachment does, where the centre has also turned that on), so this is a check on who holds those roles rather than on what leaves by email
 - [ ] A named person at the centre who actions access and erasure requests, and a named person at Tenzing who receives breach reports
 - [ ] The list of people holding the external connection string is written down and short
 - [ ] The paper fallback sheet is printed and in the hut

@@ -291,19 +291,21 @@ working branch.** Spec: `docs/superpowers/specs/2026-09-10-weekly-register-updat
   beds. One SQL function builds the rows and the sentences; the report
   under Admin → Reports, viewed or downloaded as a CSV, reads them in
   full, but the emailed version reads only their counts (below).
-- *Sent on a Sunday, counts and a link only* (migration 037): the staff
-  ticked "Gets the Sunday report" on their record — offered only to
-  supervisors and admins, since only they may run the report it
-  summarises — are emailed the previous Sunday night through Saturday
-  night as a count per section and a link into the app, never a resident
-  name, room or date. A switch under Settings turns the send on or off
-  for the site; "Send last week's now" checks it regardless of the
-  switch, on the audit record. Recipients moved off a comma-separated
-  address list typed into Settings: they are now always known staff, so a
-  colleague who leaves stops receiving resident data automatically, and
-  because no resident data leaves by this email at all, none of it lives
-  on in an inbox, a forward, or a mail provider's own backups outside the
-  app's retention rules.
+- *Sent on Sunday at 10:00 site time; counts and a link, plus, where the
+  centre turns it on, the update as a Word document* (migrations 037,
+  052): the staff ticked "Gets the Sunday report" on their record —
+  offered only to supervisors and admins, since only they may run the
+  report it summarises — are emailed the previous Sunday night through
+  Saturday night as a count per section and a link into the app, never a
+  resident name, room or date in the email body. A switch under Settings
+  turns the send on or off for the site; "Send last week's now" checks it
+  regardless of the switch, on the audit record. Recipients moved off a
+  comma-separated address list typed into Settings: they are now always
+  known staff, so a colleague who leaves stops receiving resident data
+  automatically, and because the email body carries no resident data,
+  none of it lives on in an inbox, a forward, or a mail provider's own
+  backups outside the app's retention rules — except where a centre has
+  turned on the Word attachment, which does name residents.
 - *The IPAS permitted periods*: dates under Settings; a holiday outside
   every window is recorded with a warning, never refused.
 - *The iPad as a fixed terminal*: a manifest and the Apple meta tags, so
@@ -367,3 +369,36 @@ piece of this stage.
 Every stage keeps the rules the product already has: append-only events,
 no free text, the identity number on the detail view only, erasure that
 removes everything and leaves a proof.
+
+## Site visit, 15 September 2026
+
+What the centre manager and security asked for on the day, and where each
+stands. Dry run Monday 28 – Wednesday 30 September 2026 (the manager mirrors
+check-ins from the old app; the hut unchanged); go-live Thursday 1 October
+2026, the old sign-in system dropped that Friday.
+
+- *The Sunday update as an editable Word document to the manager first, at
+  10:00, so she reviews, edits and forwards it and head office never needs a
+  login* — **built 16 September** (migration 052, `node jobs.js weekly`,
+  `hut-weekly` cron, the Word button on the report).
+- *One nightly email to the manager instead of two* (the child safeguarding
+  alert and the House Rules reminder) — open.
+- *An overnight alert when a parent from a one- or two-parent household is
+  off site and children remain* — open; the highest-stakes item on this
+  list (a real incident went unflagged until Monday).
+- *A conflict flag in the nightly email when a resident's In & out status
+  contradicts the day's register* (out at the gate, verified present) —
+  open.
+- *Families: link parents and children properly, so the two items above
+  can be computed* — open (the Families tab design, agreed 15 September).
+- *A gender field on the resident record* (some rooms are gender-specific)
+  — open.
+- *Room number as a visible column in the resident list* — open.
+- *An administrator's override to correct an absence record* — open; the
+  register is append-only by design, so this needs a design.
+- *Flag known night-shift workers in the absence report so they are not
+  read as absent on Sunday morning* — open.
+- *Review what security staff can see and edit; a way to flag a welfare
+  concern without edit rights* — open.
+- *Individual logins for security staff* (a shared mailbox today) — a
+  configuration matter, not code: create the accounts.
