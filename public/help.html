@@ -364,6 +364,28 @@
     <li><span><span class="ui">Staff accounts</span> <span class="who">admins</span>: invite by email with a role.<small>They choose their own password from the link. Disable an account when someone leaves.</small><small>A card that says Unsubscribed themselves means they used the link in an email; re-tick to reinstate — or, for the House Rules reminder, press Reinstate on their card instead.</small></span></li>
   </ol>
 
+  <h3 id="kiosk">Self check-in tablet</h3>
+  <p class="one">A shared tablet by the door that lets a resident record their own presence for the 24-hour register — nothing else. Adults only; it has no In &amp; out, no list, no history, no other resident's details.</p>
+  <ol class="recipe">
+    <li><span>Under <span class="ui">Admin → Staff → Add account</span>, pick role <span class="ui">Self check-in tablet</span>.<small>Name the account for where it lives, e.g. "Slaney gate tablet" — not a person.</small></span></li>
+    <li><span>Send the invite to an email you control.<small>The same invite link as any other account.</small></span></li>
+    <li><span>Open the link and set a password.</span></li>
+    <li><span>Log the tablet into that account once.<small>It lands straight on the check-in screen and never shows a login form again.</small></span></li>
+    <li><span>Turn on Guided Access (iPad) or Screen Pinning / Single App Mode (Android) so the tablet cannot be swiped out of the browser.</span></li>
+  </ol>
+  <ul class="facts">
+    <li><b>Can:</b> search a resident by name, room or ID number (two letters minimum), then check that one adult in</li>
+    <li><b>Cannot:</b> see a list, a date of birth, an ID number, anyone's history, or any other screen — every other page and API route refuses this login</li>
+    <li>A ten-second <span class="ui">That's not me</span> sits between finding a name and checking in</li>
+    <li>The register and history mark it <span class="ui">at the tablet (self)</span>, so staff can see at a glance which check-ins nobody witnessed</li>
+    <li>The tablet cannot receive the Sunday report or the safeguarding alert</li>
+    <li><b>Staff</b> link on the page logs the tablet out, for maintenance</li>
+  </ul>
+  <details class="more"><summary>More detail</summary>
+    <p>The search needs at least two letters and never returns a list — up to five name buttons, with a room shown only when two residents share a name. Ten seconds after tapping a name the page checks them in and shows "Thank you"; tapping <span class="ui">That's not me</span> first cancels it, and 30 seconds of no input clears the search so the next resident never sees the previous one's name.</p>
+    <p>This is not a witnessed check-in — nobody is watching who taps the screen — so a resident could in principle check in another adult by name. The confirmation screen and the "self" mark on the record are the safeguard; if a centre needs a witnessed check-in it uses a staff login instead.</p>
+  </details>
+
   <h3 id="settings">Settings <span class="who">admins</span></h3>
   <ul class="facts">
     <li><b>Register rules:</b> adult age, the amber hour, the House Rules figures, the holiday cap</li>

@@ -49,7 +49,8 @@ tier in front of it.
 
 ---
 
-Two front ends, one API, one Postgres database, one resident register.
+Two staff front ends and a resident-facing third, one API, one Postgres
+database, one resident register.
 
 **`index.html` — In & out (the Door or gate app in older notes).** Who is on site right now. A guard logs in,
 searches a registered resident by name, verifies the person visually, and taps
@@ -66,10 +67,22 @@ on `feature_door_checkin`, in which case a sign **in** (never a sign out) is
 also recorded as the day's check-in with `source = 'door'` — see "Compliance is
 per calendar day" below.
 
-Every event, at either app, is timestamped and attributed to the guard who
-recorded it. Both apps share `app-common.css` and `app-common.js`, loaded as
-plain `<script>`/`<link>` tags — still no build step, no front-end framework,
-and no CDN.
+**`kiosk.html` — the self check-in tablet.** A resident-facing third page for
+a shared, unattended device by the door: search one adult by name, room or
+exact ID, tap the name, wait out a ten-second "That's not me", and the same
+daily check-in is recorded with `source = 'kiosk'`. The `kiosk` role that
+logs into it is deliberately not staff — not a member of `is_staff()` — so it
+reaches resident data only through two SECURITY DEFINER functions built for
+it (`kiosk_search`, `kiosk_checkin`; migration 051) and every other `/api`
+route and front-end page refuses or redirects it. The register and a
+resident's history mark a kiosk check-in "at the tablet (self)", since nobody
+witnesses it.
+
+Every event, at any of the three, is timestamped and attributed to the guard
+(or, for a kiosk check-in, the tablet account) who recorded it. All three
+share `app-common.css` and `app-common.js`, loaded as plain
+`<script>`/`<link>` tags — still no build step, no front-end framework, and
+no CDN.
 
 The back end is Express on Node 22 with three dependencies (`express`, `pg`,
 `dotenv`), matching `tenzingdigital/scheduler`. Aligning the two was a
@@ -103,6 +116,7 @@ migrations/             numbered SQL, applied in order, exactly once
 public/                 the ONLY directory served publicly
   index.html            the gate app — Search and Log
   checkin.html          the check-in app — the register, filtered by its tiles
+  kiosk.html            the self check-in tablet — search, confirm, check in; nothing else
   admin.html            the organisation's page — residents (supervisors) and staff (admins)
   help.html             the guide: every screen, task by task, for a person with no training
   app-common.css        styles shared by both front ends
@@ -217,6 +231,7 @@ is a procedure, not a feature; the app tells you who and for how long.
 | `guard` | Search residents, sign in/out (gate app), record check-ins and annotate missed days (check-in app), read the logs and the register |
 | `supervisor` | Also add, edit and retire residents, set `departed_on` |
 | `admin` | Also manage staff, change settings, run GDPR export and erasure |
+| `kiosk` | Not staff. A shared, unattended tablet login: search one adult resident by name, room or exact ID, and record that one resident's own daily check-in. Nothing else — see "the check-in app" above |
 
 A guard never holds read access to the `residents` table, because that table
 carries dates of birth. Guards read `v_resident_status` and

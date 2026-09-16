@@ -73,6 +73,20 @@ Nothing else. There is no free-text note, no photograph, no biometric, and
 no field in which to put any. Identity is established by the guard looking
 at the person and, where the centre requires it, at their card.
 
+**The self check-in tablet (role `kiosk`) sees less than any staff login.**
+It is not staff and reaches the tables above through no query of its own,
+only two functions built for it (migration 051): `kiosk_search` returns a
+name and, only when two adults share that name, a room label — never a
+date of birth, an ID number, or anything from a resident's history —
+and `kiosk_checkin` writes only the one check-in it was shown the name
+for. A kiosk check-in is written to `checkin_events` like any other, with
+`source = 'kiosk'` and the tablet's own account as the actor, so the
+register and a resident's history can mark it "at the tablet (self)" for
+anyone who reads them afterwards. Nobody witnesses the tap: a resident
+could in principle check in another adult by name, which the ten-second
+confirmation screen and the "self" mark are the mitigation for, not a
+guarantee — a PIN or similar is a future decision, not a shipped control.
+
 **The evacuation need is the one special-category field.** It exists because
 a centre has a fire-safety duty to know who needs help to get out, and a
 personal emergency evacuation plan is what a fire officer expects. It is

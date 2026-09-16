@@ -122,6 +122,21 @@ max_nights integer check (max_nights between 1 and 365); grant update on
 t_x.absence_windows to authenticated;`. (Checked 16 Sep 2026: no such
 tenant existed.)
 
+**Migration 051 widens the gap again, in a new place.** It adds the
+`kiosk_search(text)` function (the self check-in tablet's only way to find
+a resident), so `tenant_schema_gaps()` reports `kiosk_search` missing for a
+`t_*` tenant provisioned before 051, same as any other function gap — check
+`GET /api/tenants` before deploying, as above. This is also the first
+migration to add a *role*, not only functions, and a tenant left behind
+feels that in both directions: its `profiles_role_check` still only allows
+`guard`/`supervisor`/`admin`, so creating a kiosk account there fails the
+insert on that check constraint (`23514`, one of the
+`USER_FACING_SQLSTATES` in `lib/api.js`, so `translateDbError` turns it
+into a plain 400 sentence naming the constraint rather than a 500) — and if
+a kiosk account exists there regardless, `kiosk_search`/`kiosk_checkin`
+being missing means both kiosk routes 500 for it. Either way, the tablet at
+that centre's door does not work until the tenant is brought current.
+
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every
 `t_*` schema at boot automatically, refusing to serve a schema still
@@ -441,6 +456,39 @@ weekly_report_recipients text;` by hand. Nothing needs to read or write it
 back — once `profiles.weekly_report` exists, the old column only has to be
 present, not populated — and the Settings tab recovers immediately. There
 is no down-migration script; migrations here only ever run forward.
+
+### 20. Two side channels that predated the kiosk role, closed while building it — *found and fixed 16 September, morning*
+
+Neither of these is a kiosk bug: both existed for every login before
+migration 051, and were only found because the kiosk is the first member
+of `authenticated` that is not staff, which made a review ask "what can a
+non-staff session already reach?" of code nobody had needed to ask that
+about before.
+
+- **`auth.users` granted `authenticated` a standing column-level `SELECT`
+  with no row filter** (001_platform.sql) — fine while every such session
+  was staff, since staff already see each other's email on the Staff tab,
+  but it meant `select email from auth.users` was answerable by anybody
+  with any session, across every tenant. `auth.users` now has row-level
+  security, gated through `auth.profile_for()` (020) rather than a
+  schema-bound `is_staff()` name, because `auth.users` is genuinely shared
+  across tenants and a policy's own names resolve once, at `CREATE POLICY`
+  time — the same reason `tenant_schema_gaps()` exists at all (see above).
+- **`absence_authorised(resident_id, date)` (028) was `SECURITY DEFINER`
+  with no guard of its own**, granted to `authenticated` outright — every
+  caller so far had been staff code, so nobody had reason to call it
+  directly, but a session could name a resident and a date and learn
+  whether the centre had authorised their absence, a detail the kiosk's own
+  `kiosk_search` deliberately never returns. Re-declared `SECURITY INVOKER`
+  (identical body): every owner-context caller (`record_checkin_at`,
+  close-out, the weekly report, the safeguarding alert) is unaffected,
+  since a table's owner is exempt from its own row-level security, and a
+  direct call now answers `false` for anyone `authorised_absences`' own
+  read policy would refuse — the same as if the absence did not exist.
+
+Both fixes are in migration 051 itself (unapplied anywhere live at the time
+of the fix), not a follow-up migration — see its header and the "2." and
+"4." sections of the file for the full reasoning.
 
 ### 19. `lib/` and `routes/` have no linter and no type checking
 
