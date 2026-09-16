@@ -63,7 +63,7 @@ assert.match(doc, /<w:b\/><\/w:rPr><w:t xml:space="preserve">Resident Absences:<
 assert.match(doc, /<w:u w:val="single"\/><\/w:rPr><w:t xml:space="preserve">Updates for the period between/);
 
 // Bullets: the glyph, a tab, then the text run; only the flagged one is highlighted.
-const bullets = doc.match(/<w:p><w:pPr><w:ind w:left="720" w:hanging="360"\/>.*?<\/w:p>/g);
+const bullets = doc.match(/<w:p><w:pPr><w:spacing w:after="60"\/><w:ind w:left="720" w:hanging="360"\/>.*?<\/w:p>/g);
 assert.equal(bullets.length, 2, 'two bullet paragraphs');
 assert.match(bullets[0], /<w:t>•<\/w:t><\/w:r><w:r><w:tab\/><\/w:r><w:r><w:t xml:space="preserve">Smith/);
 assert.ok(!bullets[0].includes('w:highlight'), 'an approved row is not highlighted');
