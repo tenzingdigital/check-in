@@ -4,7 +4,8 @@
 -- The centre's form (Child Protection and Welfare Safeguarding Policy,
 -- Appendix 5, part A): the parent and a nominated adult resident sign,
 -- management approves, the form is filed — and security are never told.
--- This table holds the fact that matters at the door and at 22:00: which
+-- This table holds the fact that matters at the door and at the midnight
+-- snapshot: which
 -- children, whose care, until when, and whether an overnight was approved.
 -- Nothing else: the contact number and the story stay on the paper form.
 --
@@ -125,7 +126,9 @@ create trigger residents_departed_ends_supervision
 
 -- One row per household with active members: who is responsible, who is on
 -- site, and the arrangement running right now, if any. The gate draws its
--- care lines from this; the 22:00 alert (piece B) reads it.
+-- care lines from this; the nightly snapshot (054, guardian_gap_households())
+-- restates the same predicate on the base tables, since the owner cannot read
+-- a view that filters on is_staff().
 create or replace view public.v_household_care as
 with s as (select adult_age_years from public.app_settings where id),
 members as (

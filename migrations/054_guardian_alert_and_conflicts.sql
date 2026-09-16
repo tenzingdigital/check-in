@@ -20,7 +20,8 @@
 --
 -- Two readers of each fact, and they are not the same caller. Staff read
 -- v_household_care (053) and the conflicts view below from a session with
--- an identity. The nightly email reads as the owner,
+-- an identity. The nightly email reads as the owner, with no identity at
+-- all, and every v_* view filters on is_staff() — which
 -- is false for the owner, so a snapshot written from the view would record
 -- "nothing to report" about every child left alone (035 and 041 already
 -- read base tables for exactly this reason). So the fact is computed once
