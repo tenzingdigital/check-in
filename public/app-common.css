@@ -114,6 +114,7 @@
   .brand small b { font-weight: 600; color: var(--text); }
   /* ---- history (a resident's movements and check-ins over a range) ---- */
   .meta .away { color: var(--warn-text); font-weight: 600; }
+  .meta .care { color: var(--accent); font-weight: 600; }
   .chooser .always { display: flex; align-items: flex-start; gap: 10px; margin-top: 6px; padding: 0 2px; font-size: 13px; color: var(--muted); }
   .chooser .always input { flex: none; width: 20px; height: 20px; margin-top: 1px; }
   .chooser .always b { color: var(--text); font-weight: 600; }

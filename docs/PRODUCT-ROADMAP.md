@@ -390,7 +390,9 @@ check-ins from the old app; the hut unchanged); go-live Thursday 1 October
   contradicts the day's register* (out at the gate, verified present) —
   open.
 - *Families: link parents and children properly, so the two items above
-  can be computed* — open (the Families tab design, agreed 15 September).
+  can be computed* — **built 16 September** (migration 053, the Families
+  tab, the care line at the door, the "Child supervision arrangements"
+  report).
 - *A gender field on the resident record* (some rooms are gender-specific)
   — open.
 - *Room number as a visible column in the resident list* — open.
@@ -413,8 +415,10 @@ Added from the centre's follow-up email (Niamh Slevin, 16 September 2026):
   with an arrangement in place reads differently from one without. The
   natural fact behind the overnight alert above: a parent off site
   overnight with children on site and *no approved arrangement* is the case
-  House Rules 3.5.4 makes reportable. Not yet designed. The form's contact
-  number and the story behind the absence stay on the paper form.
+  House Rules 3.5.4 makes reportable. The form's contact number and the
+  story behind the absence stay on the paper form. — **built 16 September**
+  (migration 053, the Families tab, the care line at the door, the "Child
+  supervision arrangements" report).
 - *Visitor hours* — House Rules 3.3.8: 10:00–13:00 and 14:00–20:00;
   security have been told to refuse visitors outside them. The visitors
   feature could say so at the door; nothing enforced yet.

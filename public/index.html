@@ -278,6 +278,37 @@ function timeOfDay(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
+// The care line: what a card says about who is minding whom, from the
+// running Appendix 5 arrangement (`care`, present only while it applies).
+// Plain sentences — the app records a fact, it never decides one.
+function careLine(care) {
+  const room = care.carer_room_label ? " · " + care.carer_room_label : "";
+  if (care.role === "guardian") return `Children with ${care.carer_name}${room} until ${dayTime(care.until)}`;
+  if (care.role === "child") return `With ${care.carer_name}${room}`;
+  if (care.role === "carer") return `Minding the ${(care.household_label || "").replace(/ \(\d+\)$/, "")} children until ${dayTime(care.until)}`;
+  return "";
+}
+
+// Would this adult's household be left with no guardian on site — every
+// other adult already out, and a child still in? Read from state.rows as it
+// stands right now; this never blocks anything, it only says what is true.
+function leavesChildrenUnaccompanied(r) {
+  if (!state.settings?.feature_households || !r || !r.household_id || r.is_adult === false) return false;
+  const household = [...state.rows.values()].filter((x) => x.household_id === r.household_id);
+  const otherAdultsOut = household.every((x) => x.id === r.id || x.is_adult === false || x.presence === "out");
+  const childIn = household.some((x) => x.is_adult === false && x.presence === "in");
+  return otherAdultsOut && childIn;
+}
+
+// The sign-out sentence itself, or null when it does not apply. A fact for
+// the guard's toast, never a confirm() — nothing here blocks a sign-out.
+function unsupervisedSentence(r) {
+  if (!leavesChildrenUnaccompanied(r)) return null;
+  return r.care && r.care.role === "guardian"
+    ? `Children stay on site — in ${r.care.carer_name}'s care until ${dayTime(r.care.until)}.`
+    : "Children stay on site — no supervision arrangement recorded.";
+}
+
 function todayISODate() {
   const n = new Date();
   const p = (v) => String(v).padStart(2, "0");
@@ -550,6 +581,12 @@ async function record(residentId, direction, { fromSwipe = false } = {}) {
   state.busy = true;
   document.querySelectorAll("#detail .btn").forEach((b) => (b.disabled = true));
 
+  // A fact, never a gate: read from the presence this terminal already
+  // holds, before the movement below changes it. Folded into the sign-out
+  // toast rather than shown as its own — a toast fired here would only be
+  // overwritten by the confirmation a moment later once the request returns.
+  const supervisionNote = direction === "out" ? unsupervisedSentence(state.rows.get(residentId)) : null;
+
   // With no link, or when the request itself fails to reach the server, the
   // event is queued on this terminal with its own timestamp and sent when
   // the link returns (offline.js). Any other refusal is the database's and
@@ -580,7 +617,7 @@ async function record(residentId, direction, { fromSwipe = false } = {}) {
       return;
     }
     state.busy = false;
-    toast(`${r ? r.full_name : "Resident"} signed ${direction.toUpperCase()} — queued until the connection returns`, "ok");
+    toast(`${r ? r.full_name : "Resident"} signed ${direction.toUpperCase()} — queued until the connection returns${supervisionNote ? ` · ${supervisionNote}` : ""}`, "ok");
     Offline.renderNet();
     renderDetail(null);
     runSearch($("q").value);
@@ -591,7 +628,7 @@ async function record(residentId, direction, { fromSwipe = false } = {}) {
   if (!row) return;
 
   const doorNote = direction === "in" && state.settings && state.settings.feature_door_checkin ? " · today's check-in recorded" : "";
-  toast(`${row.full_name} signed ${direction.toUpperCase()}${doorNote}`, "ok");
+  toast(`${row.full_name} signed ${direction.toUpperCase()}${doorNote}${supervisionNote ? ` · ${supervisionNote}` : ""}`, "ok");
   if (!fromSwipe) renderDetail(row);
   // record_check() returns the resident's new status row: put it on the
   // card now rather than after the list refresh, so the pill flips under
@@ -796,7 +833,8 @@ async function renderRoll() {
           <span class="meta">${[
             r.room_label && state.settings?.feature_buildings ? esc(r.room_label) : "",
             households && r.household_label ? esc(r.household_label) + (r.is_adult === false ? " · child" : "") : "",
-          ].filter(Boolean).join(" · ")}${(r.room_label && state.settings?.feature_buildings) || (households && r.household_label) ? (r.evac_need && r.evac_need !== "none" ? " · " : "") : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : ""}</span>
+            households && r.care ? `<span class="care">${esc(careLine(r.care))}</span>` : "",
+          ].filter(Boolean).join(" · ")}${(r.room_label && state.settings?.feature_buildings) || (households && r.household_label) || (households && r.care) ? (r.evac_need && r.evac_need !== "none" ? " · " : "") : ""}${r.evac_need && r.evac_need !== "none" ? `<span class="need">${esc(NEED_LABEL[r.evac_need] || "Needs help")}</span>` : ""}</span>
         </span>
         ${roll ? `<button class="btn ${roll.marks[r.id] ? "" : "ghost"}" type="button" data-mark="${esc(r.id)}" aria-label="${roll.marks[r.id] ? "Marked safe" : "Mark safe"}">${roll.marks[r.id] ? "Safe ✓" : "Safe"}</button>` : ""}
       </div>`, !!(roll && !roll.marks[r.id]))).join("")}
@@ -1313,6 +1351,10 @@ async function recordMany(direction) {
   if (alsoCheckin) {
     lines.push("", `This also records today's check-in for ${ids.length === 1 ? "them" : "all of them"}.`,
                "A recorded day cannot be undone.");
+  }
+  if (direction === "out") {
+    const unaccompanied = ids.filter((id) => leavesChildrenUnaccompanied(state.rows.get(id))).length;
+    if (unaccompanied) lines.push("", `${unaccompanied} of these leave children on site with no supervision arrangement recorded.`);
   }
   if (!confirm(lines.join("\n"))) return;
 
