@@ -2715,7 +2715,8 @@ async function main() {
     const sent = (global.__mailSink || []).slice(before);
     assert.ok(sent.length >= 2, `expected an email per supervisor and admin, got ${sent.length}`);
     assert.ok(sent.every((m) => /House Rules/.test(m.subject)), "subject");
-    assert.ok(sent.every((m) => /Missing Nights/.test(m.text) && /3 consecutive nights/.test(m.text)), "the resident at the figure is listed");
+    assert.ok(sent.every((m) => !/Missing Nights/.test(m.text) && !/Missing Nights/.test(m.html || "")), "no resident is named in the House Rules email");
+    assert.ok(sent.every((m) => /1 resident|residents at or over/.test(m.text) && /admin\.html\?tab=absences/.test(m.text)), "counts and a link to Absences");
     assert.ok(sent.some((m) => /sup2@hut.example/.test(m.to)), "the supervisor should be a recipient");
     const { rows } = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'notify-thresholds-email' order by id desc limit 1`));
     assert.equal(rows[0].ok, true); assert.match(rows[0].result, /listed/);

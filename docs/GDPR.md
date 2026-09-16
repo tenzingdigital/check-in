@@ -232,14 +232,24 @@ resident data ever reaches that site, but a centre's data protection
 officer should know a third party is in the browser on that domain.
 
 **What leaves by email.** Invitations and password resets carry no resident
-data: a staff member's own address, name and a single-use link. Of the two
-recurring reports below, one carries resident data and one does not.
+data: a staff member's own address, name and a single-use link. All three
+recurring reports below carry counts and a link only — no resident is ever
+named in an outbound email.
 
-The nightly House Rules reminder (migration 032), where the centre has
-turned it on, goes to the centre's own active supervisors and
-administrators: each resident at or over a figure, their name and room
-label, and two counts against the site's House Rules settings — consecutive
-nights missed, and nights missed within the configured window.
+The nightly House Rules reminder (migration 032, rewritten for this GDPR
+property), where the centre has turned it on, goes to the centre's own
+active supervisors and administrators: two counts against the site's House
+Rules settings — how many residents are at the consecutive-nights figure,
+and how many are at the days-in-window figure — and a link to the
+pre-filled Absences report for the night just closed. The names and room
+labels behind those counts stay in the app, under Admin → Absences.
+
+The overnight safeguarding alert (migration 041), sent every night whether
+or not there is anything to report, goes to the centre's own active
+supervisors and administrators who have it ticked: a count of children away
+overnight with no authorised absence recorded, and a link to the pre-filled
+"Absent overnight" report for that night. The names, rooms and times behind
+that count stay in the app, under Admin → Reports.
 
 The Sunday Weekly register update (migrations 035 and 037), where the
 centre has turned it on — or at any time an administrator sends it by hand

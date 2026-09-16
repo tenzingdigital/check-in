@@ -549,8 +549,9 @@ out of the two working apps:
   *Departed* marks them all departed from one date, or *Family* makes them
   one household.
 - **The nightly House Rules reminder** (migration 032, off by default):
-  after close-out, supervisors and admins are emailed the residents at or
-  over a figure, on the nights there is anyone to list. Needs
+  after close-out, supervisors and admins are emailed the counts at or over
+  a figure and a link to the pre-filled Absences report for that night —
+  never a name — on the nights there is anyone to count. Needs
   `RESEND_API_KEY` and `MAIL_FROM`.
 - **Rooms archived, not deleted** (migration 031): a room that has been
   lived in keeps its history when taken out of use and can be restored;

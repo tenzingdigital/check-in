@@ -128,8 +128,9 @@ async function runJob(schema, label, name, sql) {
 
 // The House Rules reminder (migration 032): after close-out, where the
 // centre has turned it on and email is configured, every active supervisor
-// and administrator gets the list of residents at or over a figure. Sent
-// only on nights there is anyone to list. The app states facts; the
+// and administrator gets the counts of residents at or over a figure, and a
+// link to the pre-filled Absences report for last night — never a name. Sent
+// only on nights there is anyone to count. The app states facts; the
 // letter is the manager's.
 const mail = require('./lib/mail');
 async function notifyThresholds(schema, label) {
@@ -139,7 +140,8 @@ async function notifyThresholds(schema, label) {
     const summary = await withOwnerIn(schema, async (client) => {
       const { rows: [s] } = await client.query(
         `select notify_thresholds_email as on, site_name, warn_after_consecutive_nights as nights,
-                absence_window_limit as win_limit, absence_window_days as win_days from app_settings where id`);
+                absence_window_limit as win_limit, absence_window_days as win_days,
+                to_char(site_today() - 1, 'YYYY-MM-DD') as night from app_settings where id`);
       if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
       // The register views filter on is_staff(), which the nightly job is
       // not; the same two figures are computed here from the ledger, with
@@ -166,24 +168,30 @@ async function notifyThresholds(schema, label) {
       if (!to.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
       const figures = `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}.`;
       const decision = 'The app records the facts; whether a letter or a breach report follows is the manager\'s decision. ' +
-        'Authorised absences are already left out. Details under Admin → Absences.';
-      const person = (r) => `${r.consecutive_missed} consecutive night${r.consecutive_missed === 1 ? '' : 's'}, ${r.absent_in_window} of ${s.win_limit} days in ${s.win_days}`;
-      const lines = rows.map((r) => `- ${r.full_name}${r.room_label ? ` (${r.room_label})` : ''}: ${person(r)}`);
+        'Authorised absences are already left out. The names behind these counts are in the app under Admin → Absences.';
+      const nConsecutive = rows.filter((r) => r.consecutive_missed >= s.nights).length;
+      const nWindow = rows.filter((r) => r.absent_in_window >= s.win_limit).length;
+      const link = reportLink({ tab: 'absences', from: s.night, to: s.night });
+      const ctaLabel = `Open Absences for ${safeguarding.dayMonth(s.night)}`;
+      const rowsForLayout = [
+        { label: 'At the consecutive-nights figure', value: String(nConsecutive) },
+        { label: 'At the days-in-window figure', value: String(nWindow) },
+      ];
       const text = `${s.site_name || 'CheckSteady'}: ${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure after last night's close-out.\n\n` +
-        `${figures}\n\n${lines.join('\n')}\n\n${decision}`;
-      // Unlike the other two reports this one names residents by design (see
-      // docs/GDPR.md, "What leaves by email") — so every name and room label
-      // goes through the layout's escaping, never into markup raw.
+        `${figures}\n\n` +
+        `At the consecutive-nights figure: ${nConsecutive}\nAt the days-in-window figure: ${nWindow}\n\n` +
+        (link ? `${ctaLabel}: ${link}\n\n` : '') +
+        `${decision}`;
+      // Counts and a link, never a name — see docs/GDPR.md, "What leaves by
+      // email". The names behind these counts stay behind the login, on
+      // Admin → Absences.
       const layoutArgs = {
         siteName: s.site_name,
         heading: `${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure`,
+        figure: { value: String(rows.length), label: 'residents at or over a House Rules figure', tone: 'attention' },
         paragraphs: [`After last night's close-out. ${figures}`],
-        rows: rows.map((r) => ({
-          label: r.full_name,
-          note: [r.room_label, `${r.absent_in_window} of ${s.win_limit} days in ${s.win_days}`].filter(Boolean).join(' · '),
-          value: `${r.consecutive_missed} night${r.consecutive_missed === 1 ? '' : 's'}`,
-        })),
-        cta: reportLink({ tab: 'absences' }) ? { href: reportLink({ tab: 'absences' }), label: 'Open Admin → Absences' } : null,
+        rows: rowsForLayout,
+        cta: link ? { href: link, label: ctaLabel } : null,
         notes: [decision],
       };
       const slug = await prefs.slugForSchema(client, schema);
