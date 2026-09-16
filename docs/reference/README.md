@@ -55,6 +55,28 @@ Made under section 83 of the International Protection Act 2026 (in force
 
 ## Justice-Child-Safeguarding-Policy-R3.pdf — Child Protection and Welfare Safeguarding Policy (Department of Justice / IPAS)
 
-Referenced by House Rules 3.5.3–3.5.5; Appendix 5 is the form for a child in
-another adult's care or staying elsewhere overnight. Not yet summarised
-here — read it before designing the child-welfare alert.
+Referenced by House Rules 3.5.3–3.5.5. Printed page numbers are two behind
+the PDF's (printed p.36 = PDF p.38).
+
+- **Appendix 5 (printed p.36)** — the form a parent completes *before
+  leaving the centre*, in two parts. **(A) Leaving children in the care of
+  another adult resident:** child's name and room; the anticipated duration
+  of the absence; the name and room of the nominated carer; the parent's
+  contact number; signatures of parent and nominated carer, dated. NB on the
+  form: if the absence is overnight or into the evening, the children must
+  be with the nominated adult at all times. The centre (16 Sep 2026): both
+  sign, the parent presents it to management for approval, the approved
+  form is kept on file; daytime arrangements are approved routinely, night
+  only exceptionally (none approved yet since June 2026). Security are not
+  currently told of approved arrangements — the ask is a way to record them
+  and show security who may collect/mind whose children. **(B) Children
+  staying away from the centre overnight:** anticipated duration and the
+  parent's signature (House Rules 3.5.5 adds the name and address of the
+  host and the return date). In CheckSteady (B) is an authorised absence for
+  a child with guardian agreement; (A) is not yet modelled.
+- **Appendix 4 (printed p.35)** — standard letter to a parent that a
+  referral has been made to Tusla. **Appendix 6 (printed p.37)** — notice to
+  residents naming the centre's Designated Liaison Person and deputy.
+- **Reporting a concern to IPAS (printed p.34)** — the table sent to
+  IPASChildSafeguarding@justice.ie: type of concern, where, date, date sent
+  to Tusla / Gardaí called.

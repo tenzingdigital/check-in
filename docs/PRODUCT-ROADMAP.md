@@ -402,3 +402,30 @@ check-ins from the old app; the hut unchanged); go-live Thursday 1 October
   concern without edit rights* — open.
 - *Individual logins for security staff* (a shared mailbox today) — a
   configuration matter, not code: create the accounts.
+
+Added from the centre's follow-up email (Niamh Slevin, 16 September 2026):
+
+- *Approved child-supervision arrangements (Appendix 5, part A).* A parent
+  and a nominated adult resident sign the form, management approves, the
+  form is filed — and security are never told. Ask: record the approved
+  arrangement (children, nominated carer, from/to, day or overnight,
+  approved by) and show it to security at the door, so a parent signing out
+  with an arrangement in place reads differently from one without. The
+  natural fact behind the overnight alert above: a parent off site
+  overnight with children on site and *no approved arrangement* is the case
+  House Rules 3.5.4 makes reportable. Not yet designed. The form's contact
+  number and the story behind the absence stay on the paper form.
+- *Visitor hours* — House Rules 3.3.8: 10:00–13:00 and 14:00–20:00;
+  security have been told to refuse visitors outside them. The visitors
+  feature could say so at the door; nothing enforced yet.
+- *Nightly emails to a managers' mailbox* — the centre wants the midnight
+  absence report and the child absence report sent to
+  `managers@brightonaccommodation.ie`. Recipients are ticked staff
+  accounts, so that mailbox needs a supervisor account of its own — a shared
+  login, which sits awkwardly beside the individual-logins recommendation
+  for security. Decide: a receive-only account, or tick the managers
+  individually.
+- *Security accounts* — six officers' addresses received (a seventh,
+  Colin, pending): invitations from Admin → Staff once the owner says so.
+- *Resident register* — the centre sent its current register (names,
+  rooms, DOBs) for import before the 28 September dry run.
