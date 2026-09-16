@@ -12,7 +12,6 @@ and it is deliberately the first thing in the file.
 | **Database** | `hut-db` — Render Postgres 16 |
 | **Nightly cron** | `hut-nightly` — the maintenance `pg_cron` used to run |
 | **Weekly cron** | `hut-weekly` — the Sunday Weekly Register Update, at 10:00 site time |
-| **Evening cron** | `hut-evening` — the 22:00 guardian alert, at 22:00 site time |
 | **Brochure site** | `checksteady-site` — static, published from `site/` |
 | **App URL** | `app.checksteady.com` |
 | **Site URL** | `checksteady.com` (and `www.`) |
@@ -339,7 +338,7 @@ vendor to sign up for and no keys to copy between dashboards.
 ### 1. Create the services
 
 Render dashboard → **New → Blueprint** → point at this repo. `render.yaml`
-creates all five resources in Frankfurt:
+creates all four resources in Frankfurt:
 
 | Resource | What it is |
 |---|---|
@@ -347,7 +346,6 @@ creates all five resources in Frankfurt:
 | `hut-check-in` | The Node web service — serves `public/` and `/api`. |
 | `hut-nightly` | The cron job that runs the maintenance functions. |
 | `hut-weekly` | The cron job that sends the Sunday Weekly Register Update. |
-| `hut-evening` | The cron job that sends the 22:00 guardian alert. |
 
 `DATABASE_URL` is wired from the database into both services by the blueprint;
 you never paste a connection string anywhere.
@@ -470,17 +468,15 @@ from a shell.
 The reset link is the only one of the three that helps the *last remaining
 admin*, who has nobody above them to do it.
 
-Every recurring email — the Sunday Weekly register update, the nightly
-email and the 22:00 guardian alert — carries its own Unsubscribe link and
-the RFC 8058 headers that let a mail client one-click it, both built from
-`PUBLIC_URL` the same as the links above; unset it and the email still
-sends, just with no link to unsubscribe from. The link opens
-`/unsubscribe`, needs no login, and touches only that one person's own
-preference. Admin → Staff shows who used it and when, and re-ticking the
-box reinstates them. The nightly email and the 22:00 alert share one tick,
-so stopping either stops both. A link in an email sent before migration
-054 — the old overnight safeguarding alert or House Rules reminder — still
-works and stops both the nightly email and the 22:00 alert.
+Every recurring email — the Sunday Weekly register update and the nightly
+email — carries its own Unsubscribe link and the RFC 8058 headers that let
+a mail client one-click it, both built from `PUBLIC_URL` the same as the
+links above; unset it and the email still sends, just with no link to
+unsubscribe from. The link opens `/unsubscribe`, needs no login, and
+touches only that one person's own preference. Admin → Staff shows who
+used it and when, and re-ticking the box reinstates them. A link in an
+email sent before migration 054 — the old overnight safeguarding alert or
+House Rules reminder — still works and stops the nightly email.
 
 ### 4. Add the rest of the staff, and the residents
 
@@ -579,21 +575,16 @@ out of the two working apps:
   one household.
 - **The nightly email** (migration 054, replacing the House Rules reminder
   of 032 and the overnight safeguarding alert of 041): after the snapshot,
-  the staff ticked *Gets the nightly email and the 22:00 alert* are emailed
-  one message of four counts, each with a link to the screen that has the
-  names — children on site without a guardian, children away overnight
-  without authorisation, check-ins recorded while signed out, and residents
-  at the House Rules figures — never a name. Sent on the nights there is
-  anything to count, and every Sunday regardless. One switch under
-  Settings, `nightly_email`; the old House Rules switch is retired (its
-  column stays, unread). Needs `RESEND_API_KEY` and `MAIL_FROM`.
-- **The 22:00 guardian alert** (migration 054): at 22:00 site time, the same
-  staff are emailed the households with children on site, every guardian
-  signed out at the gate and no supervision arrangement recorded — the
-  household, the children with their ages, the guardians and when they
-  went out, the room. It is the one email that names residents, because it
-  needs acting on that night; see `docs/GDPR.md`. Behind `feature_households`
-  and the same `nightly_email` switch.
+  the staff ticked *Gets the nightly email* are emailed one message of
+  four counts, each with a link to the screen that has the names —
+  children on site without a guardian (the named report for that night),
+  children away overnight without authorisation, check-ins recorded while
+  signed out, and residents at the House Rules figures — never a name.
+  Sent on the nights there is anything to count, and every Sunday
+  regardless. One switch under Settings, `nightly_email`; the old House
+  Rules switch is retired (its column stays, unread). Needs
+  `RESEND_API_KEY` and `MAIL_FROM`. There is no separate evening email:
+  the owner ruled the count and its link are the whole of it.
 - **Rooms archived, not deleted** (migration 031): a room that has been
   lived in keeps its history when taken out of use and can be restored;
   nobody can be moved into it meanwhile. Each room carries the beds
@@ -804,11 +795,12 @@ the previous Saturday, not the wrong week.
 
 The nightly run also sends **the nightly email** (migration 054) after the
 snapshot: one message, "Tonight at <site>", to the staff ticked *Gets the
-nightly email and the 22:00 alert*, with four sections in a fixed order —
+nightly email*, with four sections in a fixed order —
 **Children on site without a guardian**, **Children away overnight without
 authorisation**, **Check-ins recorded while signed out** and **At the House
 Rules figures** — each a count and a link to the page that has the names,
-never a name itself. It goes on any night a count is non-zero and every
+never a name itself. The first links to the *Children on site without a
+guardian* report for that night, not the live Families tab. It goes on any night a count is non-zero and every
 Sunday regardless, so a silent week is never mistaken for a job that
 stopped; `job_runs` records it as `nightly-email` either way. The
 guardian-gap snapshot it counts is a job of its own, `snapshot-guardian-gaps`,
@@ -833,42 +825,16 @@ written, and the House Rules switch under Settings is gone — the
 but nothing reads it. Hut-nightly needs `RESEND_API_KEY` and `MAIL_FROM`
 for this, as it always did for the two it replaced.
 
-A third cron, `hut-evening`, sends **the 22:00 guardian alert** (migration
-054): the households with children on site, every guardian signed out at
-the gate and no supervision arrangement recorded, named — the one email
-from this app that names residents, to the same ticked staff, because at
-22:00 a manager has to go to a door and a count cannot say which. As with
-the Sunday return, Render's clock is UTC and Ireland's is not, so it runs
-`node jobs.js evening` at both 21:00 and 22:00 UTC every day: the first run
-at or after 22:00 local sends, the other records "before 22:00" or
-"already sent today". A clear evening records "nothing to report" and
-sends nothing. In summer only, when Ireland is UTC+1, the 21:00 UTC run is
-the 22:00 local send and the 22:00 UTC run is a second look an hour later,
-which can send if a parent signed out in between; in winter the 21:00 UTC
-run is before 22:00 local and there is one look, at 22:00. It needs
-`feature_households` and `nightly_email` on under
-Settings and at least one person ticked, or it records why it sent
-nothing. With no mail keys it records "mail not configured" as a
-*failure*, unlike the other jobs, so the health banner shows an
-unconfigured cron from its first evening rather than on the first night a
-child is left; the nightly email fails the same way.
-`node jobs.js evening --force` from a Render shell sends it now, by hand —
-still once a day. After the blueprint sync that creates it, Render prompts
-for `RESEND_API_KEY` and `MAIL_FROM` on the new cron (they are `sync:
-false` in the blueprint), the same as `hut-weekly`; then tick *Gets the
-nightly email and the 22:00 alert* on each manager's staff card, since
-that one tick is the audience for both.
-
-What the alert covers, and what it does not: it looks at the gate at 22:00
-site time, and again an hour later in summer only — the two cron hours are
-UTC and do not move with the clocks. A household that becomes a gap after
-the last evening run (a parent who goes out at 23:00) is not named to
-anyone that night. It reaches the nightly email as a count, around 01:30
-in summer and 00:30 in winter, and the *Children on site without a
-guardian* report the next morning by name; the next email that names it is
-the following day's 22:00 alert, if the household is still in that state.
-Nobody should assume the app watches the door all night — it looks at
-22:00, tells the managers who are ticked, and stops.
+What the app covers here, and what it does not: a family that has
+children on site and no guardian on site — every guardian signed out at
+the gate, no supervision arrangement recorded — at the 00:30 snapshot is
+counted in the nightly email and named in the *Children on site without a
+guardian* report for that night. Nothing is watched during the evening:
+a parent who goes out at 19:00 and comes back at 23:30 is never recorded
+as a gap, and one who does not come back is a count at 00:30 and a name
+in the report the next morning, not an email that evening. Nobody should
+assume the app watches the door all night — it looks once, after
+midnight, tells the managers who are ticked, and stops.
 
 When to push: the crons run `node jobs.js` directly, and only the web
 service migrates first (`database.js` at boot). A deploy that lands while a
@@ -876,12 +842,8 @@ cron is running, or that has migrated `public` while the cron's own image
 is still the old code, can make that one run fail against the mismatched
 schema — a red "maintenance job failed" banner on every terminal for two
 days, which the next successful run clears. The windows to avoid are
-21:00–23:00 UTC (`hut-evening`) and roughly 00:15–00:45 UTC
-(`hut-nightly`), plus 09:00–10:15 UTC on a Sunday (`hut-weekly`); push
-outside them. A failed evening run is the one that matters — it is the
-alert that names a child — so if a push did land in that window, check
-`hut-evening`'s log in Render and run `node jobs.js evening --force` from
-its shell if it did not send.
+roughly 00:15–00:45 UTC (`hut-nightly`) and 09:00–10:15 UTC on a Sunday
+(`hut-weekly`); push outside them.
 
 ### 6. Point the front ends at the API
 

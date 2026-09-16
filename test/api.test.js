@@ -1922,42 +1922,12 @@ async function main() {
     assert.equal((await supC.fetch(`/api/supervision/${caraArrId}/end`, { method: "POST" })).status, 200);
   });
 
-  console.log("\n== the 22:00 guardian alert and the one nightly email: composers, reports, the switch, unsubscribe kinds (migration 054) ==");
-
-  await test("guardianAlert.compose names each household, its children and its off-site guardians, carries the footer sentence and the link; the subject counts households", async () => {
-    const { compose } = require("../lib/guardianAlert");
-    // Two rows shaped as guardian_gaps_now() returns them.
-    const gaps = [
-      { household_id: "a", household_label: "Gapfixture family (3)", room_labels: "Main · 12", children: "Gil (7), Gwen (4)", guardians_out: "Gia Gapfixture (out since 19:40)", first_out_at: new Date("2026-09-16T18:40:00Z") },
-      { household_id: "b", household_label: "Otherfixture family (2)", room_labels: "Annex · 3", children: "Ollie (10)", guardians_out: "Omar Otherfixture (never signed in)", first_out_at: null },
-    ];
-    const link = "https://hut-check-in.onrender.com/admin.html#families";
-    const unsubscribe = "https://hut-check-in.onrender.com/unsubscribe?t=default&k=abc&e=guardian_alert";
-    const out = compose({ siteName: "Slaney", gaps, link, unsubscribe });
-    assert.equal(out.subject, "Slaney: children on site without a guardian — 2 households");
-    for (const part of [out.text, out.html]) {
-      assert.match(part, /Gapfixture family \(3\)/); assert.match(part, /Main · 12/);
-      assert.match(part, /Children on site: Gil \(7\), Gwen \(4\)/);
-      assert.match(part, /Guardians off site: Gia Gapfixture \(out since 19:40\)/);
-      assert.match(part, /Otherfixture family \(2\)/); assert.match(part, /Annex · 3/);
-      assert.match(part, /Children on site: Ollie \(10\)/);
-      assert.match(part, /Guardians off site: Omar Otherfixture \(never signed in\)/);
-      assert.match(part, /No supervision arrangement recorded\./);
-      assert.match(part, /This is the register as it stands at \d{2}:\d{2}; a paper Appendix 5 form on file is not in the app until a supervisor records it\./);
-      assert.match(part, /This email names residents because it needs acting on tonight — treat it as you would the register itself\./);
-      assert.ok(part.includes(link), "carries the Families link");
-    }
-    assert.match(out.html, /Open Families/);
-    assert.ok(!/counts only/.test(out.html), "the default counts-only footer is replaced: this email names people");
-    assert.ok(out.text.endsWith(`To stop these emails: ${unsubscribe}`));
-    assert.equal(compose({ siteName: "Slaney", gaps: [gaps[0]] }).subject, "Slaney: children on site without a guardian — 1 household");
-    assert.equal(compose({ gaps: [gaps[0]] }).subject, "CheckSteady: children on site without a guardian — 1 household");
-  });
+  console.log("\n== the one nightly email: composer, reports, the switch, unsubscribe kinds (migration 054) ==");
 
   await test("nightlyEmail.compose carries four counts in a fixed order and four links, never a resident name; the subject sums the counts or says nothing to report", async () => {
     const { compose } = require("../lib/nightlyEmail");
     const links = {
-      families:  "https://hut-check-in.onrender.com/admin.html#families",
+      guardianGaps: "https://hut-check-in.onrender.com/admin.html#report-guardian-gaps",
       overnight: "https://hut-check-in.onrender.com/admin.html#report-overnight",
       conflicts: "https://hut-check-in.onrender.com/admin.html#report-checkin-conflicts",
       absences:  "https://hut-check-in.onrender.com/admin.html#absences",
@@ -1975,11 +1945,11 @@ async function main() {
       // let slip through; none of them, nor anything like a name, is here.
       assert.ok(!/Famfixture|Gapfixture|Kim|Gil|Pat\b/.test(part), "no resident name anywhere in the nightly email");
     }
-    assert.match(out.text, /Children on site without a guardian: 2 — https:\/\/hut-check-in\.onrender\.com\/admin\.html#families/);
+    assert.match(out.text, /Children on site without a guardian: 2 — https:\/\/hut-check-in\.onrender\.com\/admin\.html#report-guardian-gaps/, "the link is the named report for that night, not the live Families tab");
     assert.match(out.text, /Children away overnight without authorisation: 1 — /);
     assert.match(out.text, /Check-ins recorded while signed out: 3 — /);
     assert.match(out.text, /At the House Rules figures: 0 — /);
-    assert.match(out.html, /Open Families/, "the button opens the first section with something in it");
+    assert.match(out.html, /Open Children on site without a guardian/, "the button opens the first section with something in it");
     assert.match(out.html, /counts only/, "the default footer: counts and links, the detail behind the login");
     assert.ok(out.text.endsWith(`To stop these emails: ${unsubscribe}`));
 
@@ -2078,10 +2048,8 @@ async function main() {
     assert.equal((await supC.fetch("/api/settings", { method: "PATCH", body: { nightly_email: true } })).status, 403);
 
     const prefs = require("../lib/emailPrefs");
-    assert.ok(prefs.isKind("nightly") && prefs.isKind("guardian_alert"));
+    assert.ok(prefs.isKind("nightly") && !prefs.isKind("guardian_alert"), "no separate guardian-alert kind: the count is a section of the nightly email");
     assert.equal(prefs.KINDS.nightly.tick, "safeguarding_alert");
-    assert.equal(prefs.KINDS.guardian_alert.tick, "safeguarding_alert");
-    assert.equal(prefs.KINDS.guardian_alert.name, "the 22:00 guardian alert");
     assert.equal(prefs.KINDS.nightly.name, "the nightly email");
     assert.match(prefs.KINDS.safeguarding_alert.name, /now the nightly email/, "an old link's kind says where the email went");
     assert.match(prefs.KINDS.house_rules.name, /now the nightly email/);
@@ -2096,20 +2064,19 @@ async function main() {
     assert.equal(page.status, 200, html);
     assert.match(html, /the nightly email/); assert.match(html, /Stop this email/);
     assert.equal((await withOwner((c) => prefs.optOutsFor(c, supId))).length, 0, "GET changed nothing");
-    const alert = await fetch(local(link).replace(/e=nightly$/, "e=guardian_alert"));
-    assert.equal(alert.status, 200, "the guardian_alert kind"); assert.match(await alert.text(), /the 22:00 guardian alert/);
     const old = await fetch(local(link).replace(/e=nightly$/, "e=house_rules"));
     assert.equal(old.status, 200, "the retired house_rules kind"); assert.match(await old.text(), /now the nightly email/, "a link from an email sent before 054 still works");
 
-    // Three kinds read the safeguarding_alert tick. Stopping one clears the
-    // tick once; an admin ticking the person back on clears every one of
-    // their rows, not only the retired kind's, so the tick and the card agree.
-    await withOwner((c) => prefs.optOut(c, supId, ["nightly", "guardian_alert", "safeguarding_alert"]));
+    // Three kinds read the safeguarding_alert tick (the nightly email and
+    // the two retired ones). Stopping one clears the tick once; an admin
+    // ticking the person back on clears every one of their rows, not only
+    // the retired kind's, so the tick and the card agree.
+    await withOwner((c) => prefs.optOut(c, supId, ["nightly", "safeguarding_alert"]));
     assert.equal((await withOwner((c) => c.query(`select safeguarding_alert from public.profiles where id = $1`, [supId]))).rows[0].safeguarding_alert, false);
-    assert.equal((await withOwner((c) => prefs.optOutsFor(c, supId))).length, 3);
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, supId))).length, 2);
     const retick = await nAdmin.fetch(`/api/staff/${supId}/safeguarding-alert`, { method: "POST", body: { on: true } });
     assert.equal(retick.status, 200, retick.text);
-    assert.equal((await withOwner((c) => prefs.optOutsFor(c, supId))).length, 0, "re-ticking clears the nightly and 22:00 opt-outs too");
+    assert.equal((await withOwner((c) => prefs.optOutsFor(c, supId))).length, 0, "re-ticking clears the nightly opt-out too");
     assert.equal((await nAdmin.fetch(`/api/staff/${supId}/safeguarding-alert`, { method: "POST", body: { on: false } })).status, 200, "left as found");
   });
 
@@ -3324,23 +3291,18 @@ async function main() {
     assert.equal(cleared.json.find((s) => s.id === id).weekly_report, false, "demoting to guard did not clear the flag");
   });
 
-  console.log("\n== the 22:00 guardian alert and the one nightly email (migration 054) ==");
-
-  await test("eveningGate(): 22:00 site time or later — or force", async () => {
-    const { eveningGate } = require("../jobs");
-    assert.equal(eveningGate({ localHour: 21 }), "before 22:00");
-    assert.equal(eveningGate({ localHour: 0 }), "before 22:00");
-    assert.equal(eveningGate({ localHour: 22 }), null);
-    assert.equal(eveningGate({ localHour: 23 }), null);
-    assert.equal(eveningGate({ localHour: 3, force: true }), null, "force bypasses the clock");
-  });
+  console.log("\n== the one nightly email (migration 054) ==");
 
   // A household whose only adult is signed OUT at the gate while the child is
-  // signed IN, with nothing recorded to cover it — the fact the 22:00 alert
-  // exists for. Built through the API as a supervisor and a guard would.
+  // signed IN, with nothing recorded to cover it — the fact the nightly
+  // email's first section counts and the Children-without-a-guardian report
+  // names. Built through the API as a supervisor and a guard would. There is
+  // no separate evening email: the owner ruled the count in the nightly
+  // email, with a link to the named report for that night, is the whole of
+  // it.
   const gap = {};
-  await test("the 22:00 alert names the household and the child to the staff ticked for it, once a day, and not once an arrangement covers them", async () => {
-    const { guardianAlert } = require("../jobs");
+  await test("a household with children on site and every guardian out is a guardian gap; the nightly email fails loud when mail is not configured", async () => {
+    const { nightlyEmail } = require("../jobs");
     for (const [k, first, last, dob] of [["parent", "Gia", "Gapfixture", "1990-02-02"], ["kid", "Gil", "Gapfixture", "2019-01-01"], ["carer", "Cass", "Gapcarer", "1984-04-04"]]) {
       const res = await supC.fetch("/api/residents", { method: "POST", body: { first_name: first, last_name: last, date_of_birth: dob } });
       assert.equal(res.status, 201, res.text); gap[k] = res.json.id;
@@ -3353,100 +3315,33 @@ async function main() {
     }
     const supId = (await withOwner((c) => c.query(`select id from auth.users where email = 'sup2@hut.example'`))).rows[0].id;
     await withOwner((c) => c.query(`update public.profiles set safeguarding_alert = true, active = true where id = $1`, [supId]));
-    await withOwner((c) => c.query(`delete from public.job_runs where job = 'guardian-alert-email'`));
-    const lastRun = async () => (await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'guardian-alert-email' order by id desc limit 1`))).rows[0];
+    await withOwner((c) => c.query(`update public.app_settings set nightly_email = true, feature_households = true`));
+    const expected = (await withOwner((c) => c.query(`select count(*)::int as n from public.guardian_gap_households() g where g.household_id = $1`, [gap.hh]))).rows[0].n;
+    assert.equal(expected, 1, "the fixture household is a gap");
 
-    // The switches, in the order the job checks them.
-    await withOwner((c) => c.query(`update public.app_settings set nightly_email = false, feature_households = true`));
-    let before = (global.__mailSink || []).length;
-    assert.equal(await guardianAlert("public", "", { force: true }), true);
-    assert.equal((await lastRun()).result, "off");
-    await withOwner((c) => c.query(`update public.app_settings set nightly_email = true, feature_households = false`));
-    assert.equal(await guardianAlert("public", "", { force: true }), true);
-    assert.equal((await lastRun()).result, "households off");
-    await withOwner((c) => c.query(`update public.app_settings set feature_households = true`));
-    assert.equal((global.__mailSink || []).length, before, "nothing goes while either switch is off");
+    // A supervision arrangement covering the household makes the fact go away.
+    const from = new Date(Date.now() - 3600e3).toISOString(), to = new Date(Date.now() + 3 * 3600e3).toISOString();
+    const rec = await supC.fetch(`/api/households/${gap.hh}/supervision`, { method: "POST", body: { carer_id: gap.carer, from_at: from, to_at: to, overnight: true } });
+    assert.equal(rec.status, 201, rec.text); gap.arr = rec.json.id;
+    const covered = (await withOwner((c) => c.query(`select count(*)::int as n from public.guardian_gap_households() g where g.household_id = $1`, [gap.hh]))).rows[0].n;
+    assert.equal(covered, 0, "the covered household is not a gap");
+    assert.equal((await supC.fetch(`/api/supervision/${gap.arr}/end`, { method: "POST" })).status, 200);
 
-    // No mail provider is a failure here, not a shrug: a hut-evening
-    // created without its mail keys must light the health banner on its
-    // first quiet evening, not on the first night a child is left.
+    // No mail provider is a failure, not a shrug: a hut-nightly created
+    // without its mail keys must light the health banner on its first
+    // quiet night, not on the first night a child is left.
+    const before = (global.__mailSink || []).length;
     const sink = process.env.HUT_MAIL_SINK;
     try {
       delete process.env.HUT_MAIL_SINK;
-      assert.equal(await guardianAlert("public", "", { force: true }), true);
-      let notConfigured = await lastRun();
-      assert.equal(notConfigured.result, "mail not configured"); assert.equal(notConfigured.ok, false, "recorded as a failure, so recent_failures sees it");
-      await withOwner((c) => c.query(`update public.app_settings set nightly_email = true`));
-      const { nightlyEmail } = require("../jobs");
       assert.equal(await nightlyEmail("public", ""), true);
-      notConfigured = (await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'nightly-email' order by id desc limit 1`))).rows[0];
-      assert.equal(notConfigured.result, "mail not configured"); assert.equal(notConfigured.ok, false, "the nightly email fails loud the same way");
+      const notConfigured = (await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'nightly-email' order by id desc limit 1`))).rows[0];
+      assert.equal(notConfigured.result, "mail not configured"); assert.equal(notConfigured.ok, false, "recorded as a failure, so recent_failures sees it");
     } finally {
       process.env.HUT_MAIL_SINK = sink;
     }
     assert.equal((global.__mailSink || []).length, before, "nothing reached the sink while it was off");
-
-    // Unforced: the clock decides. Whatever the hour in the test cluster, an
-    // unforced run either sends or records the gate; it never errors.
-    assert.equal(await guardianAlert("public", ""), true);
-    const unforced = (await lastRun()).result;
-    assert.ok(unforced === "before 22:00" || /emailed$/.test(unforced), unforced);
-    await withOwner((c) => c.query(`delete from public.job_runs where job = 'guardian-alert-email'`));
-
-    // Forced: the email, with names, to the one ticked supervisor.
-    const expected = (await withOwner((c) => c.query(`select count(*)::int as n from public.guardian_gaps_now()`))).rows[0].n;
-    assert.ok(expected >= 1, "the fixture household is a gap");
-    before = (global.__mailSink || []).length;
-    assert.equal(await guardianAlert("public", "", { force: true }), true);
-    let sent = (global.__mailSink || []).slice(before);
-    assert.equal(sent.length, 1, "one email per ticked recipient");
-    assert.equal(sent[0].to, "sup2@hut.example");
-    assert.match(sent[0].subject, /children on site without a guardian — \d+ household/);
-    for (const part of [sent[0].text, sent[0].html]) {
-      assert.match(part, /Gapfixture family \(2\)/, "the household is named");
-      assert.match(part, /Children on site: [^\n<]*Gil \(\d+\)/, "the child, first name and age");
-      assert.match(part, /Guardians off site: [^\n<]*Gia Gapfixture \(out since \d{2}:\d{2}\)/, "the guardian, and since when");
-      assert.match(part, /No supervision arrangement recorded/);
-      assert.match(part, /This email names residents because it needs acting on tonight/, "the footer says why this one names people");
-    }
-    assert.match(sent[0].text, /Open Families: https:\/\/hut-check-in\.onrender\.com\/admin\.html\?tab=families/);
-    assert.equal(sent[0].attachments, undefined, "nothing is attached");
-    assert.ok(sent[0].headers && /e=guardian_alert>$/.test(sent[0].headers["List-Unsubscribe"]), "the unsubscribe headers carry the guardian_alert kind");
-    let run = await lastRun();
-    assert.equal(run.result, `${expected} households, 0/1 emailed`, "the sink answers not delivered, so 0/1 is right here");
-    assert.equal(run.ok, false, "a run that reached nobody is not ok");
-
-    // Reaching nobody is not "sent": a second forced run is a fresh attempt.
-    assert.equal(await guardianAlert("public", "", { force: true }), true);
-    assert.equal((global.__mailSink || []).length, before + 2, "a total delivery failure is retried, not treated as already sent");
-    // Once a run has delivered, the day is done — force or not.
-    await withOwner((c) => c.query(`insert into public.job_runs (job, ok, result) values ('guardian-alert-email', true, '1 households, 1/1 emailed')`));
-    assert.equal(await guardianAlert("public", "", { force: true }), true);
-    assert.equal((global.__mailSink || []).length, before + 2, "no duplicate once a run already delivered today");
-    assert.equal((await lastRun()).result, "already sent today");
-
-    // A supervision arrangement covering the household makes the fact go away.
-    await withOwner((c) => c.query(`delete from public.job_runs where job = 'guardian-alert-email'`));
-    const from = new Date(Date.now() - 3600e3).toISOString(), to = new Date(Date.now() + 3 * 3600e3).toISOString();
-    const rec = await supC.fetch(`/api/households/${gap.hh}/supervision`, { method: "POST", body: { carer_id: gap.carer, from_at: from, to_at: to, overnight: true } });
-    assert.equal(rec.status, 201, rec.text); gap.arr = rec.json.id;
-    const stillGaps = (await withOwner((c) => c.query(`select count(*)::int as n from public.guardian_gaps_now()`))).rows[0].n;
-    assert.equal(await guardianAlert("public", "", { force: true }), true);
-    run = await lastRun();
-    if (stillGaps === 0) {
-      assert.equal(run.result, "nothing to report");
-      assert.equal((global.__mailSink || []).length, before + 2, "nothing sent when there is nothing to report");
-    } else {
-      // Another test's household is in the state tonight; ours is not.
-      assert.match(run.result, /emailed$/);
-      assert.doesNotMatch((global.__mailSink || []).at(-1).text, /Gapfixture/, "the covered household is not named");
-    }
-
-    // No recipients: recorded, nothing sent.
     await withOwner((c) => c.query(`update public.profiles set safeguarding_alert = false where id = $1`, [supId]));
-    assert.equal((await supC.fetch(`/api/supervision/${gap.arr}/end`, { method: "POST" })).status, 200);
-    assert.equal(await guardianAlert("public", "", { force: true }), true);
-    assert.equal((await lastRun()).result, "no recipients");
   });
 
   await test("the nightly email is one message of four counts and four links, never a name, to the same staff; off, or nothing to report on a weekday, nothing goes", async () => {
@@ -3493,7 +3388,7 @@ async function main() {
     const gapsRecorded = (await withOwner((c) => c.query(`select count(*)::int as n from public.overnight_guardian_gaps where night = $1`, [lastNight]))).rows[0].n;
     assert.ok(gapsRecorded >= counts.gaps_now, "the email counts the night's snapshot rows");
     const m = (re) => { const x = sent[0].text.match(re); assert.ok(x, `${re} in:\n${sent[0].text}`); return Number(x[1]); };
-    assert.equal(m(/Children on site without a guardian: (\d+) — https:\/\/hut-check-in\.onrender\.com\/admin\.html\?tab=families\n/), gapsRecorded);
+    assert.equal(m(new RegExp(`Children on site without a guardian: (\\d+) — https://hut-check-in\\.onrender\\.com/admin\\.html\\?tab=reports&report=guardian-gaps&from=${lastNight}&to=${lastNight}\\n`)), gapsRecorded, "the link is the named report for that night");
     assert.equal(m(new RegExp(`Children away overnight without authorisation: (\\d+) — https://hut-check-in\\.onrender\\.com/admin\\.html\\?tab=reports&report=overnight&from=${lastNight}&to=${lastNight}\\n`)), counts.children_away);
     assert.equal(m(new RegExp(`Check-ins recorded while signed out: (\\d+) — https://hut-check-in\\.onrender\\.com/admin\\.html\\?tab=reports&report=checkin-conflicts&from=${lastNight}&to=${lastNight}\\n`)), counts.conflicts);
     const atFigures = m(new RegExp(`At the House Rules figures: (\\d+) — https://hut-check-in\\.onrender\\.com/admin\\.html\\?tab=absences&from=${lastNight}&to=${lastNight}`));
@@ -3539,13 +3434,11 @@ async function main() {
     await withOwner((c) => c.query(`update public.profiles set safeguarding_alert = false where id = $1`, [supId]));
   });
 
-  await test("evening mode runs only the 22:00 alert; nightly mode writes nightly-email and neither of the two jobs it replaced", async () => {
+  await test("nightly mode writes nightly-email and neither of the two jobs it replaced; there is no evening mode", async () => {
     const jobs = require("../jobs");
     const count = async (job) => (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = $1`, [job]))).rows[0].n;
-    const closeBefore = await count("close-out-compliance-days"), alertBefore = await count("guardian-alert-email");
-    await jobs.main("evening", { keepPool: true });
-    assert.equal(await count("guardian-alert-email"), alertBefore + 1, "evening mode ran the 22:00 alert once");
-    assert.equal(await count("close-out-compliance-days"), closeBefore, "evening mode runs no other job");
+    await assert.rejects(() => jobs.main("evening", { keepPool: true }), /unknown mode "evening"/, "no separate evening email, so no evening mode");
+    assert.equal(await count("guardian-alert-email"), 0, "no job of its own ever wrote a row");
     const nightlyBefore = await count("nightly-email"), gapSnapBefore = await count("snapshot-guardian-gaps");
     await jobs.main("nightly", { keepPool: true });
     assert.equal(await count("nightly-email"), nightlyBefore + 1, "the nightly run wrote its one email's row");
@@ -3575,17 +3468,18 @@ async function main() {
     for (const h of [6, 12, 15, 23]) assert.equal(snapshotGate({ localHour: h }), "outside the snapshot window", `${h}:00 is outside`);
     assert.equal(snapshotGate({ localHour: undefined }), "outside the snapshot window", "no app_settings row is not a night");
     assert.equal(schemaBehind({ schema: "t_x", missing_functions: [] }), null);
-    assert.equal(schemaBehind({ schema: "t_x", missing_functions: ["guardian_gaps_now", "snapshot_guardian_gaps"] }), "schema behind: guardian_gaps_now, snapshot_guardian_gaps");
+    assert.equal(schemaBehind({ schema: "t_x", missing_functions: ["guardian_gap_households", "snapshot_guardian_gaps"] }), "schema behind: guardian_gap_households, snapshot_guardian_gaps");
     assert.equal(schemaBehind(undefined), "schema not provisioned");
   });
 
   // The leak this guards against: searchPath() is `t_x, public, extensions`,
-  // so on a tenant provisioned before 054 an unqualified guardian_gaps_now()
-  // does not fail — it runs public's, over the LEGACY centre's households,
-  // and the 22:00 email names them to the wrong centre's staff. A real
-  // tenant is provisioned and one 054 function dropped from it, as the
-  // tenant_schema_gaps() test above does, then both crons are run over it.
-  await test("a tenant schema behind public runs no job at all — the 22:00 alert, the nightly email and the purges included — and records schema-check ok=false", async () => {
+  // so on a tenant provisioned before 054 an unqualified
+  // snapshot_guardian_gaps() does not fail — it runs public's, over the
+  // LEGACY centre's households, and the nightly email counts them for the
+  // wrong centre's staff. A real tenant is provisioned and one 054 function
+  // dropped from it, as the tenant_schema_gaps() test above does, then both
+  // crons are run over it.
+  await test("a tenant schema behind public runs no job at all — the weekly return, the nightly email and the purges included — and records schema-check ok=false", async () => {
     const jobs = require("../jobs");
     const tenancy = require("../lib/tenancy");
     await withOwner(async (c) => {
@@ -3595,17 +3489,17 @@ async function main() {
                      values ('Behind Fixture', 'behindfixture', 'active', now(), 'test')`);
       await tenancy.provisionSchema(c, "behindfixture", { siteName: "Behind Fixture" });
       await c.query(`update t_behindfixture.app_settings set nightly_email = true, feature_households = true`);
-      await c.query(`drop function t_behindfixture.guardian_gaps_now() cascade`);
+      await c.query(`drop function t_behindfixture.snapshot_guardian_gaps(date) cascade`);
     });
     const runs = async () => (await withOwner((c) => c.query(`select job, ok, result from t_behindfixture.job_runs order by id`))).rows;
     const legacyBefore = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'schema-check'`))).rows[0].n;
 
-    const failedEvening = await jobs.main("evening", { keepPool: true, force: true });
-    assert.ok(failedEvening >= 1, "a behind tenant counts as a failed job, so the cron exits non-zero");
+    const failedWeekly = await jobs.main("weekly", { keepPool: true, force: true });
+    assert.ok(failedWeekly >= 1, "a behind tenant counts as a failed job, so the cron exits non-zero");
     let rows = await runs();
-    assert.deepEqual(rows.map((r) => r.job), ["schema-check"], "the 22:00 alert did not run on the behind schema");
+    assert.deepEqual(rows.map((r) => r.job), ["schema-check"], "the weekly return did not run on the behind schema");
     assert.equal(rows[0].ok, false);
-    assert.match(rows[0].result, /^schema behind: .*guardian_gaps_now/, rows[0].result);
+    assert.match(rows[0].result, /^schema behind: .*snapshot_guardian_gaps/, rows[0].result);
 
     const failedNightly = await jobs.main("nightly", { keepPool: true });
     assert.ok(failedNightly >= 1);
@@ -4527,17 +4421,16 @@ async function main() {
     const all = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "all", action: "stop" });
     assert.equal(all.status, 200);
     outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
-    // "All" is every kind still sent — the two 054 kinds and the Sunday
-    // report — and NOT the two retired ones, which would be staff-card lines
-    // for emails nobody sends. Two of the three share the safeguarding_alert
-    // tick, and one UPDATE clears it once (emailPrefs ticksFor), not twice.
-    assert.deepEqual(outs.map((o) => o.kind).sort(), ["guardian_alert", "nightly", "weekly_report"]);
+    // "All" is every kind still sent — the nightly email (054) and the
+    // Sunday report — and NOT the two retired ones, which would be
+    // staff-card lines for emails nobody sends.
+    assert.deepEqual(outs.map((o) => o.kind).sort(), ["nightly", "weekly_report"]);
 
     const back = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "weekly_report", action: "resume" });
     assert.equal(back.status, 200);
     assert.match(await back.text(), /will be sent to you again/i);
     outs = await withOwner((c) => prefs.optOutsFor(c, unsubSupId));
-    assert.deepEqual(outs.map((o) => o.kind).sort(), ["guardian_alert", "nightly"]);
+    assert.deepEqual(outs.map((o) => o.kind).sort(), ["nightly"]);
     const backAll = await form("/unsubscribe", { t: "default", k: key, e: "weekly_report", kind: "all", action: "resume" });
     assert.equal(backAll.status, 200);
     assert.equal((await withOwner((c) => prefs.optOutsFor(c, unsubSupId))).length, 0);

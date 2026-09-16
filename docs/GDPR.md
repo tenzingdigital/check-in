@@ -34,10 +34,11 @@ centre turns that on.
 Updated 16 September 2026 against migrations 053–054: households now carry
 guardians and children and a recorded supervision arrangement (053); the
 nightly House Rules reminder (032) and the overnight safeguarding alert
-(041) are one nightly email of counts; and a new 22:00 guardian alert names
-a household, its children and its off-site guardians in the email body —
-the first recurring email in the app whose body names a resident. The
-"What leaves by email" section and the processor table say so.
+(041) are one nightly email of counts, one of which — children on site
+without a guardian — links to a report that names the household behind
+the login. The owner ruled against a separate evening email that would
+have named residents in its body; none was released. The "What leaves by
+email" section and the processor table say so.
 
 **This is not legal advice.** A system that records the daily presence of
 residents in accommodation, some of whom are in the international protection
@@ -270,41 +271,24 @@ officer should know a third party is in the browser on that domain.
 **What leaves by email.** Invitations and password resets carry no resident
 data: a staff member's own address, name and a single-use link. The nightly
 email and the Sunday update below carry counts and a link only — no
-resident is named in the email body. Two exceptions: the 22:00 guardian
-alert names people in its body by design (below), and, chosen per centre,
+resident is named in the email body. One exception, chosen per centre:
 the Sunday update can be attached as a Word document (below).
 
 The nightly email (migration 054, replacing the House Rules reminder of
 032 and the overnight safeguarding alert of 041), where the centre has
 turned `nightly_email` on, goes after the night closes to the centre's own
-active supervisors and administrators ticked "Gets the nightly email and
-the 22:00 alert" on their staff record: four counts, each with a link into
-the app — households with children on site and no guardian at midnight
-(the Families tab), children away overnight with no authorised absence
-(the "Absent overnight" report), check-ins recorded while the In & out
-register had the person out (the "Check-ins recorded while signed out"
-report), and residents at the House Rules figures (the Absences tab for
-that night). Sent on any night a count is non-zero and every Sunday
-regardless. The names, rooms and times behind the counts stay in the app.
-
-**The 22:00 guardian alert (migration 054).** At 22:00 site time, where a
-household has children on site, no guardian on site and no supervision
-arrangement recorded, the same ticked supervisors and administrators are
-emailed the fact with names: the household, its room, each child on site
-by first name and age, and each guardian off site with the time they
-signed out. This is the one recurring email whose body names a resident.
-The reason is the incident it answers and House Rules 3.5.4: a child left
-overnight with nobody responsible is a matter to be acted on that night,
-by the person whose duty it is, and a count cannot be acted on at 22:00.
-Nothing else leaves with it — no date of birth, identity number,
-evacuation need or free text — and the email says of itself that it names
-residents because it needs acting on tonight. It is off by default:
-`nightly_email` and `feature_households` must both be on, and somebody must
-be ticked. Recipients are supervisors and admins with a login who are
-ticked for it, whose accounts already see the same households under Families; the exposure the
-alert adds is the mail channel itself (the recipient's mailbox, its
-provider, and forwarding), as with the Sunday attachment. Resend retains
-sent messages by default, so the processor table lists it.
+active supervisors and administrators ticked "Gets the nightly email" on
+their staff record: four counts, each with a link into the app —
+households with children on site and no guardian at midnight (the
+"Children on site without a guardian" report for that night), children
+away overnight with no authorised absence (the "Absent overnight" report),
+check-ins recorded while the In & out register had the person out (the
+"Check-ins recorded while signed out" report), and residents at the House
+Rules figures (the Absences tab for that night). Sent on any night a count
+is non-zero and every Sunday regardless. The names, rooms and times behind
+the counts stay in the app. The "children on site without a guardian"
+count links to a report that names the household and its children, behind
+the login, and opening it is audited like any other report.
 
 The Sunday Weekly register update (migrations 035 and 037), where the
 centre has turned it on — or at any time an administrator sends it by hand
@@ -329,21 +313,19 @@ the exposure it adds is the mail channel itself (the recipient's mailbox,
 its provider, and forwarding), which is why it is off by default and the
 Settings copy says what it names. The attachment travels to Resend, the
 email provider, as part of the message, and Resend retains sent messages by
-default; the DPA's processor table must list that. The nightly email and the 22:00
-guardian alert never carry an attachment.
+default; the DPA's processor table must list that. The nightly email never
+carries an attachment.
 
 Every recurring email carries an Unsubscribe link (migration 049) that
 works without a login and stops that one email or all of them; the fact is
 recorded against the staff record and shown to administrators, who may
-reinstate by ticking the person again. The nightly email and the 22:00
-alert share one tick, so stopping either stops both. Login codes,
-invitations and password resets carry no such link.
+reinstate by ticking the person again. Login codes, invitations and
+password resets carry no such link.
 
-None of the three recurring emails carries a date of birth, an identity-document
-number, an evacuation need or free text about a person. The body of the
-nightly email and of the Sunday update never carries a name; the 22:00
-guardian alert's body does, and only the Sunday attachment, where a centre
-has turned it on, otherwise does.
+Neither recurring email carries a date of birth, an identity-document
+number, an evacuation need or free text about a person. No recurring email
+names a resident in its body; the Sunday Word attachment (migration 052,
+a per-site switch) is the one exception.
 
 **How those messages are built.** Each is sent as plain text and as a
 styled part carrying the same words, laid out by `layout()` in
@@ -387,7 +369,7 @@ may be in dispute with staff, that matters.
 | Processor | Purpose | Where |
 |---|---|---|
 | Render Services, Inc. | Hosting, the managed database, backups, the nightly scheduler | Frankfurt (EU); fixed at creation in `render.yaml` |
-| Resend, Inc. | Invitation and password-reset email to staff; the nightly email and the Sunday Weekly register update carry counts and a link only, to the centre's own ticked supervisors and administrators; the 22:00 guardian alert, where a centre turns it on, names a household, its room, its children (first name and age) and its off-site guardians with sign-out times, to the same ticked staff; where a centre turns it on, the Sunday Word document (resident names, rooms, dates) — all retained by Resend as sent-message content | EU/US; see DPA section 6 |
+| Resend, Inc. | Invitation and password-reset email to staff; the nightly email and the Sunday Weekly register update carry counts and a link only, to the centre's own ticked supervisors and administrators; where a centre turns it on, the Sunday Word document (resident names, rooms, dates) — all retained by Resend as sent-message content | EU/US; see DPA section 6 |
 
 Both are US companies with EU data residency, so the transfer basis (Standard
 Contractual Clauses plus the EU–US Data Privacy Framework, as each provider

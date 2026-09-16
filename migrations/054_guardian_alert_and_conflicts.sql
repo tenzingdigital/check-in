@@ -10,12 +10,17 @@
 -- guardian on site and no supervision arrangement (053), and a check-in
 -- recorded while the gate had the person out — and the switch for the one
 -- nightly email that replaces the House Rules reminder (032) and the
--- overnight safeguarding alert (041).
+-- overnight safeguarding alert (041). "Children on site without a guardian"
+-- is a section of that email: a count, with a link to the named report for
+-- that night. It was drafted as a separate evening email as well (a
+-- names-now function, an unsubscribe kind of its own, a third cron); the
+-- owner ruled against a separate email and it was folded into the nightly
+-- one before this file was ever deployed, which is why the file keeps its
+-- name and number and none of those objects.
 --
 -- Two readers of each fact, and they are not the same caller. Staff read
 -- v_household_care (053) and the conflicts view below from a session with
--- an identity. The 22:00 alert and the nightly email read as the owner,
--- with no identity at all, and every v_* view filters on is_staff() — which
+-- an identity. The nightly email reads as the owner,
 -- is false for the owner, so a snapshot written from the view would record
 -- "nothing to report" about every child left alone (035 and 041 already
 -- read base tables for exactly this reason). So the fact is computed once
@@ -52,7 +57,7 @@ grant select on public.overnight_guardian_gaps to authenticated;
 -- running right now. Guardians are the household's active adults, children
 -- its active under-age members (adult_age_years), presence is the latest
 -- gate event, exactly as v_household_care (053) computes them — this is
--- that view's shape without its is_staff() filter, for the two functions
+-- that view's shape without its is_staff() filter, for the snapshot
 -- below, which the nightly job calls with no identity. Owner-only: a staff
 -- session reads the view.
 create or replace function public.guardian_gap_households()
@@ -117,69 +122,7 @@ end $$;
 revoke all on function public.purge_guardian_gaps() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- 3. The 22:00 rows, with names, for the people whose duty it is.
--- ---------------------------------------------------------------------------
--- One row per gap household, ready to read out: the household label and
--- rooms as the register shows them (018), the children on site as
--- "Cormac (9)", the guardians as "Aoife Brennan (out since 19:40)" — with
--- the date when they went out on another day. Supervisors and admins
--- only, because it names children; a guard is refused, not handed zero
--- rows, so the refusal is visible. The owner (the 22:00 alert, no
--- identity) passes, as in email_link_key() (049) — which is why this is
--- never granted to anon.
-create or replace function public.guardian_gaps_now()
-returns table (household_id uuid, household_label text, room_labels text, children text, guardians_out text, first_out_at timestamptz)
-language plpgsql stable security definer set search_path = public set lc_time = 'C' as $$
-declare v_tz text; v_adult integer; v_today date;
-begin
-  if auth.uid() is not null and not public.is_supervisor() then
-    raise exception 'Only a supervisor or admin can list children without a guardian' using errcode = '42501';
-  end if;
-  select local_timezone, adult_age_years into v_tz, v_adult from public.app_settings where id;
-  v_today := public.site_today();
-  return query
-  with g as (select * from public.guardian_gap_households()),
-  m as (
-    select r.household_id, btrim(r.first_name) as first_name, btrim(r.last_name) as last_name, r.date_of_birth,
-           (r.date_of_birth <= current_date - make_interval(years => v_adult)) as is_adult,
-           coalesce(le.kind, 'out') as presence,
-           le.occurred_at as last_event_at,
-           case when rm.id is null then null
-                else b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number end as room_label
-      from public.residents r
-      join g on g.household_id = r.household_id
-      left join public.rooms rm    on rm.id = r.room_id
-      left join public.buildings b on b.id = rm.building_id
-      left join lateral (
-        select ge.kind, ge.occurred_at from public.gate_events ge
-         where ge.resident_id = r.id
-         order by ge.occurred_at desc, ge.id desc limit 1) le on true
-     where r.status = 'active'
-  )
-  select g.household_id,
-         (select string_agg(distinct m.last_name, ' / ' order by m.last_name) || ' family (' || count(*) || ')'
-            from m where m.household_id = g.household_id),
-         (select string_agg(distinct m.room_label, ', ' order by m.room_label)
-            from m where m.household_id = g.household_id and m.room_label is not null),
-         (select string_agg(m.first_name || ' (' || date_part('year', age(m.date_of_birth))::integer || ')', ', ' order by m.date_of_birth)
-            from m where m.household_id = g.household_id and not m.is_adult and m.presence = 'in'),
-         (select string_agg(m.first_name || ' ' || m.last_name
-                   || case when m.last_event_at is null then ' (never signed in)'
-                           else ' (out since '
-                                || to_char(m.last_event_at at time zone v_tz,
-                                           case when (m.last_event_at at time zone v_tz)::date = v_today then 'HH24:MI' else 'FMDD Mon HH24:MI' end)
-                                || ')' end,
-                   ', ' order by m.last_name, m.first_name)
-            from m where m.household_id = g.household_id and m.is_adult),
-         g.first_out_at
-    from g
-   order by 2;
-end $$;
-revoke all on function public.guardian_gaps_now() from public, anon;
-grant execute on function public.guardian_gaps_now() to authenticated;
-
--- ---------------------------------------------------------------------------
--- 4. Check-ins recorded while the gate had the person out.
+-- 3. Check-ins recorded while the gate had the person out.
 -- ---------------------------------------------------------------------------
 -- A conflict is a check-in whose latest gate event at or before it is OUT,
 -- or none exists — the register said "present" about someone the gate had
@@ -218,11 +161,11 @@ $$;
 revoke all on function public.checkin_conflict_count(date) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- 5. One switch for the one nightly email (and the 22:00 alert).
+-- 4. One switch for the one nightly email.
 -- ---------------------------------------------------------------------------
 alter table public.app_settings add column if not exists nightly_email boolean not null default false;
 comment on column public.app_settings.nightly_email is
-  'The nightly email (children without a guardian, children away, check-in conflicts, House Rules figures) and the 22:00 guardian alert, to the staff ticked safeguarding_alert. Replaces notify_thresholds_email (032), which is kept but no longer read.';
+  'The nightly email (children without a guardian, children away, check-in conflicts, House Rules figures), to the staff ticked safeguarding_alert. Replaces notify_thresholds_email (032), which is kept but no longer read.';
 -- On for any site that had either of the emails it replaces.
 update public.app_settings set nightly_email = true
  where notify_thresholds_email or exists (select 1 from public.profiles p where p.safeguarding_alert);
@@ -238,7 +181,7 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 6. Two new unsubscribe kinds; the retired safeguarding alert folds into
+-- 5. One new unsubscribe kind; the retired safeguarding alert folds into
 --    'nightly'; the retired House Rules reminder is left as history.
 -- ---------------------------------------------------------------------------
 -- Someone who opted out of the overnight safeguarding alert has opted out
@@ -258,7 +201,7 @@ end $$;
 -- one click on that link, and it clears the tick this time.
 alter table public.email_opt_outs drop constraint if exists email_opt_outs_kind_check;
 alter table public.email_opt_outs add constraint email_opt_outs_kind_check
-  check (kind in ('weekly_report', 'safeguarding_alert', 'house_rules', 'guardian_alert', 'nightly'));
+  check (kind in ('weekly_report', 'safeguarding_alert', 'house_rules', 'nightly'));
 insert into public.email_opt_outs (profile_id, kind)
 select distinct o.profile_id, 'nightly' from public.email_opt_outs o where o.kind = 'safeguarding_alert'
 on conflict do nothing;
@@ -270,8 +213,8 @@ declare s text;
 begin
   for s in select nspname from pg_namespace where nspname like 't\_%' escape '\' loop
     execute format('alter table %I.email_opt_outs drop constraint if exists email_opt_outs_kind_check', s);
-    execute format('alter table %I.email_opt_outs add constraint email_opt_outs_kind_check check (kind in (%L, %L, %L, %L, %L))',
-                   s, 'weekly_report', 'safeguarding_alert', 'house_rules', 'guardian_alert', 'nightly');
+    execute format('alter table %I.email_opt_outs add constraint email_opt_outs_kind_check check (kind in (%L, %L, %L, %L))',
+                   s, 'weekly_report', 'safeguarding_alert', 'house_rules', 'nightly');
     -- safeguarding_alert only, for the reason above: a house_rules row has
     -- no tick behind it and would disagree with the email.
     execute format('insert into %I.email_opt_outs (profile_id, kind) select distinct o.profile_id, %L from %I.email_opt_outs o where o.kind = %L on conflict do nothing',

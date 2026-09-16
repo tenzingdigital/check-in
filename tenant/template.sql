@@ -1125,63 +1125,6 @@ $$;
 
 --
 
--- Name: guardian_gaps_now(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION __TENANT__.guardian_gaps_now() RETURNS TABLE(household_id uuid, household_label text, room_labels text, children text, guardians_out text, first_out_at timestamp with time zone)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO '__TENANT__', 'public', 'extensions'
-    SET lc_time TO 'C'
-    AS $$
-declare v_tz text; v_adult integer; v_today date;
-begin
-  if auth.uid() is not null and not __TENANT__.is_supervisor() then
-    raise exception 'Only a supervisor or admin can list children without a guardian' using errcode = '42501';
-  end if;
-  select local_timezone, adult_age_years into v_tz, v_adult from __TENANT__.app_settings where id;
-  v_today := __TENANT__.site_today();
-  return query
-  with g as (select * from __TENANT__.guardian_gap_households()),
-  m as (
-    select r.household_id, btrim(r.first_name) as first_name, btrim(r.last_name) as last_name, r.date_of_birth,
-           (r.date_of_birth <= current_date - make_interval(years => v_adult)) as is_adult,
-           coalesce(le.kind, 'out') as presence,
-           le.occurred_at as last_event_at,
-           case when rm.id is null then null
-                else b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number end as room_label
-      from __TENANT__.residents r
-      join g on g.household_id = r.household_id
-      left join __TENANT__.rooms rm    on rm.id = r.room_id
-      left join __TENANT__.buildings b on b.id = rm.building_id
-      left join lateral (
-        select ge.kind, ge.occurred_at from __TENANT__.gate_events ge
-         where ge.resident_id = r.id
-         order by ge.occurred_at desc, ge.id desc limit 1) le on true
-     where r.status = 'active'
-  )
-  select g.household_id,
-         (select string_agg(distinct m.last_name, ' / ' order by m.last_name) || ' family (' || count(*) || ')'
-            from m where m.household_id = g.household_id),
-         (select string_agg(distinct m.room_label, ', ' order by m.room_label)
-            from m where m.household_id = g.household_id and m.room_label is not null),
-         (select string_agg(m.first_name || ' (' || date_part('year', age(m.date_of_birth))::integer || ')', ', ' order by m.date_of_birth)
-            from m where m.household_id = g.household_id and not m.is_adult and m.presence = 'in'),
-         (select string_agg(m.first_name || ' ' || m.last_name
-                   || case when m.last_event_at is null then ' (never signed in)'
-                           else ' (out since '
-                                || to_char(m.last_event_at at time zone v_tz,
-                                           case when (m.last_event_at at time zone v_tz)::date = v_today then 'HH24:MI' else 'FMDD Mon HH24:MI' end)
-                                || ')' end,
-                   ', ' order by m.last_name, m.first_name)
-            from m where m.household_id = g.household_id and m.is_adult),
-         g.first_out_at
-    from g
-   order by 2;
-end $$;
-
-
---
-
 -- Name: hut_summary(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -3044,7 +2987,7 @@ CREATE TABLE __TENANT__.email_opt_outs (
     profile_id uuid NOT NULL,
     kind text NOT NULL,
     unsubscribed_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT email_opt_outs_kind_check CHECK ((kind = ANY (ARRAY['weekly_report'::text, 'safeguarding_alert'::text, 'house_rules'::text, 'guardian_alert'::text, 'nightly'::text])))
+    CONSTRAINT email_opt_outs_kind_check CHECK ((kind = ANY (ARRAY['weekly_report'::text, 'safeguarding_alert'::text, 'house_rules'::text, 'nightly'::text])))
 );
 
 
@@ -5477,16 +5420,6 @@ GRANT ALL ON FUNCTION __TENANT__.export_resident_record(p_resident_id uuid) TO s
 
 REVOKE ALL ON FUNCTION __TENANT__.guardian_gap_households() FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.guardian_gap_households() TO service_role;
-
-
---
-
--- Name: FUNCTION guardian_gaps_now(); Type: ACL; Schema: public; Owner: -
---
-
-REVOKE ALL ON FUNCTION __TENANT__.guardian_gaps_now() FROM PUBLIC;
-GRANT ALL ON FUNCTION __TENANT__.guardian_gaps_now() TO authenticated;
-GRANT ALL ON FUNCTION __TENANT__.guardian_gaps_now() TO service_role;
 
 
 --

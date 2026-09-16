@@ -581,8 +581,8 @@
           <p class="hint under">Two-letter codes, comma-separated. A supervisor or administrator logging in from anywhere else is refused; a guard from elsewhere must type an emailed code. Unknown addresses are not treated as abroad.</p></div>
         <label class="check"><input id="stMfa" type="checkbox"> <span><b>Codes by email at login.</b> Supervisors and administrators type a 6-digit code emailed to them after their password; they can trust a personal device for 30 days. Guards keep password-only login.</span></label>
 
-        <h2 class="mt6">Nightly email and the 22:00 alert</h2>
-        <label class="check"><input id="stNightly" type="checkbox"> <span><b>Nightly email to the staff ticked for alerts.</b> After the night closes, the staff ticked "Gets the nightly email and the 22:00 alert" under Staff are emailed four counts, each with a link into the app: children on site without a guardian, children away overnight without authorisation, check-ins recorded while signed out, and residents at the House Rules figures. Sent on any night with something to count, and every Sunday regardless. Counts only; names stay in the app. The same tick receives the 22:00 alert, which does name the household and children, because it must be acted on that night.</span></label>
+        <h2 class="mt6">Nightly email</h2>
+        <label class="check"><input id="stNightly" type="checkbox"> <span><b>Nightly email to the staff ticked for alerts.</b> After the night closes, the staff ticked "Gets the nightly email" under Staff are emailed four counts, each with a link into the app: children on site without a guardian, children away overnight without authorisation, check-ins recorded while signed out, and residents at the House Rules figures. Sent on any night with something to count, and every Sunday regardless. Counts only; names stay in the app.</span></label>
 
         <h2 class="mt6">Weekly register update</h2>
         <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> At 10:00 on Sunday, the staff ticked to receive it are emailed a count for resident absences, weekend updates, removals and room updates, and a link into the app. The email body never names a resident; the tick below adds the update as a Word document, which does.</span></label>
@@ -1754,11 +1754,10 @@ function staffCard(s) {
   // A separate tick from the Sunday report, deliberately: a designated
   // safeguarding person may want the nightly email and not the weekly return
   // to head office, or the reverse (migration 041). Same role rule — the
-  // email points at reports a guard cannot run. One tick carries both the
-  // nightly email and the 22:00 guardian alert (054); the column keeps its
-  // 041 name, safeguarding_alert.
+  // email points at reports a guard cannot run. One tick carries the
+  // nightly email (054); the column keeps its 041 name, safeguarding_alert.
   const safeguarding = ["guard", "kiosk"].includes(s.role) ? "" : `
-        <label class="check"><input type="checkbox" class="sSg" data-sid="${esc(s.id)}" ${s.safeguarding_alert ? "checked" : ""}> <span>Gets the nightly email and the 22:00 alert</span></label>`;
+        <label class="check"><input type="checkbox" class="sSg" data-sid="${esc(s.id)}" ${s.safeguarding_alert ? "checked" : ""}> <span>Gets the nightly email</span></label>`;
   // Someone who used the Unsubscribe link in an email (049). Shown as its own
   // line rather than an unticked box, because an unticked box cannot say
   // whether it was them or an admin. Re-ticking clears it: the Sunday
@@ -1766,7 +1765,7 @@ function staffCard(s) {
   // two 054 kinds and the two retired ones (the old safeguarding alert and
   // the House Rules reminder, which had no tick of its own and used to
   // carry a Reinstate button here) — so the line says which tick to use.
-  const NAMES = { weekly_report: "the Sunday report", guardian_alert: "the 22:00 guardian alert", nightly: "the nightly email", safeguarding_alert: "the nightly safeguarding alert (now the nightly email)", house_rules: "the nightly House Rules reminder (now the nightly email)" };
+  const NAMES = { weekly_report: "the Sunday report", nightly: "the nightly email", safeguarding_alert: "the nightly safeguarding alert (now the nightly email)", house_rules: "the nightly House Rules reminder (now the nightly email)" };
   const optOuts = (s.opt_outs || []).map((o) => `
         <span class="meta unsub">Unsubscribed themselves from ${NAMES[o.kind] || o.kind} on ${esc(shortDate(o.unsubscribed_at))}${o.kind === "weekly_report" ? "" : " · tick the alert above to resume"}</span>`).join("");
   return `
@@ -1834,14 +1833,14 @@ async function loadStaff() {
     : `<p class="empty">No staff accounts.</p>`;
 
   // A guard terminal already says this in red (public/checkin.html) when
-  // nobody is signed up for the nightly email and the 22:00 alert, but that
+  // nobody is signed up for the nightly email, but that
   // is not where the fix happens — this tab is. Checked here rather than
   // polled, so it settles the moment a box below is ticked and this list
   // reloads.
   const health = await guarded(() => apiGet("/api/session/health"), () => null);
   const sg = $("safeguardingNotice");
   if (health && health.safeguarding_alert_unset) {
-    sg.innerHTML = `<b>Nobody receives the nightly email or the 22:00 alert.</b> Tick "Gets the nightly email and the 22:00 alert" for at least one supervisor or admin below.`;
+    sg.innerHTML = `<b>Nobody receives the nightly email.</b> Tick "Gets the nightly email" for at least one supervisor or admin below.`;
     sg.hidden = false;
   } else {
     sg.hidden = true;
@@ -1888,7 +1887,7 @@ const ROLE_HELP = {
   kiosk: {
     title: "A self check-in tablet is not staff — it is a shared login left running on one device.",
     can: ["Search for one resident by name, room or ID number", "Record that resident's own check-in for today"],
-    cannot: ["See a list of residents, or anyone's date of birth or ID number", "Sign anyone in or out at the gate", "Receive the Sunday report, the nightly email or the 22:00 alert", "Do anything a guard, supervisor or admin can do"],
+    cannot: ["See a list of residents, or anyone's date of birth or ID number", "Sign anyone in or out at the gate", "Receive the Sunday report or the nightly email", "Do anything a guard, supervisor or admin can do"],
   },
 };
 function renderRoleHelp() {
@@ -1990,8 +1989,8 @@ $("staffList").addEventListener("change", async (e) => {
     );
     if (out) {
       toast(out.safeguarding_alert
-        ? `${s.full_name} will get the nightly email and the 22:00 alert`
-        : `${s.full_name} will not get the nightly email or the 22:00 alert`, "ok");
+        ? `${s.full_name} will get the nightly email`
+        : `${s.full_name} will not get the nightly email`, "ok");
       loadStaff();
     }
   }

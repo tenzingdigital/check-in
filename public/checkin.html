@@ -562,8 +562,8 @@ async function checkHealth() {
     // 046): a child away overnight with no authorised absence reaches no
     // other screen in this app (v_resident_compliance exempts under-18s from
     // the daily rule), so this is the one place it would ever be said. The
-    // same tick carries the nightly email and the 22:00 alert (054).
-    box.innerHTML = `<b>Nobody receives the nightly email or the 22:00 alert.</b> Tell the administrator to tick "Gets the nightly email and the 22:00 alert" for at least one supervisor or admin, in Admin → Staff.`;
+    // same tick carries the nightly email (054).
+    box.innerHTML = `<b>Nobody receives the nightly email.</b> Tell the administrator to tick "Gets the nightly email" for at least one supervisor or admin, in Admin → Staff.`;
     box.hidden = false;
   } else {
     box.hidden = true;

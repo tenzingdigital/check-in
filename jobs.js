@@ -15,15 +15,13 @@
    stands and labels the rows "last night", so it may only run in the small
    hours (see snapshotGate()) — run late, it is skipped, not run wrong.
 
-   Three crons run this file (render.yaml):
+   Two crons run this file (render.yaml):
      hut-nightly   00:30 UTC daily      node jobs.js          close-out, purges, snapshots, the one nightly email
      hut-weekly    09:00 and 10:00 UTC  node jobs.js weekly   the Sunday Weekly Register Update, once, at 10:00 site time
-     hut-evening   21:00 and 22:00 UTC  node jobs.js evening  the 22:00 guardian alert, once, at 22:00 site time
      node jobs.js weekly --force    by hand: resend a missed Sunday return (still once per day)
-     node jobs.js evening --force   by hand: send the 22:00 alert now (still once per day)
-   Two hours each for the weekly and evening runs because Render's cron is
-   UTC and the site's clock is not: the first run at or after the hour sends,
-   the other records why it did not.
+   Two hours for the weekly run because Render's cron is UTC and the site's
+   clock is not: the first run at or after the hour sends, the other records
+   why it did not.
 
    `close-out` is the one that is not optional. Without it, daily_compliance
    only ever gains rows from record_checkin() — the positive path — so nobody
@@ -166,7 +164,6 @@ const mail = require('./lib/mail');
 // is_supervisor(), which a job is not.
 const weekly = require('./lib/weeklyReport');
 const safeguarding = require('./lib/safeguardingAlert');
-const guardian = require('./lib/guardianAlert');
 const nightly = require('./lib/nightlyEmail');
 
 // The cron process has no request to build a link from, so it reads
@@ -353,121 +350,6 @@ function schemaBehind(gapsRow) {
   return missing.length ? `schema behind: ${missing.join(', ')}` : null;
 }
 
-// When the 22:00 guardian alert may go: at 22:00 site time or later. One
-// gate, because the other things the Sunday return waits for do not apply —
-// it is every day, and it reads the gate as it stands rather than a
-// snapshot. 22:00 is when a child left for the evening has plainly been left
-// overnight, and early enough that a manager can still go to a door. `force`
-// (`node jobs.js evening --force`, and the tests) skips the clock and only
-// the clock: "already sent today" is checked by the caller and still stops
-// a second run, so a forced run cannot double-send.
-function eveningGate({ localHour, force = false }) {
-  if (force) return null;
-  if (localHour < 22) return 'before 22:00';
-  return null;
-}
-
-// The 22:00 guardian alert (054). A household with children on site, every
-// guardian signed OUT at the gate and no supervision arrangement running is
-// the one fact in this app a count cannot serve: somebody has to go to a
-// door tonight, and needs to know which. So this is the one email that
-// names residents in its body (lib/guardianAlert.js says why, and
-// docs/GDPR.md records it), and it goes only to the staff ticked for the
-// safeguarding alert — supervisors and admins with a login, whose duty it
-// is to act. Behind feature_households, because the fact is defined by
-// households, and behind nightly_email, the one switch for both messages.
-//
-// guardian_gaps_now() is the supervisor's function run as the owner: it
-// refuses a guard by identity and lets a caller with none through, exactly
-// as email_link_key() (049) does, which is why it is never granted to anon.
-async function guardianAlert(schema, label, { force = false } = {}) {
-  const name = 'guardian-alert-email';
-  const started = Date.now();
-  try {
-    const summary = await withOwnerIn(schema, async (client) => {
-      const { rows: [s] } = await client.query(
-        `select nightly_email as on, feature_households as households, site_name, local_timezone,
-                to_char(site_today(), 'YYYY-MM-DD') as today,
-                extract(hour from now() at time zone local_timezone)::int as local_hour
-           from app_settings where id`);
-      if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
-      if (!s.households) { await record(client, name, true, 'households off'); return 'households off'; }
-      // Mail not configured is recorded as a FAILURE here, where the other
-      // jobs tolerate it (mail.send() logs and answers not delivered). A
-      // hut-evening created at blueprint sync without RESEND_API_KEY and
-      // MAIL_FROM pasted in would otherwise record "nothing to report",
-      // ok, every quiet evening, and show itself only on the first night a
-      // child was left — as a 22:00 email that never arrived. ok=false puts
-      // it in v_system_health's recent_failures, and the health banner on
-      // every terminal is the one early warning there is. The nightly
-      // email does the same, for the same reason. The test sink is exempt:
-      // it stands in for a configured provider.
-      if (!mail.isConfigured() && process.env.HUT_MAIL_SINK !== '1') {
-        await record(client, name, false, 'mail not configured');
-        return 'mail not configured';
-      }
-      const staff = await safeguarding.recipients(client);
-      if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
-      const stop = eveningGate({ localHour: s.local_hour, force });
-      if (stop) { await record(client, name, true, stop); return stop; }
-      // Once a day, and "once" means a run recorded ok — everyone reached.
-      // A partial delivery is recorded ok=false and so counts as not sent:
-      // the next run resends to all, and the one person who already had it
-      // gets it twice. Inherited from the weekly return deliberately (see
-      // weeklyRegister()): for a child-welfare email a duplicate beats a
-      // miss. The two cron hours make a second run a certainty, not a
-      // mishap — and, in summer only, a second look: at UTC+1 the 21:00
-      // UTC run is 22:00 local and sends, and the 22:00 UTC run an hour
-      // later catches a parent who signed out in between. In winter the
-      // 21:00 UTC run records "before 22:00" and there is one look, at
-      // 22:00. Nothing watches the door after the last run: a household
-      // that becomes a gap later reaches the nightly email as a count and
-      // the morning's report by name (README §5).
-      const { rows: already } = await client.query(
-        `select 1 from job_runs
-           where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
-             and (ran_at at time zone $2)::date = $3::date
-           limit 1`,
-        [name, s.local_timezone, s.today]);
-      if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
-      const { rows: gaps } = await client.query('select * from guardian_gaps_now()');
-      // A clear evening sends nothing. Unlike the nightly email there is no
-      // Sunday nil: a message that names nobody has no door to point at,
-      // and job_runs is the evidence the check ran.
-      if (!gaps.length) { await record(client, name, true, 'nothing to report'); return 'nothing to report'; }
-
-      const slug = await prefs.slugForSchema(client, schema);
-      let delivered = 0;
-      for (const r of staff) {
-        // One compose per person: the footer link is theirs alone.
-        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'guardian_alert' });
-        const { subject, text, html } = guardian.compose({
-          siteName: s.site_name,
-          gaps,
-          link: reportLink({ tab: 'families' }),
-          unsubscribe,
-          timeZone: s.local_timezone,
-        });
-        const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
-        if (out.delivered) delivered += 1;
-      }
-      const result = `${gaps.length} households, ${delivered}/${staff.length} emailed`;
-      const allDelivered = delivered === staff.length;
-      await record(client, name, allDelivered, result);
-      if (!allDelivered) {
-        console.error(`[jobs] ${name}: ${staff.length - delivered} of ${staff.length} recipients did not receive the guardian alert`);
-      }
-      return result;
-    });
-    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
-    return true;
-  } catch (err) {
-    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
-    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
-    return false;
-  }
-}
-
 // The one nightly email (054), "Tonight at <site>". It replaced two: the
 // House Rules reminder (032), which went to every supervisor and admin
 // after close-out, and the overnight safeguarding alert (041), which went
@@ -553,9 +435,12 @@ async function nightlyEmail(schema, label) {
       // Each link lands on the page that has the names, for the night the
       // count is about — see reportLink() above. The guardian-gap count
       // reads the table the snapshot-guardian-gaps step wrote earlier in
-      // this same run.
+      // this same run, and its link opens the named "Children on site
+      // without a guardian" report for that night, not the live Families
+      // tab: the report is the night the count is about, and opening it is
+      // audited (routes/reports.js).
       const links = {
-        families: reportLink({ tab: 'families' }),
+        guardianGaps: reportLink({ tab: 'reports', report: 'guardian-gaps', from: s.night, to: s.night }),
         overnight: reportLink({ tab: 'reports', report: 'overnight', from: s.night, to: s.night }),
         conflicts: reportLink({ tab: 'reports', report: 'checkin-conflicts', from: s.night, to: s.night }),
         absences: reportLink({ tab: 'absences', from: s.night, to: s.night }),
@@ -592,7 +477,7 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
   // `main(undefined, ...)` would otherwise re-read process.argv[2] instead of
   // meaning "no mode".
   const isNightly = mode === undefined || mode === 'nightly';
-  if (!isNightly && mode !== 'weekly' && mode !== 'evening') throw new Error(`[jobs] unknown mode "${mode}"`);
+  if (!isNightly && mode !== 'weekly') throw new Error(`[jobs] unknown mode "${mode}"`);
   let failed = 0;
 
   const { rows: tenants } = await withOwner((client) => client.query(
@@ -613,11 +498,12 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
     // not fail: it falls through to public's copy, which reads public's
     // tables. For a purge that is a harmless no-op against the legacy
     // centre's own rows; for the email jobs it is another centre's data.
-    // guardian_gaps_now(), overnight_guardian_gaps, checkin_conflict_count()
-    // and snapshot_guardian_gaps() (054) are all unqualified in the jobs
-    // above, so on a tenant provisioned before 054 the 22:00 alert would
-    // have emailed the LEGACY centre's households — names — to this
-    // tenant's staff. A behind schema is an operator problem (bring it
+    // overnight_guardian_gaps, checkin_conflict_count() and
+    // snapshot_guardian_gaps() (054) are all unqualified in the jobs
+    // above, so on a tenant provisioned before 054 the nightly email would
+    // have counted the LEGACY centre's households for this tenant's staff,
+    // and linked them to a report of them. A behind schema is an operator
+    // problem (bring it
     // current or close it; docs/KNOWN-ISSUES.md #4), so it is refused whole
     // and recorded ok=false as `schema-check`, which v_system_health shows.
     if (schema !== 'public') {
@@ -644,17 +530,11 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
     const live = t.status === 'trial' || t.status === 'active';
 
     // 'weekly' mode is the Sunday cron: only the weekly return, for every
-    // live tenant, and none of the nightly maintenance around it. 'evening'
-    // mode is the 22:00 cron: only the guardian alert, likewise. `force`
-    // applies to those two — `node jobs.js weekly --force` is the manual
-    // resend of a missed Sunday return, `node jobs.js evening --force` the
-    // manual send of the alert; nightly mode ignores it.
+    // live tenant, and none of the nightly maintenance around it. `force`
+    // applies to it — `node jobs.js weekly --force` is the manual resend of
+    // a missed Sunday return; nightly mode ignores it.
     if (mode === 'weekly') {
       if (live && !(await weeklyRegister(schema, label, { force }))) failed += 1;
-      continue;
-    }
-    if (mode === 'evening') {
-      if (live && !(await guardianAlert(schema, label, { force }))) failed += 1;
       continue;
     }
 
@@ -708,7 +588,7 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
   return failed;
 }
 
-module.exports = { weeklyRegister, sendGate, guardianAlert, eveningGate, nightlyEmail, snapshotGate, schemaBehind, main };
+module.exports = { weeklyRegister, sendGate, snapshotGate, schemaBehind, nightlyEmail, main };
 if (require.main === module) main().catch((err) => {
   console.error("[jobs] fatal:", err);
   process.exit(1);

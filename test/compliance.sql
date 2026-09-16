@@ -1303,41 +1303,20 @@ select pg_temp.expect('054 view: guardians on site is zero', (:'care_guardians_o
 reset role;
 reset request.jwt.claim.sub;
 
-\echo '--- guardian_gaps_now(): supervisor and owner, not a guard'
-set role authenticated;
-set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
-select count(*)::int as n, min(g.children) as children, min(g.guardians_out) as guardians_out, min(g.household_label) as label
-  from public.guardian_gaps_now() g where g.household_id = :'gap_hh' \gset now_
-select pg_temp.expect('054 guardian_gaps_now names the household', (:'now_n')::integer, 1);
-select pg_temp.expect('054 guardian_gaps_now names the child with age', :'now_children'::text, 'Gil (7)'::text);
-select pg_temp.expect('054 guardian_gaps_now names the parent as out', :'now_guardians_out'::text like 'Gia Gapfixture (out since %', true);
-select pg_temp.expect('054 guardian_gaps_now labels the household', :'now_label'::text, 'Gapfixture family (2)'::text);
-reset role;
-reset request.jwt.claim.sub;
--- The 22:00 alert (jobs.js) calls this as the owner, outside any identity.
-select count(*)::int as n from public.guardian_gaps_now() g where g.household_id = :'gap_hh' \gset owner_
-select pg_temp.expect('054 guardian_gaps_now answers the owner (the nightly job)', (:'owner_n')::integer, 1);
-set role authenticated;
-set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
-select pg_temp.expect('054 guard cannot call guardian_gaps_now',
-  pg_temp.try('x', 'select * from public.guardian_gaps_now()') like '%blocked%', true);
-select pg_temp.try('054 guard calls guardian_gaps_now', 'select * from public.guardian_gaps_now()');
--- The kiosk (051) is not staff either: the one function in this app that
--- names a household's children and off-site guardians is closed to the
--- tablet at the door.
-set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
-select pg_temp.expect('054 kiosk cannot call guardian_gaps_now',
-  pg_temp.try('x', 'select * from public.guardian_gaps_now()') like '%blocked%', true);
-select pg_temp.try('054 kiosk calls guardian_gaps_now', 'select * from public.guardian_gaps_now()');
-reset role;
-reset request.jwt.claim.sub;
+-- The nightly job reads the fact as the owner, outside any identity.
+select count(*)::int as n from public.guardian_gap_households() g where g.household_id = :'gap_hh' \gset owner_
+select pg_temp.expect('054 guardian_gap_households answers the owner (the nightly job)', (:'owner_n')::integer, 1);
 
 \echo '--- an arrangement covering the household removes it from the fact'
 set role authenticated;
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 select public.record_supervision(:'gap_hh', :'gap_carer', now() - interval '3 hours', now() + interval '12 hours', true) as gap_arr \gset
-select count(*)::int as n from public.guardian_gaps_now() g where g.household_id = :'gap_hh' \gset covered_
+reset role;
+reset request.jwt.claim.sub;
+select count(*)::int as n from public.guardian_gap_households() g where g.household_id = :'gap_hh' \gset covered_
 select pg_temp.expect('054 covered household is not a gap', (:'covered_n')::integer, 0);
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
 select public.end_supervision(:'gap_arr');
 reset role;
 reset request.jwt.claim.sub;
@@ -1378,18 +1357,19 @@ select pg_temp.try('054 kiosk calls checkin_conflict_count', 'select public.chec
 reset role;
 reset request.jwt.claim.sub;
 
-\echo '--- the switch and its backfill; the two new unsubscribe kinds'
+\echo '--- the switch and its backfill; the new unsubscribe kind'
 select pg_temp.expect('054 nightly_email column exists',
   (select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'nightly_email'), 1);
 select pg_temp.expect('054 notify_thresholds_email is kept',
   (select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'notify_thresholds_email'), 1);
-insert into public.email_opt_outs (profile_id, kind) values ('22222222-2222-2222-2222-222222222222', 'guardian_alert');
 insert into public.email_opt_outs (profile_id, kind) values ('22222222-2222-2222-2222-222222222222', 'nightly');
-select pg_temp.expect('054 guardian_alert is a kind', (select count(*)::int from public.email_opt_outs where kind = 'guardian_alert'), 1);
 select pg_temp.expect('054 nightly is a kind', (select count(*)::int from public.email_opt_outs where kind = 'nightly'), 1);
 select pg_temp.expect('054 an unknown kind is still refused',
   pg_temp.try('x', 'insert into public.email_opt_outs (profile_id, kind) values (''22222222-2222-2222-2222-222222222222'', ''carrier_pigeon'')') like '%blocked%', true);
-delete from public.email_opt_outs where kind in ('guardian_alert', 'nightly');
+-- No separate guardian-alert email, so no kind for one.
+select pg_temp.expect('054 guardian_alert is not a kind',
+  pg_temp.try('x', 'insert into public.email_opt_outs (profile_id, kind) values (''22222222-2222-2222-2222-222222222222'', ''guardian_alert'')') like '%blocked%', true);
+delete from public.email_opt_outs where kind = 'nightly';
 
 \echo '--- purge removes only rows older than the (temporarily lowered) retention'
 insert into public.overnight_guardian_gaps (night, household_id, children_on_site, guardians_out)

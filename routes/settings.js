@@ -38,7 +38,7 @@ const COLUMNS = {
   // The nightly House Rules reminder by email (032). No longer read: 054
   // folded it into nightly_email below; the column goes in a later migration.
   notify_thresholds_email:       { kind: 'bool' },
-  // The one nightly email and the 22:00 guardian alert (054), to the staff ticked for the safeguarding alert.
+  // The one nightly email (054), to the staff ticked for the safeguarding alert.
   nightly_email:                 { kind: 'bool' },
   // The Sunday Weekly register update by email (035). Recipients are a flag
   // on the staff record (POST /api/staff/:id/weekly-report, migration 037),

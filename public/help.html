@@ -314,7 +314,7 @@
   <details class="more"><summary>Breach reports and the Absences tab</summary>
     <p><b>Absences tab.</b> Every active resident with a run of missed nights or a missed day in the rolling window, worst first, each count beside the figure in Settings, with whether they are checked in today or away, and the last breach report. Type a name or room to filter. Nothing is decided here; the letter is the manager's.</p>
     <p><b>Breach reports.</b> When a figure is reached, or a resident misuses the verification tablet by signing in for others, staff issue a breach report to IPAS. Record on the person's sheet that it was issued, which kind, the day and its reference, so nobody issues one twice.</p>
-    <p><b>The nightly email.</b> Residents at the House Rules figures are one of the four counts in the nightly email, with a link to Absences for that night; see <a href="#nightly">The nightly email and the 22:00 alert</a>. Names stay in the app.</p>
+    <p><b>The nightly email.</b> Residents at the House Rules figures are one of the four counts in the nightly email, with a link to Absences for that night; see <a href="#nightly">The nightly email</a>. Names stay in the app.</p>
   </details>
 
   <h3 id="families">Families and supervision <span class="who">supervisors and admins</span></h3>
@@ -326,7 +326,7 @@
     <li>No contact number and no free text are held — the arrangement is the fact the door needs, the signed Appendix 5 form keeps the rest</li>
     <li>Every staff member sees it: on <span class="ui">In &amp; out</span> and <span class="ui">Roll call</span> a guardian's card says who is minding their children until when, a carer's card says whose children they are minding, and a child's card says who they are with</li>
     <li>A guardian signing out while the household's other adults are already off site and a child is still on site: the sign-out message says who is minding the children, or that none is recorded — a fact, never a block; the sign-out is recorded either way</li>
-    <li>At 22:00 a household with children on site, no guardian on site and no arrangement recorded is emailed to the ticked managers by name; see <a href="#nightly">The nightly email and the 22:00 alert</a></li>
+    <li>A household with children on site, no guardian on site and no arrangement recorded at the midnight snapshot is counted in the nightly email, which links to the named report for that night; see <a href="#nightly">The nightly email</a></li>
   </ul>
 
   <h3 id="buildings">Buildings and rooms</h3>
@@ -371,18 +371,17 @@
     <li>Every one of these emails has an Unsubscribe link. Someone who uses it shows as "Unsubscribed themselves" on their staff card; tick them again to put them back, or they can from the same link</li>
   </ul>
 
-  <h3 id="nightly">The nightly email and the 22:00 alert</h3>
+  <h3 id="nightly">The nightly email</h3>
   <ol class="recipe">
-    <li><span>Under <span class="ui">Admin → Staff</span>, tick <span class="ui">Gets the nightly email and the 22:00 alert</span> for each supervisor or admin who should have them.<small>One tick, both emails. Offered only to supervisors and admins.</small></span></li>
-    <li><span>Under <span class="ui">Admin → Settings → Nightly email and the 22:00 alert</span>, tick the switch.<small>Turns both on or off for the site. The 22:00 alert also needs the households feature on.</small></span></li>
+    <li><span>Under <span class="ui">Admin → Staff</span>, tick <span class="ui">Gets the nightly email</span> for each supervisor or admin who should have it.<small>Offered only to supervisors and admins.</small></span></li>
+    <li><span>Under <span class="ui">Admin → Settings → Nightly email</span>, tick the switch.<small>Turns it on or off for the site.</small></span></li>
   </ol>
   <ul class="facts">
     <li>The nightly email goes after the night closes: four counts, each with a link into the app — children on site without a guardian, children away overnight without authorisation, check-ins recorded while signed out, and residents at the House Rules figures</li>
     <li>Sent on any night with something to count, and every Sunday regardless, so a quiet week is never a silent one</li>
-    <li>Counts only; the names are in the app behind each link</li>
-    <li>The 22:00 alert is different: it names the household, its room, the children on site and the guardians off site with the time each signed out, because it must be acted on that night. It goes at 22:00 site time, to the same ticked managers, only when a household with children on site has no guardian on site and no supervision arrangement recorded</li>
-    <li>On receiving it: check the Families tab for the household, and the paper Appendix 5 forms for an arrangement not yet recorded. The app states the fact; the manager judges it</li>
-    <li>These two replaced the nightly House Rules reminder and the overnight safeguarding alert, which were separate emails; an Unsubscribe link from one of those still works and stops both the nightly email and the 22:00 alert</li>
+    <li>Counts only; the names are in the app behind each link. The "children on site without a guardian" link opens the named <span class="ui">Children on site without a guardian</span> report for that night: the household, its room, its children, how many guardians were off site and when the first of them signed out</li>
+    <li>On seeing a count there: open the report, check the Families tab for the household, and the paper Appendix 5 forms for an arrangement not yet recorded. The app states the fact; the manager judges it</li>
+    <li>This one email replaced the nightly House Rules reminder and the overnight safeguarding alert, which were separate emails; an Unsubscribe link from one of those still works and stops the nightly email</li>
   </ul>
 
   <h3 id="staff">Staff</h3>
@@ -405,7 +404,7 @@
     <li><b>Cannot:</b> see a list, a date of birth, an ID number, anyone's history, or any other screen — every other page and API route refuses this login</li>
     <li>A ten-second <span class="ui">That's not me</span> sits between finding a name and checking in</li>
     <li>The register and history mark it <span class="ui">at the tablet (self)</span>, so staff can see at a glance which check-ins nobody witnessed</li>
-    <li>The tablet cannot receive the Sunday report, the nightly email or the 22:00 alert</li>
+    <li>The tablet cannot receive the Sunday report or the nightly email</li>
     <li><b>Staff</b> link on the page logs the tablet out, for maintenance</li>
   </ul>
   <details class="more"><summary>More detail</summary>
@@ -417,7 +416,7 @@
   <h3 id="settings">Settings <span class="who">admins</span></h3>
   <ul class="facts">
     <li><b>Register rules:</b> adult age, the amber hour, the House Rules figures, the holiday cap</li>
-    <li><b>Features:</b> buildings, evacuation, households, visitors, the door switch, the nightly email and the 22:00 alert</li>
+    <li><b>Features:</b> buildings, evacuation, households, visitors, the door switch, the nightly email</li>
     <li><b>Retention:</b> movements and the register</li>
     <li><b>Security:</b> idle lock, email codes, home countries</li>
   </ul>
