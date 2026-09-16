@@ -2540,6 +2540,82 @@ async function main() {
     assert.match(out.text, /Resident absences: 0/);
   });
 
+  await test("document() is Amy's Sunday layout: five headings, one sentence per person, None for an empty section, the ones to act on highlighted", async () => {
+    const { document } = require("../lib/weeklyReport");
+    const rows = [
+      { section: "Resident absences", status: "not approved", resident: "Jane Doe", line: "Jane Doe from Weekly Block W1 was absent from Friday 4 September to Sunday 6 September 2026 (3 nights), still away. Not approved." },
+      { section: "Resident absences", status: "approved", resident: "John Smith", line: "John Smith from Weekly Block B1 was absent from Monday 31 August to Wednesday 2 September 2026 (3 nights), back on Thursday 3 September. Approved by management." },
+      { section: "Updates from the weekend", status: "partly approved", resident: "Pat Partly", line: "Pat Partly was absent from Saturday 5 September to Saturday 5 September 2026 (1 night), still away. Partly approved (0 of 1 nights)." },
+      { section: "Room updates", status: "maintenance", resident: null, line: "Weekly Block K5 is under maintenance: waiting on a part." },
+      { section: "Weekly register change", status: "admitted", resident: "New Arrival", line: "New Arrival moved into Weekly Block K15 on Tuesday 8 September 2026." },
+    ];
+    const out = document({ siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows, generatedOn: "2026-09-13" });
+    assert.equal(out.filename, "Weekly-Register-Update-week-ending-2026-09-12.docx");
+    assert.equal(out.contentType, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    assert.ok(Buffer.isBuffer(out.buffer) && out.buffer.subarray(0, 2).toString() === "PK");
+    // Pull document.xml back out of the zip (stored deflated).
+    const xml = (() => {
+      const buf = out.buffer; let off = 0;
+      while (buf.readUInt32LE(off) === 0x04034b50) {
+        const method = buf.readUInt16LE(off + 8), csize = buf.readUInt32LE(off + 18);
+        const nlen = buf.readUInt16LE(off + 26), xlen = buf.readUInt16LE(off + 28);
+        const name = buf.subarray(off + 30, off + 30 + nlen).toString();
+        const data = buf.subarray(off + 30 + nlen + xlen, off + 30 + nlen + xlen + csize);
+        if (name === "word/document.xml") return (method === 8 ? require("zlib").inflateRawSync(data) : data).toString();
+        off += 30 + nlen + xlen + csize;
+      }
+      throw new Error("no document.xml");
+    })();
+    const text = xml.replace(/<[^>]+>/g, " ").replace(/ +/g, " ");
+    // Title, subtitle, period line.
+    assert.match(text, /Weekly Register Update Slaney · Week ending Saturday 12 September 2026/);
+    assert.match(text, /Updates for the period between Sunday 6 September 2026 and Saturday 12 September 2026/);
+    // The five headings, in Amy's order and case.
+    const order = ["Room Updates:", "Resident Absences:", "Updates from the Weekend:", "Resident Removals:", "Weekly Register Change:"];
+    let last = -1;
+    for (const h of order) { const i = text.indexOf(h); assert.ok(i > last, `${h} present and in order`); last = i; }
+    // One sentence per person, the empty section says None.
+    assert.match(text, /Resident Removals: • None\./);
+    assert.match(text, /John Smith from Weekly Block B1 was absent .* Approved by management\./);
+    assert.match(text, /Jane Doe from Weekly Block W1 .* Not approved\. Please mark as unauthorised absence\./);
+    assert.match(text, /Pat Partly .* Partly approved \(0 of 1 nights\)\. Please mark the nights not approved as unauthorised absence\./);
+    assert.match(text, /Produced by CheckSteady on Sunday 13 September 2026\. Nights are counted at midnight, site time\./);
+    // Only the two to act on are highlighted.
+    const highlighted = xml.match(/<w:highlight w:val="yellow"\/><\/w:rPr><w:t xml:space="preserve">([^<]*)<\/w:t>/g) || [];
+    assert.equal(highlighted.length, 2, "exactly the not-approved and partly-approved rows are highlighted");
+    assert.ok(highlighted[0].includes("Jane Doe") && highlighted[1].includes("Pat Partly"));
+    assert.ok(!xml.includes("<w:highlight w:val=\"yellow\"/></w:rPr><w:t xml:space=\"preserve\">John Smith"), "an approved row is plain");
+  });
+
+  await test("compose({ attached }) says the document is attached and changes the footer; without it the email is exactly as before", async () => {
+    const { compose } = require("../lib/weeklyReport");
+    const base = { siteName: "Slaney", from: "2026-09-06", to: "2026-09-12", rows: [], link: "https://hut-check-in.onrender.com/admin.html" };
+    const plain = compose(base);
+    const same = compose({ ...base, attached: false });
+    assert.equal(plain.text, same.text); assert.equal(plain.html, same.html);
+    assert.ok(!/attached as a Word document/.test(plain.text));
+    assert.match(plain.html, /It carries counts only — the detail stays behind your login\./);
+    const withDoc = compose({ ...base, attached: true });
+    assert.match(withDoc.text, /^The Weekly Register Update is attached as a Word document\.$/m);
+    assert.match(withDoc.html, /The Weekly Register Update is attached as a Word document\./);
+    assert.match(withDoc.html, /The attached document names residents — treat it as you would the register itself\./);
+    assert.ok(!/It carries counts only/.test(withDoc.html), "the counts-only footer is replaced, not doubled");
+    assert.equal(withDoc.subject, plain.subject, "the subject does not change");
+  });
+
+  await test("mail.send() carries attachments to the sink as Buffers", async () => {
+    const mail = require("../lib/mail");
+    const before = (global.__mailSink || []).length;
+    const content = Buffer.from("PKfake");
+    await mail.send({ to: "x@example.ie", subject: "s", text: "t", attachments: [{ filename: "a.docx", content, contentType: "application/octet-stream" }] });
+    const m = (global.__mailSink || [])[before];
+    assert.equal(m.attachments.length, 1);
+    assert.equal(m.attachments[0].filename, "a.docx");
+    assert.ok(Buffer.isBuffer(m.attachments[0].content) && m.attachments[0].content.equals(content));
+    await mail.send({ to: "x@example.ie", subject: "s", text: "t" });
+    assert.equal((global.__mailSink || [])[before + 1].attachments, undefined, "no attachments key when none were given");
+  });
+
   await test("send now emails every recipient ticked on the staff record, and is on the audit record; refused without recipients or to a supervisor", async () => {
     const mick = await wkAdmin.fetch("/api/staff", { method: "POST", body: { email: "mick@example.ie", full_name: "Mick Weekly", role: "supervisor" } });
     assert.equal(mick.status, 201, mick.text);
