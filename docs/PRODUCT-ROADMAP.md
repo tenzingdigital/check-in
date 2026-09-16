@@ -142,8 +142,10 @@ the gate, which the gate already records.
 
 ## Absences — the manager's list, off the guard's screen
 
-**Status: built 7 September 2026, on the working branch. No switch, no
-migration, no new data.**
+**Status: built 7 September 2026; given a date range 16 September 2026
+(Yesterday · 7 nights · 28 nights · two dates, one row per resident with
+the dates, Excel through the audited "Missed register" report). No switch,
+no migration, no new data.**
 
 - The register's third tile ("Missed days") counted everyone who had ever
   missed a required day and never cleared. It is gone; the register has

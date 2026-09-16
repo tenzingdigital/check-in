@@ -2278,6 +2278,30 @@ mountRangePresets($("absPresets"), $("absFrom"), $("absTo"), loadAbsences,
 // loadAbsences(), which needs the two dates filled in.
 { const [f, t] = presetRange("7nights"); $("absFrom").value = f; $("absTo").value = t; }
 $("absPresets").querySelector('[data-preset="7nights"]').setAttribute("aria-pressed", "true");
+
+// Excel: the whole range, never the search-filtered rows. The audit record
+// note_report() writes says "missed [from to to]"; a sheet that quietly
+// left people out because a name was typed in the filter box would make
+// that record misleading. Same reason-field widget as the History export.
+$("absExport").addEventListener("click", () => {
+  const f = $("absExportForm");
+  f.hidden = !f.hidden;
+  $("absExport").setAttribute("aria-expanded", String(!f.hidden));
+  if (!f.hidden) f.elements.reason.focus();
+});
+dismissToastOnInput($("absExportForm").elements.reason);
+$("absExportForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const reason = $("absExportForm").elements.reason.value.trim();
+  const from = $("absFrom").value, to = $("absTo").value;
+  if (!reason) { toast("Give the reason for the export", "err"); $("absExportForm").elements.reason.focus(); return; }
+  if (!from || !to) { toast("Pick two dates first", "err"); return; }
+  if (!Offline.isOnline()) { toast("Exporting needs a connection", "err"); return; }
+  // A file download: the browser saves it and stays on the page.
+  window.location.href = `/api/reports/missed?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&reason=${encodeURIComponent(reason)}&format=xlsx`;
+  toast("Export recorded and downloading", "ok");
+  $("absExportForm").hidden = true; $("absExport").setAttribute("aria-expanded", "false");
+});
 $("tabBuildings").addEventListener("click", () => selectTab("buildings"));
 $("tabReports").addEventListener("click", () => selectTab("reports"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));
