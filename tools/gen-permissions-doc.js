@@ -32,7 +32,8 @@ function table(area) {
       // as a real path and is not one. Kept sorted so the next addition is
       // obvious; check.sh fails if this file goes stale, but it cannot know
       // an id it was never told about.
-      absenceId: ':id', absenceWindowId: ':id', buildingId: ':id', residentId: ':id',
+      absenceId: ':id', absenceWindowId: ':id', arrangementId: ':id', buildingId: ':id',
+      carerId: ':id', householdId: ':id', residentId: ':id',
       rollCallId: ':id', roomId: ':id', rosterId: ':id', safeguardingStaffId: ':id',
       staffId: ':id', tenantId: ':id', visitId: ':id', weeklyReportStaffId: ':id',
       today: 'DATE',

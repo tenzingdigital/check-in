@@ -17,6 +17,7 @@
 //   breaches    breach reports issued to IPAS in the range (migration 029)
 //   weekly      the Sunday Weekly Register Update: absence spans, weekend, removals, rooms (migration 035); also as a Word document (format=docx): the Sunday return in the centre manager's layout (052)
 //   missed      who missed the daily register over a range, one row per resident with the dates (the Absences tab's export)
+//   supervision  Appendix 5 child-supervision arrangements in the range (053)
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -322,6 +323,31 @@ REPORTS.missed = {
   title: 'Missed register',
   ranged: true,
   sql: missedSql({ flat: true }),
+};
+
+// Appendix 5 arrangements in the range (053): which children were in whose
+// care, when, whether overnight was approved, who recorded it. Facts only.
+REPORTS.supervision = {
+  title: 'Child supervision arrangements',
+  ranged: true,
+  sql: `select rm.household_label as household,
+               (select string_agg(btrim(k.first_name) || ' ' || btrim(k.last_name), ', ' order by k.last_name, k.first_name)
+                  from residents k cross join (select adult_age_years from app_settings where id) s
+                 where k.household_id = a.household_id and k.status = 'active'
+                   and k.date_of_birth > current_date - make_interval(years => s.adult_age_years)) as children,
+               btrim(c.first_name) || ' ' || btrim(c.last_name) as carer, crm.room_label as carer_room,
+               to_char(a.from_at at time zone tz.local_timezone, 'YYYY-MM-DD HH24:MI') as "from",
+               to_char(a.to_at at time zone tz.local_timezone, 'YYYY-MM-DD HH24:MI') as "to",
+               a.overnight, p.full_name as recorded_by,
+               case when a.ended_at is not null then to_char(a.ended_at at time zone tz.local_timezone, 'YYYY-MM-DD HH24:MI') end as ended_early
+          from supervision_arrangements a
+          join residents c on c.id = a.carer_id
+          left join v_resident_room crm on crm.id = c.id
+          left join lateral (select household_label from v_resident_room where household_id = a.household_id limit 1) rm on true
+          left join profiles p on p.id = a.recorded_by
+          cross join (select local_timezone from app_settings where id) tz
+         where (a.from_at at time zone tz.local_timezone)::date <= $2 and (a.to_at at time zone tz.local_timezone)::date >= $1
+         order by a.from_at desc`,
 };
 
 // Authorised absences overlapping the range, and who was marked safe on

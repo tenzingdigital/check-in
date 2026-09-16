@@ -1604,7 +1604,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 18);
+    assert.equal(list.json.length, 19);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1812,6 +1812,71 @@ async function main() {
     const { rows } = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'missed' order by at`));
     assert.equal(rows.length, 2, "both exports (json and xlsx) should be on the record");
     assert.match(rows[0].note, /^House Rules letter \[/);
+  });
+
+  console.log("\n== families and supervision arrangements (migration 053) ==");
+
+  const fam = {};
+  await test("a household of a parent and a child, a carer outside it — the Families endpoint shows the shape", async () => {
+    for (const [k, first, last, dob] of [["parent", "Pat", "Famfixture", "1989-03-03"], ["kid", "Kim", "Famfixture", "2018-06-06"], ["carer", "Cara", "Carerfixture", "1985-07-07"], ["loner", "Lee", "Lonerfixture", "1979-01-01"]]) {
+      const res = await supC.fetch("/api/residents", { method: "POST", body: { first_name: first, last_name: last, date_of_birth: dob } });
+      assert.equal(res.status, 201, res.text); fam[k] = res.json.id;
+    }
+    assert.equal((await supC.fetch(`/api/residents/${fam.kid}`, { method: "PATCH", body: { household_with: fam.parent } })).status, 200);
+    fam.hh = (await withOwner((c) => c.query(`select household_id from public.residents where id = $1`, [fam.kid]))).rows[0].household_id;
+    assert.ok(fam.hh);
+    const out = await api.fetch("/api/households");
+    assert.equal(out.status, 200, out.text);
+    const h = out.json.households.find((x) => x.id === fam.hh);
+    assert.ok(h, "the household is listed");
+    assert.equal(h.guardians, 1); assert.equal(h.children, 1); assert.equal(h.care, null);
+    assert.deepEqual(h.members.map((m) => m.is_adult).sort(), [false, true]);
+    assert.ok(out.json.unassigned.some((u) => u.id === fam.loner), "a resident in no household is under unassigned");
+    assert.ok(!out.json.unassigned.some((u) => u.id === fam.parent), "a household member is not unassigned");
+  });
+
+  await test("recording an arrangement puts the care line on guardian, carer and child; ending it takes it away", async () => {
+    const from = new Date(Date.now() - 3600e3).toISOString(), to = new Date(Date.now() + 3 * 3600e3).toISOString();
+    const asGuard = await api.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    assert.equal(asGuard.status, 403);
+    const inside = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.parent, from_at: from, to_at: to, overnight: false } });
+    assert.equal(inside.status, 400); assert.match(inside.json.error, /outside the household/);
+    const rec = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    assert.equal(rec.status, 201, rec.text); fam.arr = rec.json.id;
+    const rows = (await api.fetch("/api/residents?q=fixture&limit=50")).json;
+    const by = (id) => rows.find((r) => r.id === id);
+    assert.equal(by(fam.parent).care.role, "guardian"); assert.equal(by(fam.parent).care.carer_name, "Cara Carerfixture");
+    assert.equal(by(fam.kid).care.role, "child");
+    assert.equal(by(fam.carer).care.role, "carer"); assert.match(by(fam.carer).care.household_label, /Famfixture/);
+    assert.equal(by(fam.loner).care, null);
+    const overlap = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    assert.equal(overlap.status, 400); assert.match(overlap.json.error, /already has an arrangement/);
+    const hist = await api.fetch(`/api/households/${fam.hh}/supervision?from=${siteToday()}&to=${siteToday()}`);
+    assert.equal(hist.status, 200); assert.equal(hist.json.length, 1);
+    assert.equal((await api.fetch(`/api/supervision/${fam.arr}/end`, { method: "POST" })).status, 403);
+    const end = await supC.fetch(`/api/supervision/${fam.arr}/end`, { method: "POST" });
+    assert.equal(end.status, 200, end.text); assert.ok(end.json.ended_at);
+    const after = (await api.fetch("/api/residents?q=fixture&limit=50")).json;
+    assert.equal(after.find((r) => r.id === fam.parent).care, null, "the line goes when the arrangement ends");
+  });
+
+  await test("crossing midnight needs the overnight tick; the report lists arrangements and is audited", async () => {
+    const from = new Date(Date.now() + 4 * 3600e3).toISOString(), to = new Date(Date.now() + 30 * 3600e3).toISOString();
+    const noTick = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    assert.equal(noTick.status, 400); assert.match(noTick.json.error, /overnight/);
+    const ok = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: true } });
+    assert.equal(ok.status, 201, ok.text);
+    const d = (o) => { const x = new Date(`${siteToday()}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + o); return x.toISOString().slice(0, 10); };
+    const rep = await supC.fetch(`/api/reports/supervision?from=${d(-1)}&to=${d(2)}&reason=Tusla+query&format=json`);
+    assert.equal(rep.status, 200, rep.text);
+    assert.equal(rep.json.title, "Child supervision arrangements");
+    const mine = rep.json.rows.filter((r) => /Carerfixture/.test(r.carer));
+    assert.equal(mine.length, 2, "both arrangements (one ended early) are in the range");
+    assert.ok(mine.some((r) => r.overnight === true));
+    assert.ok(mine.every((r) => /Kim Famfixture/.test(r.children)), "children are named");
+    assert.ok(!("note" in mine[0]) && !("contact" in mine[0]), "nothing but the facts");
+    const { rows } = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'supervision' order by at desc limit 1`));
+    assert.match(rows[0].note, /^Tusla query \[/);
   });
 
   console.log("\n== audit trail ==");
@@ -3612,6 +3677,38 @@ async function main() {
         assert.equal(a.status, 201, a.text);
         fx.absenceId = a.json.id;
       },
+      // A household of an adult and a child (migration 053). Fresh for the
+      // supervision-recording row: a stale household could still carry the
+      // running arrangement from a previous attempt, and the second "allow"
+      // role would hit the overlap refusal instead of genuinely succeeding.
+      household: async () => {
+        const n = Math.floor(Math.random() * 1e6);
+        const p = await supM.fetch("/api/residents", { method: "POST", body: { first_name: "Matrix", last_name: `Guardian${n}`, date_of_birth: "1990-01-01" } });
+        assert.equal(p.status, 201, p.text);
+        const k = await supM.fetch("/api/residents", { method: "POST", body: { first_name: "Matrix", last_name: `Child${n}`, date_of_birth: "2018-01-01" } });
+        assert.equal(k.status, 201, k.text);
+        const j = await supM.fetch(`/api/residents/${k.json.id}`, { method: "PATCH", body: { household_with: p.json.id } });
+        assert.equal(j.status, 200, j.text);
+        fx.householdId = j.json.household_id;
+      },
+      // An adult resident outside every household, free to carer for any of
+      // them — carer_id is not itself consumed by recording an arrangement.
+      carer: async () => {
+        const n = Math.floor(Math.random() * 1e6);
+        const c = await supM.fetch("/api/residents", { method: "POST", body: { first_name: "Matrix", last_name: `Carer${n}`, date_of_birth: "1985-01-01" } });
+        assert.equal(c.status, 201, c.text);
+        fx.carerId = c.json.id;
+      },
+      // A running arrangement to end. Fresh: ending is one-shot, so the
+      // second "allow" role needs a new one, not the one the first just ended.
+      arrangement: async () => {
+        if (!fx.householdId) await makers.household();
+        if (!fx.carerId) await makers.carer();
+        const from = new Date(Date.now() - 3600e3).toISOString(), to = new Date(Date.now() + 3 * 3600e3).toISOString();
+        const r = await supM.fetch(`/api/households/${fx.householdId}/supervision`, { method: "POST", body: { carer_id: fx.carerId, from_at: from, to_at: to, overnight: false } });
+        assert.equal(r.status, 201, r.text);
+        fx.arrangementId = r.json.id;
+      },
       tenant: async () => {
         const n = Math.floor(Math.random() * 1e6);
         const t = await clients.platform.fetch("/api/tenants", { method: "POST", body: { name: `Centre ${n}`, slug: `centre-${n}`, admin_name: "First Admin", admin_email: `first${n}@hut.example` } });
@@ -3624,7 +3721,7 @@ async function main() {
         fx.absenceWindowId = w.json.id;
       },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "weeklyReportStaff", "safeguardingStaff", "visit", "absence", "roster", "tenant", "absenceWindow"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "staff", "weeklyReportStaff", "safeguardingStaff", "visit", "absence", "roster", "household", "carer", "arrangement", "tenant", "absenceWindow"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 

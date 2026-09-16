@@ -101,6 +101,15 @@ validation.
 | Take a room out of use (archived if ever lived in, else removed)<br><code>DELETE /api/rooms/:id</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Put an archived room back into use<br><code>POST /api/rooms/:id/restore</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 
+## Families
+
+| What | Logged out | Guard | Kiosk | Supervisor | Admin | Platform admin |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Every household, its members and the running arrangement, plus the unassigned<br><code>GET /api/households</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
+| Record a supervision arrangement (a household child in another resident's care)<br><code>POST /api/households/:id/supervision</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
+| A household's supervision history over a range<br><code>GET /api/households/:id/supervision</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
+| End a supervision arrangement early<br><code>POST /api/supervision/:id/end</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
+
 ## Reports
 
 | What | Logged out | Guard | Kiosk | Supervisor | Admin | Platform admin |
@@ -108,6 +117,7 @@ validation.
 | See which reports exist<br><code>GET /api/reports</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
 | Export a report (register, attendance, movements, occupancy, evacuation, drills); logged<br><code>GET /api/reports/register</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Who missed the register over a range (the Absences tab); not logged<br><code>GET /api/missed</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
+| Child supervision arrangements over a range; logged<br><code>GET /api/reports/supervision</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Who viewed which record (the access log)<br><code>GET /api/reports/access</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 
 ## Administration

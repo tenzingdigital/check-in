@@ -110,10 +110,17 @@ module.exports = [
   { area: 'Residents and buildings', name: 'Take a room out of use (archived if ever lived in, else removed)', method: 'DELETE', path: (fx) => `/api/rooms/${fx.roomId}`, expect: SUPERVISOR, fresh: 'room' },
   { area: 'Residents and buildings', name: 'Put an archived room back into use', method: 'POST', path: (fx) => `/api/rooms/${fx.roomId}/restore`, body: () => ({}), expect: SUPERVISOR, fresh: 'room' },
 
+  // ---- families (child-supervision arrangements, migration 053) ----------
+  { area: 'Families', name: 'Every household, its members and the running arrangement, plus the unassigned', method: 'GET', path: () => '/api/households', expect: STAFF },
+  { area: 'Families', name: 'Record a supervision arrangement (a household child in another resident\'s care)', method: 'POST', path: (fx) => `/api/households/${fx.householdId}/supervision`, body: (fx) => ({ carer_id: fx.carerId, from_at: new Date(Date.now() - 3600e3).toISOString(), to_at: new Date(Date.now() + 3 * 3600e3).toISOString(), overnight: false }), expect: SUPERVISOR, fresh: 'household' },
+  { area: 'Families', name: "A household's supervision history over a range", method: 'GET', path: (fx) => `/api/households/${fx.householdId}/supervision?from=${fx.today}&to=${fx.today}`, expect: STAFF },
+  { area: 'Families', name: 'End a supervision arrangement early', method: 'POST', path: (fx) => `/api/supervision/${fx.arrangementId}/end`, body: () => ({}), expect: SUPERVISOR, fresh: 'arrangement' },
+
   // ---- reports (supervisors and admins; one is the admin's) ---------------
   { area: 'Reports', name: 'See which reports exist', method: 'GET', path: () => '/api/reports', expect: STAFF },
   { area: 'Reports', name: 'Export a report (register, attendance, movements, occupancy, evacuation, drills); logged', method: 'GET', path: (fx) => `/api/reports/register?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: SUPERVISOR },
   { area: 'Reports', name: 'Who missed the register over a range (the Absences tab); not logged', method: 'GET', path: (fx) => `/api/missed?from=${fx.today}&to=${fx.today}`, expect: SUPERVISOR },
+  { area: 'Reports', name: 'Child supervision arrangements over a range; logged', method: 'GET', path: (fx) => `/api/reports/supervision?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: SUPERVISOR },
   { area: 'Reports', name: 'Who viewed which record (the access log)', method: 'GET', path: (fx) => `/api/reports/access?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: ADMIN },
 
   // ---- the resident's rights and the site (admins) ------------------------

@@ -135,6 +135,29 @@ router.get('/', wrap(async (req, res) => {
         household_id: rm.household_id || null, household_size: rm.household_size || null, household_label: rm.household_label || null,
       });
     }
+    // Who is minding whom (migration 053): a guardian, a child or the carer
+    // of a running arrangement carries one line for the door. Only when the
+    // household feature is on — nothing is joined otherwise.
+    const { rows: care } = await client.query(
+      `select c.household_id, c.carer_id, c.carer_name, c.carer_room_label, c.until, c.overnight, rm.household_label
+         from v_household_care c
+         join lateral (select household_label from v_resident_room where household_id = c.household_id limit 1) rm on true
+        where c.arrangement_id is not null
+          and (c.household_id = any($1::uuid[]) or c.carer_id = any($2::uuid[]))`,
+      [found.map(r => r.household_id).filter(Boolean), found.map(r => r.id)],
+    );
+    const careByHousehold = new Map(care.map(c => [c.household_id, c]));
+    const careByCarer = new Map(care.map(c => [c.carer_id, c]));
+    for (const r of found) {
+      const asMember = r.household_id ? careByHousehold.get(r.household_id) : null;
+      const asCarer = careByCarer.get(r.id);
+      const c = asMember || asCarer;
+      r.care = c ? {
+        role: asCarer ? 'carer' : (r.is_adult === false ? 'child' : 'guardian'),
+        carer_name: c.carer_name, carer_room_label: c.carer_room_label, until: c.until, overnight: c.overnight,
+        household_label: c.household_label,
+      } : null;
+    }
     // Away with the centre's agreement today (migration 028): the card says
     // so, and on the register the person is not "not seen", they are away.
     // The reason is deliberately NOT selected. All three front ends render
