@@ -119,7 +119,7 @@ Above the existing search box:
   ones drawn today, unchanged.
 - **Empty states:** "Nobody missed the register between Tue 9 and Mon 15
   Sep." When `to > closed_through`: an extra line "Last night's register
-  is not closed yet — it closes at 01:30." shown above the table (or the
+  is not closed yet — it closes overnight." shown above the table (or the
   empty message) whenever the range includes an unclosed day.
 - **Excel:** the inline reason field + button the History panel uses
   (`Reason for the export`, `maxlength=200`, required), labelled "Excel".

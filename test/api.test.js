@@ -1744,6 +1744,14 @@ async function main() {
 
     const month = await supC.fetch(`/api/absences?from=${siteDay(-28)}&to=${siteDay(-1)}`);
     assert.equal(month.json.rows.find((r) => r.id === absIds.twice).nights_missed, 3);
+
+    const narrow = await supC.fetch(`/api/absences?from=${siteDay(-20)}&to=${siteDay(-3)}`);
+    assert.equal(narrow.status, 200, narrow.text);
+    assert.ok(!narrow.json.rows.some((r) => r.id === absIds.missy), "Missy's only miss (yesterday) is outside this range");
+    const narrowTwice = narrow.json.rows.find((r) => r.id === absIds.twice);
+    assert.ok(narrowTwice, "Twice's miss nine nights ago should be in this range");
+    assert.equal(narrowTwice.nights_missed, 1);
+    assert.deepEqual(narrowTwice.missed_dates, [siteDay(-9)]);
   });
 
   await test("today's open row never counts, and the response says how far the register is closed", async () => {
@@ -1764,6 +1772,13 @@ async function main() {
     const one = await supC.fetch(`/api/absences?from=${siteDay(-1)}`);
     assert.equal(one.status, 200, "to should default to from");
     assert.equal(one.json.to, siteDay(-1));
+    const oneOurs = one.json.rows.filter((r) => [absIds.twice, absIds.missy].includes(r.id));
+    assert.deepEqual(oneOurs.map((r) => r.id), [absIds.twice, absIds.missy],
+      "both missed yesterday; Twice first because of the longer streak");
+    for (const r of oneOurs) {
+      assert.equal(r.nights_missed, 1);
+      assert.deepEqual(r.missed_dates, [siteDay(-1)]);
+    }
   });
 
   await test("the Missed register report is the same rows with the dates flattened, and asks for a reason", async () => {
@@ -1777,6 +1792,7 @@ async function main() {
     assert.ok(twice, "Twice is missing from the report");
     assert.equal(twice.nights_missed, 2);
     assert.equal(twice.dates, `${siteDay(-2)}, ${siteDay(-1)}`);
+    assert.match(twice.ref, /^\d{4}$/, "the report should carry the zero-padded ref like every other report");
     assert.equal("missed_dates" in twice, false, "the array column must not reach a spreadsheet");
     assert.equal("id" in twice, false, "the report carries the ref, not the uuid");
     const xl = await supC.fetch(`/api/reports/missed?from=${from}&to=${to}&reason=House+Rules+letter&format=xlsx`);

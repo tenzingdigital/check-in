@@ -59,7 +59,7 @@ function rangeParams(query) {
   const to = dateParam(query.to || query.from, 'to');
   if (to < from) throw new HttpError(400, 'to must not be before from');
   const days = (Date.parse(to) - Date.parse(from)) / 86400000;
-  if (days > 366) throw new HttpError(400, 'A report covers at most a year');
+  if (days > 366) throw new HttpError(400, 'A range covers at most a year');
   return { from, to };
 }
 
@@ -89,7 +89,7 @@ function missedSql({ flat = false } = {}) {
       select distinct on (resident_id) resident_id, kind, issued_on
         from breach_reports order by resident_id, issued_on desc, id desc
     )
-    select ${flat ? '' : 'r.id, '}r.ref, btrim(r.first_name) || ' ' || btrim(r.last_name) as ${flat ? 'resident' : 'full_name'},
+    select ${flat ? "lpad(r.ref::text, 4, '0') as ref" : 'r.id, r.ref'}, btrim(r.first_name) || ' ' || btrim(r.last_name) as ${flat ? 'resident' : 'full_name'},
            rm.building, rm.room,
            d.nights_missed, d.nights_required,
            ${flat ? "array_to_string(d.missed_dates, ', ') as dates" : 'd.missed_dates'},
