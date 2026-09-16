@@ -1154,9 +1154,17 @@ select pg_temp.expect('053 view: one child', (:'shape_children')::integer, 1);
 select pg_temp.expect('053 view: no arrangement yet', (:'shape_no_arr')::boolean, true);
 
 \echo '--- a supervisor records a daytime arrangement'
+-- now()-1h .. now()+3h, clipped to the site day: relative to the clock alone
+-- the window crossed midnight after 21:00 site time and this line refused
+-- it every evening. Clipping keeps it running now, keeps it inside the day,
+-- and keeps the +4h windows below clear of it (to_at <= now()+3h).
+select greatest(now() - interval '1 hour', x.d) as arr_from,
+       least(now() + interval '3 hours', x.d + interval '1 day') as arr_to
+  from (select date_trunc('day', now() at time zone s.local_timezone) at time zone s.local_timezone as d
+          from public.app_settings s where s.id) x \gset
 set role authenticated;
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
-select public.record_supervision(:'hh', :'carer_id', now() - interval '1 hour', now() + interval '3 hours', false) as arr \gset
+select public.record_supervision(:'hh', :'carer_id', :'arr_from', :'arr_to', false) as arr \gset
 reset role;
 select pg_temp.expect('053 record: returns an id', (:'arr')::uuid is not null, true);
 select arrangement_id, carer_name from public.v_household_care where household_id = :'hh' \gset view_
@@ -1225,3 +1233,127 @@ update public.app_settings set compliance_retention_days = 2555;
 select pg_temp.expect('053 purge removes the old row', (:'purge_n')::integer >= 1, true);
 select count(*) as n from public.supervision_arrangements where household_id = :'hh' \gset remaining_
 select pg_temp.expect('053 purge keeps the current one', (:'remaining_n')::integer, 1);
+
+\echo ''
+\echo '=========== 054: GUARDIAN GAPS AND CHECK-IN CONFLICTS ==========='
+-- Fixture: household Gapfixture (adult Gia + child Gil), carer Gus outside
+-- it; gate events written as the owner. The 053 block leaves the session's
+-- claim at the kiosk; clear it, so the owner reads below are the owner's —
+-- the nightly job's identity (auth.uid() is null), which every v_* view
+-- filters to nothing. The snapshot and the count must work for exactly that
+-- caller, or the job records "nothing to report" about a child left alone.
+reset role;
+reset request.jwt.claim.sub;
+insert into public.households default values returning id as gap_hh \gset
+insert into public.residents (first_name, last_name, date_of_birth, status, household_id)
+  values ('Gia', 'Gapfixture', '1990-01-01', 'active', :'gap_hh') returning id as gap_parent \gset
+insert into public.residents (first_name, last_name, date_of_birth, status, household_id)
+  values ('Gil', 'Gapfixture', (current_date - interval '7 years')::date, 'active', :'gap_hh') returning id as gap_kid \gset
+insert into public.residents (first_name, last_name, date_of_birth, status)
+  values ('Gus', 'Gapcarer', '1980-01-01', 'active') returning id as gap_carer \gset
+-- Everyone signs in, then the parent signs out two hours ago.
+insert into public.gate_events (resident_id, guard_id, kind, occurred_at) values
+  (:'gap_parent', '11111111-1111-1111-1111-111111111111', 'in',  now() - interval '6 hours'),
+  (:'gap_kid',    '11111111-1111-1111-1111-111111111111', 'in',  now() - interval '6 hours'),
+  (:'gap_carer',  '11111111-1111-1111-1111-111111111111', 'in',  now() - interval '6 hours'),
+  (:'gap_parent', '11111111-1111-1111-1111-111111111111', 'out', now() - interval '2 hours');
+
+\echo '--- the 053 view states the shape a staff session sees'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select children_on_site, guardians_on_site from public.v_household_care where household_id = :'gap_hh' \gset care_
+select pg_temp.expect('054 view: children on site, no guardian', (:'care_children_on_site')::integer, 1);
+select pg_temp.expect('054 view: guardians on site is zero', (:'care_guardians_on_site')::integer, 0);
+reset role;
+reset request.jwt.claim.sub;
+
+\echo '--- guardian_gaps_now(): supervisor and owner, not a guard'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select count(*)::int as n, min(g.children) as children, min(g.guardians_out) as guardians_out, min(g.household_label) as label
+  from public.guardian_gaps_now() g where g.household_id = :'gap_hh' \gset now_
+select pg_temp.expect('054 guardian_gaps_now names the household', (:'now_n')::integer, 1);
+select pg_temp.expect('054 guardian_gaps_now names the child with age', :'now_children'::text, 'Gil (7)'::text);
+select pg_temp.expect('054 guardian_gaps_now names the parent as out', :'now_guardians_out'::text like 'Gia Gapfixture (out since %', true);
+select pg_temp.expect('054 guardian_gaps_now labels the household', :'now_label'::text, 'Gapfixture family (2)'::text);
+reset role;
+reset request.jwt.claim.sub;
+-- The 22:00 alert (jobs.js) calls this as the owner, outside any identity.
+select count(*)::int as n from public.guardian_gaps_now() g where g.household_id = :'gap_hh' \gset owner_
+select pg_temp.expect('054 guardian_gaps_now answers the owner (the nightly job)', (:'owner_n')::integer, 1);
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('054 guard cannot call guardian_gaps_now',
+  pg_temp.try('x', 'select * from public.guardian_gaps_now()') like '%blocked%', true);
+select pg_temp.try('054 guard calls guardian_gaps_now', 'select * from public.guardian_gaps_now()');
+reset role;
+reset request.jwt.claim.sub;
+
+\echo '--- an arrangement covering the household removes it from the fact'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.record_supervision(:'gap_hh', :'gap_carer', now() - interval '3 hours', now() + interval '12 hours', true) as gap_arr \gset
+select count(*)::int as n from public.guardian_gaps_now() g where g.household_id = :'gap_hh' \gset covered_
+select pg_temp.expect('054 covered household is not a gap', (:'covered_n')::integer, 0);
+select public.end_supervision(:'gap_arr');
+reset role;
+reset request.jwt.claim.sub;
+
+\echo '--- the snapshot, run as the owner, writes the gap for the night once'
+select public.snapshot_guardian_gaps(public.site_today()) as n \gset snap_
+select pg_temp.expect('054 snapshot writes one row', (:'snap_n')::integer, 1);
+select children_on_site, guardians_out, (first_out_at is not null) as has_first_out
+  from public.overnight_guardian_gaps where night = public.site_today() and household_id = :'gap_hh' \gset row_
+select pg_temp.expect('054 snapshot row carries the counts', (:'row_children_on_site')::integer, 1);
+select pg_temp.expect('054 snapshot row counts the guardian out', (:'row_guardians_out')::integer, 1);
+select pg_temp.expect('054 snapshot row carries when they went out', (:'row_has_first_out')::boolean, true);
+select public.snapshot_guardian_gaps(public.site_today()) as n \gset snap2_
+select pg_temp.expect('054 snapshot is idempotent', (:'snap2_n')::integer, 0);
+
+\echo '--- conflicts: a check-in recorded after the parent signed out; the carer''s is not one'
+-- As a guard, through the register's own function (record_checkin_at is
+-- reachable only through its wrappers, 010/051).
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select (public.record_checkin(:'gap_parent')).presented as p1 \gset
+select (public.record_checkin(:'gap_carer')).presented as p2 \gset
+select count(*)::int as n, min(c.last_gate_kind) as kind from public.v_checkin_conflicts c where c.resident_id = :'gap_parent' \gset conf_
+select pg_temp.expect('054 conflict: check-in after an OUT', (:'conf_n')::integer, 1);
+select pg_temp.expect('054 conflict carries the gate fact', :'conf_kind'::text, 'out'::text);
+select count(*)::int as n from public.v_checkin_conflicts c where c.resident_id = :'gap_carer' \gset conf2_
+select pg_temp.expect('054 no conflict when signed in', (:'conf2_n')::integer, 0);
+reset role;
+reset request.jwt.claim.sub;
+-- The nightly email counts a day's conflicts as the owner.
+select public.checkin_conflict_count(public.site_today()) as n \gset cc_
+select pg_temp.expect('054 checkin_conflict_count counts today''s for the owner', (:'cc_n')::integer >= 1, true);
+set role authenticated;
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+select count(*)::int as n from public.v_checkin_conflicts \gset kconf_
+select pg_temp.expect('054 kiosk reads no conflicts', (:'kconf_n')::integer, 0);
+select pg_temp.try('054 kiosk calls checkin_conflict_count', 'select public.checkin_conflict_count(public.site_today())');
+reset role;
+reset request.jwt.claim.sub;
+
+\echo '--- the switch and its backfill; the two new unsubscribe kinds'
+select pg_temp.expect('054 nightly_email column exists',
+  (select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'nightly_email'), 1);
+select pg_temp.expect('054 notify_thresholds_email is kept',
+  (select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'notify_thresholds_email'), 1);
+insert into public.email_opt_outs (profile_id, kind) values ('22222222-2222-2222-2222-222222222222', 'guardian_alert');
+insert into public.email_opt_outs (profile_id, kind) values ('22222222-2222-2222-2222-222222222222', 'nightly');
+select pg_temp.expect('054 guardian_alert is a kind', (select count(*)::int from public.email_opt_outs where kind = 'guardian_alert'), 1);
+select pg_temp.expect('054 nightly is a kind', (select count(*)::int from public.email_opt_outs where kind = 'nightly'), 1);
+select pg_temp.expect('054 an unknown kind is still refused',
+  pg_temp.try('x', 'insert into public.email_opt_outs (profile_id, kind) values (''22222222-2222-2222-2222-222222222222'', ''carrier_pigeon'')') like '%blocked%', true);
+delete from public.email_opt_outs where kind in ('guardian_alert', 'nightly');
+
+\echo '--- purge removes only rows older than the (temporarily lowered) retention'
+insert into public.overnight_guardian_gaps (night, household_id, children_on_site, guardians_out)
+  values (public.site_today() - 40, :'gap_hh', 1, 1);
+update public.app_settings set compliance_retention_days = 30;
+select public.purge_guardian_gaps() as n \gset gpurge_
+update public.app_settings set compliance_retention_days = 2555;
+select pg_temp.expect('054 purge removes the old row', (:'gpurge_n')::integer, 1);
+select count(*)::int as n from public.overnight_guardian_gaps where household_id = :'gap_hh' \gset gleft_
+select pg_temp.expect('054 purge keeps tonight''s', (:'gleft_n')::integer, 1);

@@ -80,6 +80,8 @@ const TENANT_JOBS = [
   ["purge-expired-breach-reports", "select purge_expired_breach_reports()"],
   // Appendix 5 arrangements go with the register they belong to (053).
   ["purge-supervision-arrangements", "select purge_supervision_arrangements()"],
+  // The nightly record of children on site with no guardian, likewise (054).
+  ["purge-guardian-gaps", "select purge_guardian_gaps()"],
   // app_settings (one row) and a small residents table can carry the
   // planner's default guess of ~300 rows forever. Cross-joined into every
   // view, that guess is how a 200-row query was costed at 85,000 rows and

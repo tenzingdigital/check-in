@@ -230,6 +230,7 @@ CREATE TABLE __TENANT__.app_settings (
     notify_thresholds_email boolean DEFAULT false NOT NULL,
     weekly_report_email boolean DEFAULT false NOT NULL,
     weekly_report_attach_document boolean DEFAULT false NOT NULL,
+    nightly_email boolean DEFAULT false NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),
@@ -560,6 +561,26 @@ begin
   returning * into v_row;
   return v_row;
 end;
+$$;
+
+
+--
+
+-- Name: checkin_conflict_count(date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.checkin_conflict_count(p_day date) RETURNS integer
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  select count(*)::integer
+    from __TENANT__.checkin_events e
+    left join lateral (
+      select ge.kind from __TENANT__.gate_events ge
+       where ge.resident_id = e.resident_id and ge.occurred_at <= e.occurred_at
+       order by ge.occurred_at desc, ge.id desc limit 1) g on true
+   where (e.occurred_at at time zone (select local_timezone from __TENANT__.app_settings where id))::date = p_day
+     and (g.kind is null or g.kind = 'out')
 $$;
 
 
@@ -1044,6 +1065,103 @@ begin
   return v_out;
 end;
 $$;
+
+
+--
+
+-- Name: guardian_gap_households(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.guardian_gap_households() RETURNS TABLE(household_id uuid, children_on_site integer, guardians_out integer, first_out_at timestamp with time zone)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  with s as (select adult_age_years from __TENANT__.app_settings where id),
+  members as (
+    select r.household_id,
+           (r.date_of_birth <= current_date - make_interval(years => s.adult_age_years)) as is_adult,
+           coalesce(le.kind, 'out') as presence,
+           le.occurred_at as last_event_at
+      from __TENANT__.residents r cross join s
+      left join lateral (
+        select ge.kind, ge.occurred_at from __TENANT__.gate_events ge
+         where ge.resident_id = r.id
+         order by ge.occurred_at desc, ge.id desc limit 1) le on true
+     where r.status = 'active' and r.household_id is not null
+  ),
+  shape as (
+    select m.household_id,
+           count(*) filter (where not m.is_adult and m.presence = 'in')::integer as children_on_site,
+           count(*) filter (where m.is_adult and m.presence = 'in')::integer     as guardians_on_site,
+           count(*) filter (where m.is_adult and m.presence = 'out')::integer    as guardians_out,
+           min(m.last_event_at) filter (where m.is_adult and m.presence = 'out') as first_out_at
+      from members m group by m.household_id
+  )
+  select sh.household_id, sh.children_on_site, sh.guardians_out, sh.first_out_at
+    from shape sh
+   where sh.children_on_site > 0 and sh.guardians_on_site = 0
+     and not exists (
+       select 1 from __TENANT__.supervision_arrangements a
+        where a.household_id = sh.household_id and a.ended_at is null
+          and now() >= a.from_at and now() < a.to_at)
+$$;
+
+
+--
+
+-- Name: guardian_gaps_now(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.guardian_gaps_now() RETURNS TABLE(household_id uuid, household_label text, room_labels text, children text, guardians_out text, first_out_at timestamp with time zone)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    SET lc_time TO 'C'
+    AS $$
+declare v_tz text; v_adult integer; v_today date;
+begin
+  if auth.uid() is not null and not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin can list children without a guardian' using errcode = '42501';
+  end if;
+  select local_timezone, adult_age_years into v_tz, v_adult from __TENANT__.app_settings where id;
+  v_today := __TENANT__.site_today();
+  return query
+  with g as (select * from __TENANT__.guardian_gap_households()),
+  m as (
+    select r.household_id, btrim(r.first_name) as first_name, btrim(r.last_name) as last_name, r.date_of_birth,
+           (r.date_of_birth <= current_date - make_interval(years => v_adult)) as is_adult,
+           coalesce(le.kind, 'out') as presence,
+           le.occurred_at as last_event_at,
+           case when rm.id is null then null
+                else b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number end as room_label
+      from __TENANT__.residents r
+      join g on g.household_id = r.household_id
+      left join __TENANT__.rooms rm    on rm.id = r.room_id
+      left join __TENANT__.buildings b on b.id = rm.building_id
+      left join lateral (
+        select ge.kind, ge.occurred_at from __TENANT__.gate_events ge
+         where ge.resident_id = r.id
+         order by ge.occurred_at desc, ge.id desc limit 1) le on true
+     where r.status = 'active'
+  )
+  select g.household_id,
+         (select string_agg(distinct m.last_name, ' / ' order by m.last_name) || ' family (' || count(*) || ')'
+            from m where m.household_id = g.household_id),
+         (select string_agg(distinct m.room_label, ', ' order by m.room_label)
+            from m where m.household_id = g.household_id and m.room_label is not null),
+         (select string_agg(m.first_name || ' (' || date_part('year', age(m.date_of_birth))::integer || ')', ', ' order by m.date_of_birth)
+            from m where m.household_id = g.household_id and not m.is_adult and m.presence = 'in'),
+         (select string_agg(m.first_name || ' ' || m.last_name
+                   || case when m.last_event_at is null then ' (never signed in)'
+                           else ' (out since '
+                                || to_char(m.last_event_at at time zone v_tz,
+                                           case when (m.last_event_at at time zone v_tz)::date = v_today then 'HH24:MI' else 'FMDD Mon HH24:MI' end)
+                                || ')' end,
+                   ', ' order by m.last_name, m.first_name)
+            from m where m.household_id = g.household_id and m.is_adult),
+         g.first_out_at
+    from g
+   order by 2;
+end $$;
 
 
 --
@@ -1777,6 +1895,24 @@ $$;
 
 --
 
+-- Name: purge_guardian_gaps(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_guardian_gaps() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare n integer;
+begin
+  delete from __TENANT__.overnight_guardian_gaps
+   where night < __TENANT__.site_today() - (select compliance_retention_days from __TENANT__.app_settings where id);
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+
+--
+
 -- Name: purge_resident_views(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2383,6 +2519,26 @@ $$;
 
 --
 
+-- Name: snapshot_guardian_gaps(date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.snapshot_guardian_gaps(p_night date) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare n integer;
+begin
+  insert into __TENANT__.overnight_guardian_gaps (night, household_id, children_on_site, guardians_out, first_out_at)
+  select p_night, g.household_id, g.children_on_site, g.guardians_out, g.first_out_at
+    from __TENANT__.guardian_gap_households() g
+  on conflict do nothing;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+
+--
+
 -- Name: snapshot_overnight_absences(date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2869,7 +3025,7 @@ CREATE TABLE __TENANT__.email_opt_outs (
     profile_id uuid NOT NULL,
     kind text NOT NULL,
     unsubscribed_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT email_opt_outs_kind_check CHECK ((kind = ANY (ARRAY['weekly_report'::text, 'safeguarding_alert'::text, 'house_rules'::text])))
+    CONSTRAINT email_opt_outs_kind_check CHECK ((kind = ANY (ARRAY['weekly_report'::text, 'safeguarding_alert'::text, 'house_rules'::text, 'guardian_alert'::text, 'nightly'::text])))
 );
 
 
@@ -2983,6 +3139,21 @@ CREATE TABLE __TENANT__.overnight_absences (
     resident_id uuid NOT NULL,
     off_site_since timestamp with time zone,
     snapshot_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+
+-- Name: overnight_guardian_gaps; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.overnight_guardian_gaps (
+    night date NOT NULL,
+    household_id uuid NOT NULL,
+    children_on_site integer NOT NULL,
+    guardians_out integer NOT NULL,
+    first_out_at timestamp with time zone,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -3157,6 +3328,31 @@ CREATE VIEW __TENANT__.v_check_log AS
      JOIN __TENANT__.residents r ON ((r.id = e.resident_id)))
      JOIN __TENANT__.profiles g ON ((g.id = e.guard_id)))
   WHERE __TENANT__.is_staff();
+
+
+--
+
+-- Name: v_checkin_conflicts; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW __TENANT__.v_checkin_conflicts AS
+ SELECT e.id AS checkin_id,
+    e.resident_id,
+    e.occurred_at,
+    e.guard_id,
+    e.source,
+    g.kind AS last_gate_kind,
+    g.occurred_at AS last_gate_at
+   FROM (__TENANT__.checkin_events e
+     LEFT JOIN LATERAL ( SELECT ge.kind,
+            ge.occurred_at
+           FROM __TENANT__.gate_events ge
+          WHERE ((ge.resident_id = e.resident_id) AND (ge.occurred_at <= e.occurred_at))
+          ORDER BY ge.occurred_at DESC, ge.id DESC
+         LIMIT 1) g ON (true))
+  WHERE (__TENANT__.is_staff() AND (e.occurred_at > (now() - make_interval(days => ( SELECT app_settings.compliance_retention_days
+           FROM __TENANT__.app_settings
+          WHERE app_settings.id)))) AND ((g.kind IS NULL) OR (g.kind = 'out'::text)));
 
 
 --
@@ -3532,6 +3728,15 @@ ALTER TABLE ONLY __TENANT__.job_runs
 
 ALTER TABLE ONLY __TENANT__.overnight_absences
     ADD CONSTRAINT overnight_absences_pkey PRIMARY KEY (night, resident_id);
+
+
+--
+
+-- Name: overnight_guardian_gaps overnight_guardian_gaps_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.overnight_guardian_gaps
+    ADD CONSTRAINT overnight_guardian_gaps_pkey PRIMARY KEY (night, household_id);
 
 
 --
@@ -4214,6 +4419,15 @@ ALTER TABLE ONLY __TENANT__.overnight_absences
 
 --
 
+-- Name: overnight_guardian_gaps overnight_guardian_gaps_household_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.overnight_guardian_gaps
+    ADD CONSTRAINT overnight_guardian_gaps_household_id_fkey FOREIGN KEY (household_id) REFERENCES __TENANT__.households(id) ON DELETE CASCADE;
+
+
+--
+
 -- Name: profiles profiles_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4659,6 +4873,14 @@ CREATE POLICY gate_events_read ON __TENANT__.gate_events FOR SELECT USING (__TEN
 
 --
 
+-- Name: overnight_guardian_gaps guardian_gaps_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY guardian_gaps_read ON __TENANT__.overnight_guardian_gaps FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
 -- Name: households; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -4694,6 +4916,13 @@ ALTER TABLE __TENANT__.overnight_absences ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY overnight_absences_read ON __TENANT__.overnight_absences FOR SELECT USING (__TENANT__.is_staff());
 
+
+--
+
+-- Name: overnight_guardian_gaps; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.overnight_guardian_gaps ENABLE ROW LEVEL SECURITY;
 
 --
 
@@ -5084,6 +5313,15 @@ GRANT ALL ON FUNCTION __TENANT__.authorise_absence(p_resident_id uuid, p_from da
 
 --
 
+-- Name: FUNCTION checkin_conflict_count(p_day date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.checkin_conflict_count(p_day date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.checkin_conflict_count(p_day date) TO service_role;
+
+
+--
+
 -- Name: FUNCTION close_out_compliance_days(p_through date); Type: ACL; Schema: public; Owner: -
 --
 
@@ -5194,6 +5432,25 @@ GRANT ALL ON FUNCTION __TENANT__.erase_resident(p_resident_id uuid, p_reason tex
 REVOKE ALL ON FUNCTION __TENANT__.export_resident_record(p_resident_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.export_resident_record(p_resident_id uuid) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.export_resident_record(p_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION guardian_gap_households(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.guardian_gap_households() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.guardian_gap_households() TO service_role;
+
+
+--
+
+-- Name: FUNCTION guardian_gaps_now(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.guardian_gaps_now() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.guardian_gaps_now() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.guardian_gaps_now() TO service_role;
 
 
 --
@@ -5488,6 +5745,15 @@ GRANT ALL ON FUNCTION __TENANT__.purge_expired_visits() TO service_role;
 
 --
 
+-- Name: FUNCTION purge_guardian_gaps(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_guardian_gaps() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_guardian_gaps() TO service_role;
+
+
+--
+
 -- Name: FUNCTION purge_resident_views(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -5656,6 +5922,15 @@ GRANT ALL ON FUNCTION __TENANT__.room_label_of(p_room_id uuid) TO service_role;
 REVOKE ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boolean, max_results integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boolean, max_results integer) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boolean, max_results integer) TO service_role;
+
+
+--
+
+-- Name: FUNCTION snapshot_guardian_gaps(p_night date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.snapshot_guardian_gaps(p_night date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.snapshot_guardian_gaps(p_night date) TO service_role;
 
 
 --
@@ -5888,6 +6163,15 @@ GRANT SELECT ON TABLE __TENANT__.overnight_absences TO authenticated;
 
 --
 
+-- Name: TABLE overnight_guardian_gaps; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.overnight_guardian_gaps TO service_role;
+GRANT SELECT ON TABLE __TENANT__.overnight_guardian_gaps TO authenticated;
+
+
+--
+
 -- Name: TABLE profiles; Type: ACL; Schema: public; Owner: -
 --
 
@@ -5966,6 +6250,15 @@ GRANT SELECT ON TABLE __TENANT__.supervision_arrangements TO authenticated;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_check_log TO authenticated;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_check_log TO service_role;
+
+
+--
+
+-- Name: TABLE v_checkin_conflicts; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_checkin_conflicts TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_checkin_conflicts TO service_role;
 
 
 --
