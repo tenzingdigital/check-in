@@ -1825,7 +1825,10 @@ async function main() {
     assert.equal((await supC.fetch(`/api/residents/${fam.kid}`, { method: "PATCH", body: { household_with: fam.parent } })).status, 200);
     fam.hh = (await withOwner((c) => c.query(`select household_id from public.residents where id = $1`, [fam.kid]))).rows[0].household_id;
     assert.ok(fam.hh);
-    const out = await api.fetch("/api/households");
+    // Supervisor and admin only: the Families tab is the one consumer, and
+    // the door reads /api/residents. A guard is refused outright.
+    assert.equal((await api.fetch("/api/households")).status, 403, "a guard cannot list households");
+    const out = await supC.fetch("/api/households");
     assert.equal(out.status, 200, out.text);
     const h = out.json.households.find((x) => x.id === fam.hh);
     assert.ok(h, "the household is listed");
@@ -1836,12 +1839,15 @@ async function main() {
   });
 
   await test("recording an arrangement puts the care line on guardian, carer and child; ending it takes it away", async () => {
+    // now-1h .. now+3h is relative to the clock, so after 21:00 site time it
+    // crosses midnight; overnight: true keeps it recordable at any hour. The
+    // midnight rule itself is the next test's business, not this one's.
     const from = new Date(Date.now() - 3600e3).toISOString(), to = new Date(Date.now() + 3 * 3600e3).toISOString();
-    const asGuard = await api.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    const asGuard = await api.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: true } });
     assert.equal(asGuard.status, 403);
-    const inside = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.parent, from_at: from, to_at: to, overnight: false } });
+    const inside = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.parent, from_at: from, to_at: to, overnight: true } });
     assert.equal(inside.status, 400); assert.match(inside.json.error, /outside the household/);
-    const rec = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    const rec = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: true } });
     assert.equal(rec.status, 201, rec.text); fam.arr = rec.json.id;
     const rows = (await api.fetch("/api/residents?q=fixture&limit=50")).json;
     const by = (id) => rows.find((r) => r.id === id);
@@ -1849,9 +1855,10 @@ async function main() {
     assert.equal(by(fam.kid).care.role, "child");
     assert.equal(by(fam.carer).care.role, "carer"); assert.match(by(fam.carer).care.household_label, /Famfixture/);
     assert.equal(by(fam.loner).care, null);
-    const overlap = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    const overlap = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: true } });
     assert.equal(overlap.status, 400); assert.match(overlap.json.error, /already has an arrangement/);
-    const hist = await api.fetch(`/api/households/${fam.hh}/supervision?from=${siteToday()}&to=${siteToday()}`);
+    assert.equal((await api.fetch(`/api/households/${fam.hh}/supervision?from=${siteToday()}&to=${siteToday()}`)).status, 403, "a guard cannot read the history");
+    const hist = await supC.fetch(`/api/households/${fam.hh}/supervision?from=${siteToday()}&to=${siteToday()}`);
     assert.equal(hist.status, 200); assert.equal(hist.json.length, 1);
     assert.equal((await api.fetch(`/api/supervision/${fam.arr}/end`, { method: "POST" })).status, 403);
     const end = await supC.fetch(`/api/supervision/${fam.arr}/end`, { method: "POST" });
@@ -1886,8 +1893,10 @@ async function main() {
     // adult member of her own household, itself under someone else's care at
     // the same time, so the two running arrangements could be confused for
     // one another on her own /api/residents row.
+    // overnight: true for the same reason as above — a window around now()
+    // crosses midnight for an hour a day, and that rule is not under test here.
     const from = new Date(Date.now() - 1800e3).toISOString(), to = new Date(Date.now() + 1800e3).toISOString();
-    const asFamCarer = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: false } });
+    const asFamCarer = await supC.fetch(`/api/households/${fam.hh}/supervision`, { method: "POST", body: { carer_id: fam.carer, from_at: from, to_at: to, overnight: true } });
     assert.equal(asFamCarer.status, 201, asFamCarer.text);
     const famArrId = asFamCarer.json.id;
 
@@ -1898,7 +1907,7 @@ async function main() {
     const caraHh = join.json.household_id;
     assert.ok(caraHh);
 
-    const asLee = await supC.fetch(`/api/households/${caraHh}/supervision`, { method: "POST", body: { carer_id: fam.loner, from_at: from, to_at: to, overnight: false } });
+    const asLee = await supC.fetch(`/api/households/${caraHh}/supervision`, { method: "POST", body: { carer_id: fam.loner, from_at: from, to_at: to, overnight: true } });
     assert.equal(asLee.status, 201, asLee.text);
     const caraArrId = asLee.json.id;
 
@@ -3738,8 +3747,10 @@ async function main() {
       arrangement: async () => {
         if (!fx.householdId) await makers.household();
         if (!fx.carerId) await makers.carer();
+        // overnight: true — the window is relative to the clock and would
+        // otherwise be refused for crossing midnight after 21:00 site time.
         const from = new Date(Date.now() - 3600e3).toISOString(), to = new Date(Date.now() + 3 * 3600e3).toISOString();
-        const r = await supM.fetch(`/api/households/${fx.householdId}/supervision`, { method: "POST", body: { carer_id: fx.carerId, from_at: from, to_at: to, overnight: false } });
+        const r = await supM.fetch(`/api/households/${fx.householdId}/supervision`, { method: "POST", body: { carer_id: fx.carerId, from_at: from, to_at: to, overnight: true } });
         assert.equal(r.status, 201, r.text);
         fx.arrangementId = r.json.id;
       },

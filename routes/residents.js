@@ -136,15 +136,23 @@ router.get('/', wrap(async (req, res) => {
       });
     }
     // Who is minding whom (migration 053): a guardian, a child or the carer
-    // of a running arrangement carries one line for the door.
-    const { rows: care } = await client.query(
+    // of a running arrangement carries one line for the door. The normal
+    // state is no arrangement at all, and v_household_care walks the
+    // movement log for every household to say so — so ask the cheap
+    // question first (one index lookup on supervision_arrangements) and
+    // only read the view when something is actually running.
+    const { rows: [{ any: anyRunning }] } = await client.query(
+      `select exists (select 1 from supervision_arrangements
+                       where ended_at is null and now() >= from_at and now() < to_at) as any`,
+    );
+    const { rows: care } = anyRunning ? await client.query(
       `select c.household_id, c.carer_id, c.carer_name, c.carer_room_label, c.until, c.overnight, rm.household_label
          from v_household_care c
          join lateral (select household_label from v_resident_room where household_id = c.household_id limit 1) rm on true
         where c.arrangement_id is not null
           and (c.household_id = any($1::uuid[]) or c.carer_id = any($2::uuid[]))`,
       [found.map(r => r.household_id).filter(Boolean), found.map(r => r.id)],
-    );
+    ) : { rows: [] };
     const careByHousehold = new Map(care.map(c => [c.household_id, c]));
     const careByCarer = new Map(care.map(c => [c.carer_id, c]));
     for (const r of found) {

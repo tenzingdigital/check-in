@@ -148,6 +148,28 @@ inside a migration file; a later migration adding another `app_settings`
 column should do the same rather than falling back to the manual
 `GET /api/tenants` check.
 
+**Migration 053 is a whole new table, and its gap is quiet on the screen
+that uses it.** It adds `supervision_arrangements`, the view
+`v_household_care` and four functions — `record_supervision`,
+`end_supervision`, `crosses_midnight` and `purge_supervision_arrangements`
+— and deliberately does not reach into existing `t_*` schemas (the file
+says why: a table mirrored without its policies, grants and functions is
+worse than a reported gap). `tenant_schema_gaps()` reports all four
+functions missing for a tenant provisioned before it, so **before
+deploying, check `GET /api/tenants`**; a tenant missing any of them is
+behind. On such a tenant nothing 500s, which is the problem: `searchPath()`
+falls through to `public`'s objects, where `my_role()` finds no profile
+and answers `'none'`, so the Families tab loads (`GET /api/households`
+reads the tenant's own residents and `public.v_household_care`, which is
+empty for that caller) and is silently empty of arrangements, and
+Record answers 403 (`public.record_supervision` refuses a caller whose
+`is_supervisor()` is false). Bring it current by applying 053's objects
+against that schema — the table, its policy and grants, the audit trigger,
+the four functions, the departed-carer trigger on `residents` and the view,
+with `public.` rewritten to the tenant schema — and the tab fills in on the
+next load. Until then the nightly purge on that tenant harmlessly runs
+`public`'s `purge_supervision_arrangements()` against `public`'s own table.
+
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every
 `t_*` schema at boot automatically, refusing to serve a schema still

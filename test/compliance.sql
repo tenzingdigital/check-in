@@ -1188,6 +1188,18 @@ select pg_temp.expect('053 refuses an overlap',
 select pg_temp.expect('053 refuses crossing midnight without the overnight tick',
   pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'carer_id') ||
     ', now() + interval ''4 hours'', now() + interval ''30 hours'', false)') like '%blocked%', true);
+select pg_temp.expect('053 refuses a household that does not exist',
+  pg_temp.try('x', 'select public.record_supervision(''00000000-0000-4000-8000-000000000000'', ' || quote_literal(:'carer_id') ||
+    ', now() + interval ''4 hours'', now() + interval ''5 hours'', false)') like '%No such household%', true);
+reset role;
+-- A departed adult is not an active resident, so cannot be nominated.
+insert into public.residents (first_name, last_name, date_of_birth, status, departed_on)
+  values ('Sup', 'Leaver', '1987-02-02', 'departed', current_date) returning id as leaver_id \gset
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.expect('053 refuses a departed resident as carer',
+  pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'leaver_id') ||
+    ', now() + interval ''4 hours'', now() + interval ''5 hours'', false)') like '%blocked%', true);
 reset role;
 
 \echo '--- an overnight arrangement, ticked, is never refused for crossing midnight'
@@ -1234,11 +1246,35 @@ select pg_temp.expect('053 purge removes the old row', (:'purge_n')::integer >= 
 select count(*) as n from public.supervision_arrangements where household_id = :'hh' \gset remaining_
 select pg_temp.expect('053 purge keeps the current one', (:'remaining_n')::integer, 1);
 
+\echo '--- a carer who leaves the centre stops minding anyone: departure ends the arrangement'
+-- The same clipped window as the first arrangement, which the purge has
+-- just removed, so nothing overlaps it. The carer is then marked departed
+-- as the owner: the trigger fires for whoever writes the row.
+reset role;
+reset request.jwt.claim.sub;
+insert into public.residents (first_name, last_name, date_of_birth, status)
+  values ('Sup', 'Goer', '1986-03-03', 'active') returning id as goer_id \gset
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.record_supervision(:'hh', :'goer_id', :'arr_from', :'arr_to', false) as arr3 \gset
+select arrangement_id from public.v_household_care where household_id = :'hh' \gset before_
+select pg_temp.expect('053 departure: the arrangement runs beforehand', :'before_arrangement_id'::uuid, (:'arr3')::uuid);
+reset role;
+update public.residents set status = 'departed', departed_on = current_date where id = :'goer_id';
+select (ended_at is not null) as has_ended from public.supervision_arrangements where id = :'arr3' \gset dep_
+select pg_temp.expect('053 departure: ended_at is set on the carer''s arrangement', (:'dep_has_ended')::boolean, true);
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select (arrangement_id is null) as no_arr from public.v_household_care where household_id = :'hh' \gset dep_
+select pg_temp.expect('053 departure: the view shows no arrangement', (:'dep_no_arr')::boolean, true);
+reset role;
+reset request.jwt.claim.sub;
+
 \echo ''
 \echo '=========== 054: GUARDIAN GAPS AND CHECK-IN CONFLICTS ==========='
 -- Fixture: household Gapfixture (adult Gia + child Gil), carer Gus outside
--- it; gate events written as the owner. The 053 block leaves the session's
--- claim at the kiosk; clear it, so the owner reads below are the owner's —
+-- it; gate events written as the owner. Clear the session's claim here
+-- regardless of what the 053 block left, so the owner reads below are the owner's —
 -- the nightly job's identity (auth.uid() is null), which every v_* view
 -- filters to nothing. The snapshot and the count must work for exactly that
 -- caller, or the job records "nothing to report" about a child left alone.

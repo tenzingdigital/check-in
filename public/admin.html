@@ -849,7 +849,7 @@ function renderFamilies() {
         <input class="field grow" type="search" placeholder="Add a member…" data-addsearch="${esc(h.id)}" aria-label="Add a member to ${esc(h.label || "this family")}" autocomplete="off">
       </div>
       <div class="famAddResults" data-addresults="${esc(h.id)}"></div>
-      ${h.children ? `<div class="famCare mt8">${h.care
+      ${h.children || h.care ? `<div class="famCare mt8">${h.care
         ? `<span>${careLine(h.care)}</span> <button class="btn ghost sm" type="button" data-endcare="${esc(h.care.arrangement_id)}">End early</button>`
         : `<span class="hint">No supervision arrangement running.</span> <button class="btn sm" type="button" data-newcare="${esc(h.id)}">Supervision…</button>`}</div>` : ""}
     </div>`).join("") : `<p class="hint">No families yet. Tick people below and make one.</p>`;
@@ -931,7 +931,7 @@ $("panelFamilies").addEventListener("click", async (e) => {
     const out = await guarded(() => apiPost(`/api/supervision/${endBtn.dataset.endcare}/end`), (err) => toast("Not ended: " + err.message, "err"));
     if (!out) return;
     toast("Arrangement ended", "ok");
-    loadFamilies();
+    await loadFamilies(); // the sheet's widget reads state.families: refresh it only once that is current
     refreshHhCare();
     return;
   }
@@ -976,7 +976,11 @@ function openCareForm(householdId) {
   $("cfCarerResults").innerHTML = "";
   const now = new Date();
   $("cfFrom").value = localInputValue(now);
-  $("cfTo").value = localInputValue(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0));
+  // Until: 20:00 today — or, once 20:00 has passed, 20:00 tomorrow, so the
+  // default never ends before it starts.
+  const until = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0);
+  if (until <= now) until.setDate(until.getDate() + 1);
+  $("cfTo").value = localInputValue(until);
   $("cfOvernight").checked = false;
   $("cfOvernight").disabled = false;
   updateOvernightForce();
@@ -1026,7 +1030,7 @@ $("careForm").addEventListener("submit", async (e) => {
   if (!out) return;
   toast("Arrangement recorded", "ok");
   closeCareForm();
-  loadFamilies();
+  await loadFamilies(); // as above: the sheet's widget reads state.families
   refreshHhCare();
 });
 
@@ -1523,9 +1527,9 @@ function renderDetail(rec, summary) {
       };
     };
     // The supervision widget: only shown once the resident is in a
-    // household, and only when that household has children (matches the
-    // Families tab card, which hides the whole care line for a
-    // childless/guardians-only household).
+    // household, and only when that household has children — or an
+    // arrangement still running, which must stay endable even after the
+    // last child left the household (matches the Families tab card).
     const renderCare = async () => {
       const box = $("hhCare");
       if (!box) return; // the sheet closed while a request was out
@@ -1535,7 +1539,7 @@ function renderDetail(rec, summary) {
       if (!box2) return; // the sheet closed while the request was out
       if (!fam) { box2.innerHTML = ""; return; }
       const hh = fam.households.find((h) => h.id === rec.household_id);
-      if (!hh || !hh.children) { box2.innerHTML = ""; return; }
+      if (!hh || !(hh.children || hh.care)) { box2.innerHTML = ""; return; }
       box2.innerHTML = hh.care
         ? `<p class="hint flush mt8">${careLine(hh.care)} <button class="linkish" type="button" id="hhEndCare">End early</button></p>`
         : `<p class="hint flush mt8">No supervision arrangement running. <button class="linkish" type="button" id="hhNewCare">Supervision…</button></p>`;

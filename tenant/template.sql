@@ -780,6 +780,22 @@ $$;
 
 --
 
+-- Name: end_departed_carer_supervision(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.end_departed_carer_supervision() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  update __TENANT__.supervision_arrangements set ended_at = greatest(now(), from_at)
+   where carer_id = new.id and ended_at is null;
+  return null;
+end $$;
+
+
+--
+
 -- Name: roll_calls; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2340,6 +2356,9 @@ begin
     raise exception 'Only a supervisor or admin can record a supervision arrangement' using errcode = '42501';
   end if;
   if p_to <= p_from then raise exception 'The arrangement must end after it starts' using errcode = '22023'; end if;
+  if not exists (select 1 from __TENANT__.households h where h.id = p_household) then
+    raise exception 'No such household' using errcode = '22023';
+  end if;
   select adult_age_years into v_adult_age from __TENANT__.app_settings where id;
   if not exists (select 1 from __TENANT__.residents r where r.id = p_carer and r.status = 'active'
                    and r.date_of_birth <= current_date - make_interval(years => v_adult_age)) then
@@ -3454,7 +3473,7 @@ CREATE VIEW __TENANT__.v_household_care AS
             a.to_at AS until,
             a.overnight
            FROM ((__TENANT__.supervision_arrangements a
-             JOIN __TENANT__.residents c ON ((c.id = a.carer_id)))
+             JOIN __TENANT__.residents c ON (((c.id = a.carer_id) AND (c.status = 'active'::text))))
              LEFT JOIN __TENANT__.v_resident_room rm ON ((rm.id = c.id)))
           WHERE ((a.ended_at IS NULL) AND (now() >= a.from_at) AND (now() < a.to_at))
           ORDER BY a.household_id, a.from_at DESC
@@ -4224,6 +4243,14 @@ CREATE TRIGGER profiles_weekly_report_guard BEFORE INSERT OR UPDATE ON __TENANT_
 --
 
 CREATE TRIGGER residents_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.residents FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: residents residents_departed_ends_supervision; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER residents_departed_ends_supervision AFTER UPDATE OF status ON __TENANT__.residents FOR EACH ROW WHEN (((new.status = 'departed'::text) AND (old.status IS DISTINCT FROM 'departed'::text))) EXECUTE FUNCTION __TENANT__.end_departed_carer_supervision();
 
 
 --
@@ -5365,6 +5392,15 @@ GRANT ALL ON FUNCTION __TENANT__.email_link_key(p_profile uuid) TO service_role;
 REVOKE ALL ON FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.end_absence(p_id bigint, p_last_day date) TO service_role;
+
+
+--
+
+-- Name: FUNCTION end_departed_carer_supervision(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.end_departed_carer_supervision() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.end_departed_carer_supervision() TO service_role;
 
 
 --

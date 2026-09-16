@@ -1,14 +1,17 @@
 // Families and child-supervision arrangements (migration 053).
 //
-//   GET  /api/households                       every household with members and the running arrangement; plus the unassigned
+//   GET  /api/households                       every household with members and the running arrangement; plus the unassigned   supervisor+
 //   POST /api/households/:id/supervision       { carer_id, from_at, to_at, overnight }   supervisor+
-//   GET  /api/households/:id/supervision?from&to  history, newest first
+//   GET  /api/households/:id/supervision?from&to  history, newest first   supervisor+
 //   POST /api/supervision/:id/end              supervisor+
 //
-// Reads are for every staff member: the gate draws "children with …" from
-// the same facts. Writes go through record_supervision()/end_supervision(),
-// which refuse a guard, a carer inside the household, a child, a departed
-// resident, an overlap, and a night without the overnight approval ticked.
+// Every route here is a supervisor's or admin's: the Families tab is the
+// only consumer. The door never reads these — the gate draws "children
+// with …" from the care line on each /api/residents row, which comes from
+// the same facts (v_household_care). Writes go through
+// record_supervision()/end_supervision(), which refuse a guard, a carer
+// inside the household, a child, a departed resident, an overlap, and a
+// night without the overnight approval ticked.
 // The arrangement holds no contact number and no note: the paper Appendix 5
 // form on file keeps those (docs/reference/README.md).
 
@@ -18,6 +21,14 @@ const db = require('../database');
 const { HttpError, uuidParam, dateParam, translateDbError } = require('../lib/api');
 
 const router = express.Router();
+
+// The same session check the other supervisor-only routes make (the
+// residents import, for one) — before the database is asked anything.
+function requireSupervisor(req) {
+  if (req.session.role !== 'supervisor' && req.session.role !== 'admin') {
+    throw new HttpError(403, 'Only a supervisor or admin can see families and their arrangements');
+  }
+}
 
 // v_resident_status and v_resident_room, never the residents table itself: a
 // guard has no direct grant on residents (only a supervisor or admin does),
@@ -33,6 +44,7 @@ const MEMBER_SQL = `
    order by rm.household_id, v.is_adult desc, v.last_name, v.first_name`;
 
 router.get('/households', wrap(async (req, res) => {
+  requireSupervisor(req);
   const out = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: members } = await client.query(MEMBER_SQL);
     const { rows: care } = await client.query('select * from v_household_care');
@@ -87,12 +99,13 @@ router.post('/households/:id/supervision', wrap(async (req, res) => {
 }));
 
 router.get('/households/:id/supervision', wrap(async (req, res) => {
+  requireSupervisor(req);
   const household = uuidParam(req.params.id, 'household id');
   const from = dateParam(req.query.from, 'from'), to = dateParam(req.query.to || req.query.from, 'to');
   const rows = await db.withIdentity(req.session.userId, async (client) => {
-    // v_resident_status for the carer's name, not the residents table: this
-    // is a staff-wide read (a guard included), and a guard has no direct
-    // grant on residents.
+    // v_resident_status for the carer's name rather than the residents
+    // table, like MEMBER_SQL above: the view already carries the name and
+    // runs as the table owner, so the read does not depend on who calls.
     const { rows } = await client.query(
       `select a.id, a.carer_id, v.full_name as carer_name, rm.room_label as carer_room_label,
               a.from_at, a.to_at, a.overnight, a.recorded_at, a.ended_at, p.full_name as recorded_by_name

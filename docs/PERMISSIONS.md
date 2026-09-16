@@ -105,9 +105,9 @@ validation.
 
 | What | Logged out | Guard | Kiosk | Supervisor | Admin | Platform admin |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Every household, its members and the running arrangement, plus the unassigned<br><code>GET /api/households</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
+| Every household, its members and the running arrangement, plus the unassigned<br><code>GET /api/households</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Record a supervision arrangement (a household child in another resident's care)<br><code>POST /api/households/:id/supervision</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
-| A household's supervision history over a range<br><code>GET /api/households/:id/supervision</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
+| A household's supervision history over a range<br><code>GET /api/households/:id/supervision</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | End a supervision arrangement early<br><code>POST /api/supervision/:id/end</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 
 ## Reports

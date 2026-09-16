@@ -62,6 +62,9 @@ begin
     raise exception 'Only a supervisor or admin can record a supervision arrangement' using errcode = '42501';
   end if;
   if p_to <= p_from then raise exception 'The arrangement must end after it starts' using errcode = '22023'; end if;
+  if not exists (select 1 from public.households h where h.id = p_household) then
+    raise exception 'No such household' using errcode = '22023';
+  end if;
   select adult_age_years into v_adult_age from public.app_settings where id;
   if not exists (select 1 from public.residents r where r.id = p_carer and r.status = 'active'
                    and r.date_of_birth <= current_date - make_interval(years => v_adult_age)) then
@@ -99,6 +102,27 @@ end $$;
 revoke all on function public.end_supervision(uuid) from public, anon;
 grant execute on function public.end_supervision(uuid) to authenticated;
 
+-- A carer who has left cannot be minding anyone. Marking a resident departed
+-- ends every arrangement that still names them as the carer, the same way
+-- end_supervision() would (ended_at = now, never before from_at); the view's
+-- running CTE also joins the carer on status = 'active', so a departure the
+-- trigger somehow missed still drops off the door. SECURITY DEFINER because
+-- the table has no update policy: writes go through owner-side code only.
+-- The audit trigger on supervision_arrangements records the ending.
+create or replace function public.end_departed_carer_supervision()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  update public.supervision_arrangements set ended_at = greatest(now(), from_at)
+   where carer_id = new.id and ended_at is null;
+  return null;
+end $$;
+revoke all on function public.end_departed_carer_supervision() from public, anon, authenticated;
+drop trigger if exists residents_departed_ends_supervision on public.residents;
+create trigger residents_departed_ends_supervision
+  after update of status on public.residents
+  for each row when (new.status = 'departed' and old.status is distinct from 'departed')
+  execute function public.end_departed_carer_supervision();
+
 -- One row per household with active members: who is responsible, who is on
 -- site, and the arrangement running right now, if any. The gate draws its
 -- care lines from this; the 22:00 alert (piece B) reads it.
@@ -124,7 +148,7 @@ running as (
          btrim(c.first_name) || ' ' || btrim(c.last_name) as carer_name,
          rm.room_label as carer_room_label, a.to_at as until, a.overnight
     from public.supervision_arrangements a
-    join public.residents c on c.id = a.carer_id
+    join public.residents c on c.id = a.carer_id and c.status = 'active'
     left join public.v_resident_room rm on rm.id = c.id
    where a.ended_at is null and now() >= a.from_at and now() < a.to_at
    order by a.household_id, a.from_at desc

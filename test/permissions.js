@@ -111,9 +111,13 @@ module.exports = [
   { area: 'Residents and buildings', name: 'Put an archived room back into use', method: 'POST', path: (fx) => `/api/rooms/${fx.roomId}/restore`, body: () => ({}), expect: SUPERVISOR, fresh: 'room' },
 
   // ---- families (child-supervision arrangements, migration 053) ----------
-  { area: 'Families', name: 'Every household, its members and the running arrangement, plus the unassigned', method: 'GET', path: () => '/api/households', expect: STAFF },
-  { area: 'Families', name: 'Record a supervision arrangement (a household child in another resident\'s care)', method: 'POST', path: (fx) => `/api/households/${fx.householdId}/supervision`, body: (fx) => ({ carer_id: fx.carerId, from_at: new Date(Date.now() - 3600e3).toISOString(), to_at: new Date(Date.now() + 3 * 3600e3).toISOString(), overnight: false }), expect: SUPERVISOR, fresh: 'household' },
-  { area: 'Families', name: "A household's supervision history over a range", method: 'GET', path: (fx) => `/api/households/${fx.householdId}/supervision?from=${fx.today}&to=${fx.today}`, expect: STAFF },
+  // The Families tab is the only reader of these two; the door takes its
+  // care lines from /api/residents. A guard therefore has no business here.
+  { area: 'Families', name: 'Every household, its members and the running arrangement, plus the unassigned', method: 'GET', path: () => '/api/households', expect: SUPERVISOR },
+  // overnight: true, because the window is relative to the clock and would
+  // otherwise be refused for crossing midnight when the suite runs after 21:00.
+  { area: 'Families', name: 'Record a supervision arrangement (a household child in another resident\'s care)', method: 'POST', path: (fx) => `/api/households/${fx.householdId}/supervision`, body: (fx) => ({ carer_id: fx.carerId, from_at: new Date(Date.now() - 3600e3).toISOString(), to_at: new Date(Date.now() + 3 * 3600e3).toISOString(), overnight: true }), expect: SUPERVISOR, fresh: 'household' },
+  { area: 'Families', name: "A household's supervision history over a range", method: 'GET', path: (fx) => `/api/households/${fx.householdId}/supervision?from=${fx.today}&to=${fx.today}`, expect: SUPERVISOR },
   { area: 'Families', name: 'End a supervision arrangement early', method: 'POST', path: (fx) => `/api/supervision/${fx.arrangementId}/end`, body: () => ({}), expect: SUPERVISOR, fresh: 'arrangement' },
 
   // ---- reports (supervisors and admins; one is the admin's) ---------------
