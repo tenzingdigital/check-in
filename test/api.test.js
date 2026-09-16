@@ -2811,7 +2811,7 @@ async function main() {
     // The nightly `main()` must not send the weekly email any more: run it in
     // 'nightly' mode and check the weekly job left no new row with a send.
     const runsBefore = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'weekly-register-email'`))).rows[0].n;
-    await jobs.main(undefined, { keepPool: true });
+    await jobs.main("nightly", { keepPool: true });
     const runsAfter = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'weekly-register-email'`))).rows[0].n;
     assert.equal(runsAfter, runsBefore, "the nightly run does not touch the weekly job at all");
     // And 'weekly' mode runs only the weekly job.
@@ -2820,6 +2820,12 @@ async function main() {
     const closeAfter = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'close-out-compliance-days'`))).rows[0].n;
     assert.equal(closeAfter, closeBefore, "weekly mode runs no other job");
     assert.equal((await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'weekly-register-email'`))).rows[0].n, runsBefore + 1, "weekly mode ran the weekly job once");
+    // --force by hand: past the calendar/clock/snapshot gates, never past
+    // "already sent today". Whatever the day, the result is a send or that.
+    await jobs.main("weekly", { keepPool: true, force: true });
+    const forced = (await withOwner((c) => c.query(`select result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`))).rows[0].result;
+    assert.ok(/emailed$/.test(forced) || forced === "already sent today", `forced run should send or be blocked only by the once-a-day guard, got: ${forced}`);
+    assert.ok(!["not Sunday", "before 10:00", "snapshot not run"].includes(forced), "--force must bypass the calendar, clock and snapshot gates");
     await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false`));
     await withOwner((c) => c.query(`update public.profiles set weekly_report = false where id = $1`, [mickId]));
   });

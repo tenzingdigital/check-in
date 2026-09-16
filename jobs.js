@@ -15,6 +15,7 @@
    Two crons run this file (render.yaml):
      hut-nightly   00:30 UTC daily      node jobs.js          close-out, purges, snapshot, the two nightly emails
      hut-weekly    09:00 and 10:00 UTC  node jobs.js weekly   the Sunday Weekly Register Update, once, at 10:00 site time
+     node jobs.js weekly --force   by hand: resend a missed Sunday return (still once per day)
    Two hours because Render's cron is UTC and the site's clock is not: the
    first run at or after 10:00 local sends, the other records why it did not.
 
@@ -337,8 +338,11 @@ async function safeguardingNightly(schema, label) {
 // back and read as such); Saturday night's snapshot ran, since a week
 // missing its last night would quietly omit it; and nothing has already
 // gone today (checked by the caller, not here — see weeklyRegister()).
-// `force` — `node jobs.js` by hand, and the tests — is "send now regardless
-// of when" and skips the first three; it never skips the fourth.
+// `force` — `node jobs.js weekly --force` by hand, and the tests — is "send
+// now regardless of when" and skips the first three; it never skips the
+// fourth. Run again the same day and "already sent today" still stops it, so
+// re-running --force cannot double-send; run it on any other day and it is
+// the recovery for a Sunday return that was missed.
 function sendGate({ dow, localHour, snapshotOk, force = false }) {
   if (force) return null;
   if (dow !== 7) return 'not Sunday';
@@ -375,11 +379,12 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
       // 'off', 'no recipients' and the calendar/clock/snapshot gates do not
       // match, so they never block a later run once the condition that
       // produced them changes.
-      // `force` bypasses the calendar and clock gates in sendGate() above
-      // (its documented job, for manual and test runs) — it does NOT bypass
-      // this. A forced run is still a real send with a real duplicate-email
-      // risk if run twice, and the guard being real under force is also what
-      // makes it possible to test without waiting for an actual Sunday.
+      // `force` bypasses the calendar, clock and snapshot gates in sendGate()
+      // above (its documented job, for manual and test runs) — it does NOT
+      // bypass this. A forced run is still a real send with a real
+      // duplicate-email risk if run twice, and the guard being real under
+      // force is also what makes it possible to test without waiting for an
+      // actual Sunday.
       // Match a run that actually DELIVERED to somebody. The old pattern was
       // `result ~ 'emailed$'`, which "12 rows, 0/3 emailed" also matches —
       // mail.send() never throws, it returns {delivered:false} — so a total
@@ -433,8 +438,13 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
   }
 }
 
-async function main(mode = process.argv[2], { keepPool = false } = {}) {
-  if (mode !== undefined && mode !== 'weekly') throw new Error(`[jobs] unknown mode "${mode}"`);
+async function main(mode = process.argv[2], { keepPool = false, force = process.argv.includes('--force') } = {}) {
+  // 'nightly' is accepted as a synonym for no mode at all — the test process
+  // calls main() explicitly rather than relying on the argv default, and
+  // `main(undefined, ...)` would otherwise re-read process.argv[2] instead of
+  // meaning "no mode".
+  const nightly = mode === undefined || mode === 'nightly';
+  if (!nightly && mode !== 'weekly') throw new Error(`[jobs] unknown mode "${mode}"`);
   let failed = 0;
 
   const { rows: tenants } = await withOwner((client) => client.query(
@@ -456,9 +466,11 @@ async function main(mode = process.argv[2], { keepPool = false } = {}) {
     const live = t.status === 'trial' || t.status === 'active';
 
     // 'weekly' mode is the Sunday cron: only the weekly return, for every
-    // live tenant, and none of the nightly maintenance around it.
+    // live tenant, and none of the nightly maintenance around it. `force`
+    // only applies here — `node jobs.js weekly --force` is the manual resend
+    // of a missed Sunday return; nightly mode ignores it.
     if (mode === 'weekly') {
-      if (live && !(await weeklyRegister(schema, label))) failed += 1;
+      if (live && !(await weeklyRegister(schema, label, { force }))) failed += 1;
       continue;
     }
 

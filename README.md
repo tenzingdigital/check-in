@@ -767,7 +767,10 @@ appears in Render after the blueprint sync; confirm it exists and has the
 same env vars as `hut-nightly` — and, because mail credentials
 (`RESEND_API_KEY`, `MAIL_FROM`) are set in the Render dashboard rather than
 the blueprint, copy those two onto `hut-weekly` by hand as well, or the
-Sunday email never sends.
+Sunday email never sends. If a Sunday return was missed, `node jobs.js weekly
+--force` from either cron's Render shell resends it by hand — it still
+respects "already sent today", so it cannot double-send one that already
+went.
 
 ### 6. Point the front ends at the API
 
