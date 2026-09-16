@@ -330,7 +330,7 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
   try {
     const summary = await withOwnerIn(schema, async (client) => {
       const { rows: [s] } = await client.query(
-        `select weekly_report_email as on, site_name, local_timezone,
+        `select weekly_report_email as on, weekly_report_attach_document as attach, site_name, local_timezone,
                 to_char(site_today(), 'YYYY-MM-DD') as today, extract(isodow from site_today())::int as dow
            from app_settings where id`);
       if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
@@ -365,6 +365,7 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
       const slug = await prefs.slugForSchema(client, schema);
       const { from, to } = weekly.lastWeek(s.today);
       const { rows } = await client.query('select * from weekly_register_rows_unchecked($1, $2)', [from, to]);
+      const doc = s.attach ? weekly.document({ siteName: s.site_name, from, to, rows, generatedOn: s.today }) : null;
       let delivered = 0;
       for (const r of staff) {
         // One compose per person: the footer link is theirs alone.
@@ -372,9 +373,12 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
         const { subject, text, html } = weekly.compose({
           siteName: s.site_name, from, to, rows,
           link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
-          unsubscribe,
+          unsubscribe, attached: !!doc,
         });
-        const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
+        const out = await mail.send({
+          to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe),
+          ...(doc ? { attachments: [{ filename: doc.filename, content: doc.buffer, contentType: doc.contentType }] } : {}),
+        });
         if (out.delivered) delivered += 1;
       }
       // A partial or total delivery failure is not a successful run. Recording

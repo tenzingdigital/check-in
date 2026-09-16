@@ -229,6 +229,7 @@ CREATE TABLE __TENANT__.app_settings (
     holiday_max_days integer DEFAULT 14 NOT NULL,
     notify_thresholds_email boolean DEFAULT false NOT NULL,
     weekly_report_email boolean DEFAULT false NOT NULL,
+    weekly_report_attach_document boolean DEFAULT false NOT NULL,
     CONSTRAINT app_settings_absence_window_days_check CHECK (((absence_window_days >= 7) AND (absence_window_days <= 365))),
     CONSTRAINT app_settings_absence_window_limit_check CHECK (((absence_window_limit >= 1) AND (absence_window_limit <= 365))),
     CONSTRAINT app_settings_adult_age_years_check CHECK (((adult_age_years >= 1) AND (adult_age_years <= 30))),

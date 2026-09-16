@@ -2479,6 +2479,12 @@ async function main() {
     assert.equal(ok.json.weekly_report_recipients, undefined, "the old recipients setting is gone");
     const asSup = await supC.fetch("/api/settings", { method: "PATCH", body: { weekly_report_email: false } });
     assert.equal(asSup.status, 403);
+
+    const doc = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_attach_document: true } });
+    assert.equal(doc.status, 200, doc.text);
+    assert.equal(doc.json.weekly_report_attach_document, true);
+    assert.equal((await wkAdmin.fetch("/api/settings")).json.weekly_report_attach_document, true);
+    assert.equal((await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_attach_document: false } })).json.weekly_report_attach_document, false);
   });
 
   await test("lastWeek is pure", async () => {
@@ -2643,6 +2649,27 @@ async function main() {
     const logged = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'weekly' order by at desc limit 1`));
     assert.match(logged.rows[0].note, /sent by hand/);
 
+    const offMails = (global.__mailSink || []).slice(before);
+    assert.equal(offMails.length, 2);
+    assert.ok(offMails.every((m) => m.attachments === undefined), "with the switch off, nothing is attached");
+
+    // Switch on: the same send carries the Word document to every recipient.
+    assert.equal((await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_attach_document: true } })).status, 200);
+    const before2 = (global.__mailSink || []).length;
+    const sent2 = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
+    assert.equal(sent2.status, 200, sent2.text);
+    const onMails = (global.__mailSink || []).slice(before2);
+    assert.equal(onMails.length, 2);
+    for (const m of onMails) {
+      assert.match(m.text, /attached as a Word document/);
+      assert.equal(m.attachments.length, 1);
+      assert.match(m.attachments[0].filename, /^Weekly-Register-Update-week-ending-\d{4}-\d{2}-\d{2}\.docx$/);
+      assert.equal(m.attachments[0].content.subarray(0, 2).toString(), "PK");
+      assert.equal(m.attachments[0].contentType, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    }
+    assert.ok(onMails[0].attachments[0].content.equals(onMails[1].attachments[0].content), "one document, built once, sent to each");
+    assert.equal((await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { weekly_report_attach_document: false } })).status, 200);
+
     assert.equal((await wkAdmin.fetch(`/api/staff/${mick.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
     assert.equal((await wkAdmin.fetch(`/api/staff/${niamh.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
     const none = await wkAdmin.fetch("/api/settings/weekly-report/send", { method: "POST" });
@@ -2697,6 +2724,13 @@ async function main() {
     const mails = (global.__mailSink || []).slice(before);
     assert.equal(mails.length, 1); assert.equal(mails[0].to, "mick@example.ie");
     assert.match(mails[0].text, /Weekly register update/);
+    assert.equal(mails[0].attachments, undefined, "the job attaches nothing while the switch is off");
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_attach_document = true`));
+    assert.equal(await weeklyRegister("public", "", { force: true }), true);
+    const withDoc = (global.__mailSink || []).at(-1);
+    assert.equal(withDoc.attachments.length, 1, "the job attaches the document when the switch is on");
+    assert.match(withDoc.attachments[0].filename, /\.docx$/);
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_attach_document = false`));
     run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
     // The sink always answers not delivered, so this run reached nobody —
     // and a Sunday return that reached nobody must not read back as ok=true
@@ -2708,7 +2742,7 @@ async function main() {
     // duplicate: the sink still answers not delivered, so a second email
     // does go, and it is not "already sent today".
     assert.equal(await weeklyRegister("public", "", { force: true }), true);
-    assert.equal((global.__mailSink || []).length, before + 2, "a total failure is retried, not treated as already sent");
+    assert.equal((global.__mailSink || []).length, before + 3, "a total failure is retried, not treated as already sent");
     run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
     assert.equal(run.rows[0].ok, false); assert.match(run.rows[0].result, /rows, 0\/1 emailed/);
 
@@ -2719,7 +2753,7 @@ async function main() {
     await withOwner((c) => c.query(
       `insert into public.job_runs (job, ok, result) values ('weekly-register-email', true, '6 rows, 1/1 emailed')`));
     assert.equal(await weeklyRegister("public", "", { force: true }), true);
-    assert.equal((global.__mailSink || []).length, before + 2, "no duplicate email once a run already delivered today");
+    assert.equal((global.__mailSink || []).length, before + 3, "no duplicate email once a run already delivered today");
     run = await withOwner((c) => c.query(`select ok, result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`));
     assert.equal(run.rows[0].ok, true); assert.equal(run.rows[0].result, "already sent today");
     const dow = (await withOwner((c) => c.query(`select extract(isodow from public.site_today())::int as d`))).rows[0].d;

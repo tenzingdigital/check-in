@@ -544,6 +544,7 @@
 
         <h2 class="mt6">Weekly register update</h2>
         <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> Early Sunday morning, after Saturday night's snapshot, the staff ticked to receive it are emailed a count for resident absences, weekend updates, removals and room updates, and a link into the app — no resident names, rooms or dates.</span></label>
+        <label class="check"><input id="stWeeklyDoc" type="checkbox"> <span><b>Attach it as a Word document.</b> The document names residents and rooms: the week's update, ready to review, edit and forward. Off, the email carries counts and a link only.</span></label>
         <p class="hint flush">Recipients are chosen on the staff record: tick "Gets the Sunday report" for a supervisor or admin under Staff.</p>
         <div class="mt8"><button class="btn ghost sm" type="button" id="stWeeklySend">Send last week's now</button>
           <p class="hint under">Emails last week's update to everyone ticked, so you can see what arrives. Asks first; a manual send is on the audit record.</p></div>
@@ -1991,7 +1992,7 @@ const SETTINGS_FIELDS = {
   idle_lock_minutes: "stIdle", home_countries: "stHome",
 };
 
-const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify", weekly_report_email: "stWeekly" };
+const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify", weekly_report_email: "stWeekly", weekly_report_attach_document: "stWeeklyDoc" };
 
 async function loadSettings() {
   awReset();

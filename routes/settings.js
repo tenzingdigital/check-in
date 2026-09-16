@@ -41,6 +41,8 @@ const COLUMNS = {
   // on the staff record (POST /api/staff/:id/weekly-report, migration 037),
   // not a setting.
   weekly_report_email:           { kind: 'bool' },
+  // Attach the Sunday update as a Word document — names residents (052).
+  weekly_report_attach_document: { kind: 'bool' },
   // Where logins are expected from (022): ISO codes, comma-separated.
   home_countries:                { kind: 'countries' },
 };
@@ -191,7 +193,7 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
   const slug = await db.withOwner((c) => prefs.slugForUser(c, req.session.userId));
   const out = await db.withIdentity(req.session.userId, async (client) => {
     const { rows: [s] } = await client.query(
-      `select site_name, to_char(site_today(), 'YYYY-MM-DD') as today from app_settings where id`);
+      `select site_name, weekly_report_attach_document as attach, to_char(site_today(), 'YYYY-MM-DD') as today from app_settings where id`);
     // Recipients are the staff ticked to receive it (migration 037), not a
     // setting: every address is a known person with a login.
     const staff = await weekly.recipients(client);
@@ -199,15 +201,21 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
     const { from, to } = weekly.lastWeek(s.today);
     await client.query('select note_report($1, $2, $3, $4)', ['weekly', 'sent by hand', from, to]);
     const { rows } = await client.query('select * from weekly_register_rows($1, $2)', [from, to]);
+    // One document for everyone: it is the same file, and the sentences in it
+    // come from the same rows the audit row above was written for.
+    const doc = s.attach ? weekly.document({ siteName: s.site_name, from, to, rows, generatedOn: s.today }) : null;
     let sent = 0;
     for (const r of staff) {
       const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'weekly_report' });
       const { subject, text, html } = weekly.compose({
         siteName: s.site_name, from, to, rows,
         link: reportLink({ tab: 'reports', report: 'weekly', from, to }),
-        unsubscribe,
+        unsubscribe, attached: !!doc,
       });
-      const mailed = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
+      const mailed = await mail.send({
+        to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe),
+        ...(doc ? { attachments: [{ filename: doc.filename, content: doc.buffer, contentType: doc.contentType }] } : {}),
+      });
       if (mailed.delivered) sent += 1;
     }
     return { sent, recipients: staff.length, from, to };
