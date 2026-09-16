@@ -118,8 +118,8 @@ Exposed through the existing settings read/write path like `weekly_report_email`
 
 `docx(blocks)` → `Buffer`. `blocks` is an array of
 `{ kind: 'title' | 'subtitle' | 'heading' | 'para' | 'underline' | 'bullet', text, highlight?: boolean }`.
-Parts: `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`,
-`word/styles.xml` (Normal + the few run properties used inline). All text
+Parts: `[Content_Types].xml`, `_rels/.rels`, `word/_rels/document.xml.rels`,
+`word/document.xml`, `word/styles.xml` (Normal + the few run properties used inline). All text
 XML-escaped. `highlight: true` emits `<w:highlight w:val="yellow"/>` on the
 run. Exports `docx` only.
 
@@ -211,7 +211,7 @@ role review — flag a welfare concern without edit rights (open); dry run
 ## Testing
 
 - `test/docx.test.js` (no database, like `test/xlsx.test.js`): the zip
-  container is valid and lists the four parts; `document.xml` contains each
+  container is valid and lists the five parts; `document.xml` contains each
   block's text escaped (`&`, `<`), a highlighted bullet carries
   `w:highlight w:val="yellow"`, an underlined block carries `<w:u`, output is
   byte-identical for identical input.
