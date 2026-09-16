@@ -31,6 +31,26 @@
 #
 # See docs/TECH-STACK.md for the full comparison.
 
+# ---------------------------------------------------------------------------
+# Shared secrets
+# ---------------------------------------------------------------------------
+# The mail credentials are one pair of values needed by three services — the
+# web service (invitations, resets, the trial's verification link, "send
+# now" from Settings), hut-nightly (the nightly email) and hut-weekly (the
+# Sunday return). Pasted per service they drifted: hut-nightly had them,
+# hut-weekly was created without them, and the Sunday email would have gone
+# nowhere. One environment group, prompted for once at blueprint sync
+# (`sync: false`), referenced by all three. A value set directly on a
+# service still wins over the group's, so the copy hut-nightly already has
+# by hand is harmless until it is deleted.
+envVarGroups:
+  - name: hut-mail
+    envVars:
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
 databases:
   - name: hut-db
     databaseName: hut
@@ -133,6 +153,8 @@ services:
         sync: false
       - key: ADMIN_NAME
         sync: false
+      # Mail credentials: the shared group above.
+      - fromGroup: hut-mail
 
     # Security headers are NOT set here. They live in lib/security.js, next to
     # the Content-Security-Policy hashes they are computed from — the CSP now
@@ -178,6 +200,8 @@ services:
       # report link should not read as phishing.
       - key: PUBLIC_URL
         value: https://app.checksteady.com
+      # Mail credentials: the shared group above.
+      - fromGroup: hut-mail
 
   # The Sunday Weekly Register Update, at 10:00 site time. Render's cron is
   # UTC and Ireland is not, so it runs at both 09:00 and 10:00 UTC on Sundays:
@@ -202,13 +226,8 @@ services:
         value: "22"
       - key: PUBLIC_URL
         value: https://app.checksteady.com
-      # Mail credentials are set by hand on hut-nightly today; sync: false
-      # makes Render prompt for them here at blueprint sync instead of
-      # relying on somebody remembering (see README §5).
-      - key: RESEND_API_KEY
-        sync: false
-      - key: MAIL_FROM
-        sync: false
+      # Mail credentials: the shared group above (see README §5).
+      - fromGroup: hut-mail
 
   # -------------------------------------------------------------------------
   # The brochure site (checksteady.com) — static, no build step, published

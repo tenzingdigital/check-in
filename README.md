@@ -782,11 +782,13 @@ instead. For a site whose local time zone is west of UTC, both runs fall
 before 10:00 local and the return never sends — this schedule assumes
 Ireland/UK. It also waits on `hut-nightly`'s snapshot from the night before,
 so a week whose last night never ran is not quietly sent short. The new cron
-appears in Render after the blueprint sync; confirm it exists and has the
-same env vars as `hut-nightly` — and, because mail credentials
-(`RESEND_API_KEY`, `MAIL_FROM`) are set in the Render dashboard rather than
-the blueprint, copy those two onto `hut-weekly` by hand as well, or the
-Sunday email never sends. If a Sunday return was missed, `node jobs.js weekly
+appears in Render after the blueprint sync; confirm it exists. Mail
+credentials (`RESEND_API_KEY`, `MAIL_FROM`) live in one environment group,
+`hut-mail`, that the blueprint prompts for once at sync and that all three
+services reference — paste them into the group, not per service. A value
+set directly on `hut-nightly` by hand in the past still wins over the
+group's and can be deleted once the group has them. If a Sunday return was
+missed, `node jobs.js weekly
 --force` from either cron's Render shell resends it by hand — it still
 respects "already sent today", so it cannot double-send one that already
 went, and because the week is anchored to the most recent Saturday rather
@@ -823,7 +825,8 @@ and admin) and the overnight safeguarding alert (041). Their job names
 written, and the House Rules switch under Settings is gone — the
 `notify_thresholds_email` column stays until a later migration drops it,
 but nothing reads it. Hut-nightly needs `RESEND_API_KEY` and `MAIL_FROM`
-for this, as it always did for the two it replaced.
+for this, as it always did for the two it replaced — from the `hut-mail`
+environment group in render.yaml.
 
 What the app covers here, and what it does not: a family that has
 children on site and no guardian on site — every guardian signed out at
