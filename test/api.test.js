@@ -1725,7 +1725,7 @@ async function main() {
       await c.query(`update public.residents set status = 'departed', departed_on = public.site_today() where id = $1`, [absIds.gone]);
     });
 
-    const week = await supC.fetch(`/api/absences?from=${siteDay(-7)}&to=${siteDay(-1)}`);
+    const week = await supC.fetch(`/api/missed?from=${siteDay(-7)}&to=${siteDay(-1)}`);
     assert.equal(week.status, 200, week.text);
     assert.equal(week.json.from, siteDay(-7));
     assert.equal(week.json.to, siteDay(-1));
@@ -1742,10 +1742,10 @@ async function main() {
     assert.equal(twice.nights_missed, 2, "the miss nine nights ago is outside a 7-night range");
     assert.deepEqual(twice.missed_dates, [siteDay(-2), siteDay(-1)]);
 
-    const month = await supC.fetch(`/api/absences?from=${siteDay(-28)}&to=${siteDay(-1)}`);
+    const month = await supC.fetch(`/api/missed?from=${siteDay(-28)}&to=${siteDay(-1)}`);
     assert.equal(month.json.rows.find((r) => r.id === absIds.twice).nights_missed, 3);
 
-    const narrow = await supC.fetch(`/api/absences?from=${siteDay(-20)}&to=${siteDay(-3)}`);
+    const narrow = await supC.fetch(`/api/missed?from=${siteDay(-20)}&to=${siteDay(-3)}`);
     assert.equal(narrow.status, 200, narrow.text);
     assert.ok(!narrow.json.rows.some((r) => r.id === absIds.missy), "Missy's only miss (yesterday) is outside this range");
     const narrowTwice = narrow.json.rows.find((r) => r.id === absIds.twice);
@@ -1755,7 +1755,7 @@ async function main() {
   });
 
   await test("today's open row never counts, and the response says how far the register is closed", async () => {
-    const res = await supC.fetch(`/api/absences?from=${siteDay(-7)}&to=${siteToday()}`);
+    const res = await supC.fetch(`/api/missed?from=${siteDay(-7)}&to=${siteToday()}`);
     assert.equal(res.status, 200, res.text);
     const missy = res.json.rows.find((r) => r.id === absIds.missy);
     assert.equal(missy.nights_missed, 1, "the open row for today was counted as missed");
@@ -1764,12 +1764,20 @@ async function main() {
     assert.equal(res.json.closed_through, rows[0].d);
   });
 
+  await test("looking at the Absences tab is not audited; only the export is", async () => {
+    const before = (await withOwner((c) => c.query(`select count(*)::int as n from public.admin_audit where table_name = 'reports'`))).rows[0].n;
+    const res = await supC.fetch(`/api/missed?from=${siteDay(-7)}&to=${siteDay(-1)}`);
+    assert.equal(res.status, 200, res.text);
+    const after = (await withOwner((c) => c.query(`select count(*)::int as n from public.admin_audit where table_name = 'reports'`))).rows[0].n;
+    assert.equal(after, before, "reading the tab wrote an audit row");
+  });
+
   await test("the Absences range is for supervisors and admins, and checks its dates", async () => {
-    assert.equal((await api.fetch(`/api/absences?from=${siteDay(-1)}&to=${siteDay(-1)}`)).status, 403);
-    assert.equal((await supC.fetch(`/api/absences?to=${siteDay(-1)}`)).status, 400, "from is required");
-    assert.equal((await supC.fetch(`/api/absences?from=${siteDay(-1)}&to=${siteDay(-2)}`)).status, 400, "to before from");
-    assert.equal((await supC.fetch(`/api/absences?from=2020-01-01&to=2021-06-01`)).status, 400, "more than a year");
-    const one = await supC.fetch(`/api/absences?from=${siteDay(-1)}`);
+    assert.equal((await api.fetch(`/api/missed?from=${siteDay(-1)}&to=${siteDay(-1)}`)).status, 403);
+    assert.equal((await supC.fetch(`/api/missed?to=${siteDay(-1)}`)).status, 400, "from is required");
+    assert.equal((await supC.fetch(`/api/missed?from=${siteDay(-1)}&to=${siteDay(-2)}`)).status, 400, "to before from");
+    assert.equal((await supC.fetch(`/api/missed?from=2020-01-01&to=2021-06-01`)).status, 400, "more than a year");
+    const one = await supC.fetch(`/api/missed?from=${siteDay(-1)}`);
     assert.equal(one.status, 200, "to should default to from");
     assert.equal(one.json.to, siteDay(-1));
     const oneOurs = one.json.rows.filter((r) => [absIds.twice, absIds.missy].includes(r.id));

@@ -31,7 +31,7 @@ This change gives the tab a date range. The range is the filter.
   read as having missed Monday to Wednesday.
 - **Active residents only**, as the tab is today. A departed resident's
   history is on the Daily register report.
-- **Looking is not audited; exporting is.** `GET /api/absences` writes no
+- **Looking is not audited; exporting is.** `GET /api/missed` writes no
   audit row, like the resident list the tab reads now. The Excel button
   goes through the reports route as a new report, so it asks for a reason
   and is written by `note_report()` like every other export.
@@ -42,7 +42,9 @@ This change gives the tab a date range. The range is the filter.
   convenience only.
 - **Honest about an unclosed night.** The API says how far the register is
   closed; the tab says so when the chosen range reaches past it, instead
-  of showing an empty table that reads as "nobody missed".
+  of showing an empty table that reads as "nobody missed". A register that
+  has never been closed (a centre whose nightly job has not run yet) shows
+  the same line.
 - **No migration.** Everything here is a query over tables that exist.
 
 ## Data
@@ -69,7 +71,7 @@ closed_at is not null` — one scalar beside the rows.
 
 ## API
 
-**`GET /api/absences?from=YYYY-MM-DD&to=YYYY-MM-DD`** — supervisors and
+**`GET /api/missed?from=YYYY-MM-DD&to=YYYY-MM-DD`** — supervisors and
 admins only; a guard or kiosk session gets 403 (the same
 `req.session.role` check `routes/residents.js` uses for supervisor-only
 actions). `from` and `to` are validated with the reports route's
@@ -118,9 +120,10 @@ Above the existing search box:
   (`Tue 9, Wed 10, Sat 13`, via `dayLabel`). The other columns are the
   ones drawn today, unchanged.
 - **Empty states:** "Nobody missed the register between Tue 9 and Mon 15
-  Sep." When `to > closed_through`: an extra line "Last night's register
-  is not closed yet — it closes overnight." shown above the table (or the
-  empty message) whenever the range includes an unclosed day.
+  Sep." When `closed_through` is null or `to > closed_through`: an extra
+  line "Last night's register is not closed yet — it closes overnight."
+  shown above the table (or the empty message) whenever the range includes
+  an unclosed day.
 - **Excel:** the inline reason field + button the History panel uses
   (`Reason for the export`, `maxlength=200`, required), labelled "Excel".
   Navigates to `/api/reports/missed?from&to&reason&format=xlsx`; toast
@@ -155,7 +158,7 @@ Above the existing search box:
   a `dates` string, 200 as xlsx with the spreadsheet content-type, and a
   `admin_audit` row from `note_report()` afterwards.
 
-`test/permissions.js` gains the row `GET /api/absences` → SUPERVISOR, so
+`test/permissions.js` gains the row `GET /api/missed` → SUPERVISOR, so
 `docs/PERMISSIONS.md` regenerates with it.
 
 `./check.sh` green before deploy.

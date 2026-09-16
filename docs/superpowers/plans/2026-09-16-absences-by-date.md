@@ -1,5 +1,7 @@
 # Absences by date Implementation Plan
 
+> Superseded detail: the tab endpoint was renamed to `GET /api/missed` before push — see 2026-09-16-absences-by-date-follow-ups.md.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The Admin → Absences tab shows who missed the daily register over a chosen range (Yesterday / 7 nights / 28 nights / any two dates), one row per resident with the count and the dates, and exports it to Excel through the audited reports route.

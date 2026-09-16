@@ -800,7 +800,7 @@ async function loadResidents() {
    Absences (supervisors and admins)
    ====================================================================== */
 
-// Who missed the daily register between the two dates: GET /api/absences,
+// Who missed the daily register between the two dates: GET /api/missed,
 // one row per active resident with at least one miss, most missed first.
 // The range is the filter; the search box narrows the loaded rows without
 // asking the server again. Today is never in the range by default — the
@@ -812,8 +812,8 @@ async function loadAbsences() {
   if (!from || !to) { $("absIntro").textContent = "Pick two dates."; $("absTable").innerHTML = ""; return; }
   $("absIntro").textContent = "Loading…";
   const out = await guarded(
-    () => apiGet(`/api/absences?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-    (err) => { Offline.noteFailure(err); showError("Could not load absences: " + err.message); },
+    () => apiGet(`/api/missed?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    (err) => { Offline.noteFailure(err); $("absIntro").textContent = "Could not load."; showError("Could not load absences: " + err.message); },
   );
   if (!out) return;
   showError("");
@@ -831,7 +831,9 @@ function renderAbsences() {
   const withRooms = !!s.feature_buildings;
   const range = out.from === out.to ? `on ${dayLabel(out.from)}` : `between ${dayLabel(out.from)} and ${dayLabel(out.to)}`;
 
-  $("absOpen").hidden = !(out.closed_through && out.to > out.closed_through);
+  // Never closed at all (a centre whose nightly job has not run yet) is the
+  // same fact as "reaches past the last closed night": nothing here is final.
+  $("absOpen").hidden = !(out.closed_through === null || out.to > out.closed_through);
   $("absIntro").textContent =
     `Missed the register ${range}. ` +
     `Facts against the figures in Settings: ${nightLimit} consecutive nights, ${winLimit} days in ${winDays}. ` +

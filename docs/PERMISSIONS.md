@@ -107,7 +107,7 @@ validation.
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | See which reports exist<br><code>GET /api/reports</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
 | Export a report (register, attendance, movements, occupancy, evacuation, drills); logged<br><code>GET /api/reports/register</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
-| Who missed the register over a range (the Absences tab); not logged<br><code>GET /api/absences</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
+| Who missed the register over a range (the Absences tab); not logged<br><code>GET /api/missed</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Who viewed which record (the access log)<br><code>GET /api/reports/access</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 
 ## Administration

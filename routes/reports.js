@@ -36,11 +36,13 @@
 // document, not a spreadsheet. No migration: note_report() already accepts
 // any report name, so nothing in the database needed to change.
 //
-//   GET /api/absences?from=&to=
+//   GET /api/missed?from=&to=
 //
 // The Absences tab's range: the same query as the "missed" report, without
 // the reason or the audit row — looking at the tab is not audited, as the
-// resident list it read before was not. It also returns closed_through, the
+// resident list it read before was not. Named for the report it shares its
+// query with — "absences" is already the Authorised absences report, and the
+// two mean opposite things. It also returns closed_through, the
 // last register date the nightly job has closed, so the tab can say when a
 // range reaches into a night that is not closed yet rather than show an
 // empty table that reads as "nobody missed".
@@ -453,7 +455,7 @@ router.get('/reports/inspection-pack', wrap(async (req, res) => {
   res.json({ title: 'Inspection pack', from, to, sections });
 }));
 
-router.get('/absences', wrap(async (req, res) => {
+router.get('/missed', wrap(async (req, res) => {
   if (req.session.role !== 'supervisor' && req.session.role !== 'admin') {
     throw new HttpError(403, 'Only a supervisor or admin can see who missed the register');
   }
