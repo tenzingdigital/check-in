@@ -3693,6 +3693,168 @@ async function main() {
     assert.equal((await unsubAdmin.fetch(`/api/staff/${unsubSupId}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
   });
 
+  console.log("\n== the self check-in kiosk (migration 051) ==");
+
+  // A date string n years before today, in the shape dateParam() accepts.
+  // Used only to make a resident who is definitely a child (well under the
+  // seeded adult_age_years=18) without hard-coding a year that goes stale.
+  const yearsAgo = (n) => {
+    const d = new Date();
+    d.setUTCFullYear(d.getUTCFullYear() - n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  // RED #1 (recorded here, not asserted): before migration 051, this same
+  // call fails on the profiles_role_check constraint — 'kiosk' is not yet a
+  // valid role. Task 1's report carries that failing run; this file only
+  // ever runs GREEN, against the schema this migration produced.
+  const kioskId = (await withOwner((c) => c.query(
+    `select auth.create_user($1, $2, $3, $4) as id`,
+    ["kiosk@hut.example", PASSWORD, "Gate tablet", "kiosk"],
+  ))).rows[0].id;
+
+  // This suite builds its own fixtures rather than loading seed.sql (that
+  // file is the standalone demo/dev seed, never applied by test/cluster.sh),
+  // so the resident kiosk_search/kiosk_checkin are proved against here is
+  // one made the same way "resident management" above makes its own.
+  const madeAoife = await supC.fetch("/api/residents", {
+    method: "POST",
+    body: { first_name: "Ailbhe", last_name: "Kioskington", date_of_birth: "1990-03-03", id_type: "trc", id_number: "trc5551234" },
+  });
+  assert.equal(madeAoife.status, 201, madeAoife.text);
+  const aoifeId = madeAoife.json.id;
+
+  await test("a kiosk profile is not staff, and a direct select from residents returns nothing (RLS, not an error)", async () => {
+    const staff = await withIdentity(kioskId, (c) => c.query(`select public.is_staff() as v`));
+    assert.equal(staff.rows[0].v, false, "kiosk must never be a member of is_staff()");
+    // migrations/001_platform.sql grants ALL on every table in public to
+    // authenticated by default (so the acceptance suite proves the row
+    // policies, not the grants) — residents_read/_supervisor both test
+    // is_supervisor(), false for kiosk, so the table-level privilege is
+    // there but every row is filtered out. Quiet failure, not a refusal: the
+    // reason kiosk_search()/kiosk_checkin() exist at all rather than a
+    // policy naming 'kiosk'.
+    const direct = await withIdentity(kioskId, (c) => c.query(`select count(*)::int as n from residents`));
+    assert.equal(direct.rows[0].n, 0, "a kiosk session read a resident row directly");
+  });
+
+  await test("kiosk_search finds an adult by name, in either word order, and hides the room unless two residents share a name", async () => {
+    const byFirst = await withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('ailb')`));
+    assert.equal(byFirst.rows.length, 1, "Ailbhe Kioskington, and only her, matches the prefix 'ailb'");
+    const [ailbhe] = byFirst.rows;
+    assert.equal(ailbhe.resident_id, aoifeId);
+    assert.equal(ailbhe.full_name, "Ailbhe Kioskington");
+    assert.equal(ailbhe.room_label, null, "no other resident is named Ailbhe Kioskington: room withheld");
+    assert.deepEqual(Object.keys(ailbhe).sort(), ["checked_in_today", "full_name", "resident_id", "room_label"],
+      "no date of birth, id number or any other column, ever");
+
+    const bySurname = await withIdentity(kioskId, (c) => c.query(`select full_name from kiosk_search('kioskington')`));
+    assert.ok(bySurname.rows.some((r) => r.full_name === "Ailbhe Kioskington"), "the surname-first word order also matches");
+
+    // A supervisor and an admin may use the same door (the spec's own
+    // "callable by supervisors/admins for testing"); a guard may not — their
+    // own, much wider, search already covers this ground.
+    const asSup = await withIdentity((await withOwner((c) =>
+      c.query(`select id from auth.users where email = 'sup2@hut.example'`))).rows[0].id,
+      (c) => c.query(`select full_name from kiosk_search('ailb')`));
+    assert.equal(asSup.rows[0].full_name, "Ailbhe Kioskington");
+    await assert.rejects(
+      withIdentity(guardId, (c) => c.query(`select * from kiosk_search('ailb')`)),
+      /Not authorised/i, "a guard reached kiosk_search");
+  });
+
+  await test("kiosk_search needs at least two letters and returns no more than five rows", async () => {
+    await assert.rejects(
+      withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('a')`)),
+      /two letters/i);
+    await assert.rejects(
+      withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('')`)),
+      /two letters/i, "a cleared search box, not a list of everyone");
+
+    for (let i = 1; i <= 6; i++) {
+      const made = await supC.fetch("/api/residents", {
+        method: "POST",
+        body: { first_name: `Sixtest${i}`, last_name: "Bunch", date_of_birth: "1990-01-01" },
+      });
+      assert.equal(made.status, 201, made.text);
+    }
+    const six = await withIdentity(kioskId, (c) => c.query(`select full_name from kiosk_search('sixtest')`));
+    assert.equal(six.rows.length, 5, "six residents match the prefix; at most five come back");
+    assert.ok(six.rows.every((r) => r.full_name.startsWith("Sixtest")));
+  });
+
+  await test("identity number search is exact only — a partial number matches nothing", async () => {
+    const exact = await withIdentity(kioskId, (c) => c.query(`select resident_id from kiosk_search('TRC5551234')`));
+    assert.equal(exact.rows.length, 1);
+    assert.equal(exact.rows[0].resident_id, aoifeId);
+    const lower = await withIdentity(kioskId, (c) => c.query(`select resident_id from kiosk_search('trc5551234')`));
+    assert.equal(lower.rows[0].resident_id, aoifeId, "case-insensitive, since id_number is stored upper-cased");
+    const partial = await withIdentity(kioskId, (c) => c.query(`select resident_id from kiosk_search('TRC555123')`));
+    assert.equal(partial.rows.length, 0, "one digit short of the real number must not be enumerable");
+  });
+
+  await test("a child never appears in a kiosk search, however well their name matches", async () => {
+    const made = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Kidonly", last_name: "Underage", date_of_birth: yearsAgo(10) },
+    });
+    assert.equal(made.status, 201, made.text);
+    const found = await withIdentity(kioskId, (c) => c.query(`select * from kiosk_search('kidonly')`));
+    assert.equal(found.rows.length, 0, "the daily register is an adult's duty; a child is never a candidate");
+  });
+
+  await test("kiosk_checkin records today's presentation with source='kiosk', and nothing else the kiosk does can write it", async () => {
+    const row = (await withIdentity(kioskId, (c) => c.query(`select * from kiosk_checkin($1)`, [aoifeId]))).rows[0];
+    assert.equal(row.presented, true);
+    assert.equal(row.compliance_date, siteToday());
+    const src = (await withOwner((c) => c.query(
+      `select source from checkin_events where resident_id = $1 order by id desc limit 1`, [aoifeId]))).rows[0].source;
+    assert.equal(src, "kiosk");
+
+    const again = await withIdentity(kioskId, (c) => c.query(`select checked_in_today from kiosk_search('ailb')`));
+    assert.equal(again.rows[0].checked_in_today, true, "kiosk_search reflects the kiosk's own check-in immediately");
+
+    // record_checkin_at is revoked from `authenticated` outright (as it was
+    // before this migration) — a kiosk session cannot even reach its own
+    // internal guard by calling it directly, with 'desk' or any other
+    // source. kiosk_checkin() is the only door, and it is hard-wired to
+    // 'kiosk'.
+    await assert.rejects(
+      withIdentity(kioskId, (c) => c.query(`select record_checkin_at($1, now(), false, null, 'desk')`, [aoifeId])),
+      /permission denied for function record_checkin_at/i);
+  });
+
+  await test("kiosk_checkin refuses a child and an inactive resident", async () => {
+    const childId = (await withOwner((c) =>
+      c.query(`select id from public.residents where first_name = 'Kidonly' and last_name = 'Underage'`))).rows[0].id;
+    await assert.rejects(
+      withIdentity(kioskId, (c) => c.query(`select * from kiosk_checkin($1)`, [childId])),
+      /Not a resident who checks in here/i);
+
+    const madeDeparted = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Bartley", last_name: "Kioskaway", date_of_birth: "1985-07-07" },
+    });
+    assert.equal(madeDeparted.status, 201, madeDeparted.text);
+    const departedId = madeDeparted.json.id;
+    await withOwner((c) => c.query(
+      `update public.residents set status = 'departed', departed_on = public.site_today() - 1 where id = $1`, [departedId]));
+    await assert.rejects(
+      withIdentity(kioskId, (c) => c.query(`select * from kiosk_checkin($1)`, [departedId])),
+      /Not a resident who checks in here/i);
+    await withOwner((c) => c.query(
+      `update public.residents set status = 'active', departed_on = null where id = $1`, [departedId]));
+  });
+
+  await test("a kiosk profile cannot receive the weekly report or the safeguarding alert", async () => {
+    await assert.rejects(
+      withOwner((c) => c.query(`update public.profiles set weekly_report = true where id = $1`, [kioskId])),
+      /profiles_weekly_report_not_guard/);
+    await assert.rejects(
+      withOwner((c) => c.query(`update public.profiles set safeguarding_alert = true where id = $1`, [kioskId])),
+      /profiles_safeguarding_alert_not_guard/);
+  });
+
   server.close();
   await closePool();
   console.log(`\nPASS: ${passed} HTTP assertions.`);

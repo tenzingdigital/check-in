@@ -1144,6 +1144,143 @@ $$;
 
 --
 
+-- Name: kiosk_checkin(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.kiosk_checkin(p_resident_id uuid) RETURNS __TENANT__.daily_compliance
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_role  text := __TENANT__.my_role();
+  v_res   __TENANT__.residents;
+  v_adult integer;
+begin
+  if v_role not in ('kiosk', 'supervisor', 'admin') then
+    raise exception 'Not authorised to record check-ins' using errcode = '42501';
+  end if;
+
+  select * into v_res from __TENANT__.residents where id = p_resident_id;
+  -- Missing and inactive share one message and one errcode: from the
+  -- tablet's point of view both are "nobody here to check in", and neither
+  -- should say more than that to a screen nobody is guarding.
+  if not found or v_res.status <> 'active' then
+    raise exception 'Not a resident who checks in here' using errcode = 'P0002';
+  end if;
+
+  select adult_age_years into v_adult from __TENANT__.app_settings where id;
+  if v_res.date_of_birth > (__TENANT__.site_today() - make_interval(years => v_adult))::date then
+    raise exception 'Not a resident who checks in here' using errcode = 'P0002';
+  end if;
+
+  -- The only write a kiosk can make, and it is not made here: this always
+  -- calls the one shared writer with source='kiosk', so record_checkin_at's
+  -- own guard (above) is what actually authorises it, day-placement and
+  -- de-dupe are identical to every other source, and there is no second copy
+  -- of that logic to drift out of step with desk/door.
+  return __TENANT__.record_checkin_at(p_resident_id, now(), false, null, 'kiosk');
+end;
+$$;
+
+
+--
+
+-- Name: kiosk_search(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.kiosk_search(p_q text) RETURNS TABLE(resident_id uuid, full_name text, room_label text, checked_in_today boolean)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_role  text := __TENANT__.my_role();
+  v_nq    text;
+  v_adult integer;
+begin
+  if v_role not in ('kiosk', 'supervisor', 'admin') then
+    raise exception 'Not authorised to search residents' using errcode = '42501';
+  end if;
+
+  -- Two letters minimum: the point of a search, not a list. A single letter
+  -- (or the empty string a cleared box sends) would return "everyone whose
+  -- name starts with A" off a shared tablet — this is the line that keeps
+  -- kiosk_search a search.
+  v_nq := lower(public.immutable_unaccent(btrim(coalesce(p_q, ''))));
+  if length(v_nq) < 2 then
+    raise exception 'Type at least two letters' using errcode = '22023';
+  end if;
+
+  select adult_age_years into v_adult from __TENANT__.app_settings where id;
+
+  return query
+    with matched as (
+      select
+        r.id                                              as m_id,
+        btrim(r.first_name) || ' ' || btrim(r.last_name)   as m_full_name,
+        case when rm.id is null then null
+             else b.name
+                  || case when rm.floor <> '' then ' · ' || rm.floor else '' end
+                  || ' · ' || rm.number
+        end                                                 as m_room_label,
+        exists (
+          select 1 from __TENANT__.daily_compliance d
+          where d.resident_id = r.id
+            and d.compliance_date = __TENANT__.site_today()
+            and d.presented
+        )                                                   as m_checked_in_today
+      from __TENANT__.residents r
+      left join __TENANT__.rooms     rm on rm.id = r.room_id
+      left join __TENANT__.buildings b  on b.id = rm.building_id
+      where r.status = 'active'
+        -- The daily register is an adult's duty (IPAS): a child is never on
+        -- this screen at all, not merely hidden after being found — the row
+        -- never enters the candidate set, so no branch below can surface one.
+        and r.date_of_birth <= (__TENANT__.site_today() - make_interval(years => v_adult))::date
+        and (
+          -- Name: prefix on either word order, so "aoi" and "brennan" both
+          -- find Aoife Brennan. Deliberately NOT search_key — search_key
+          -- (008) also folds in id_number, so a substring match on it would
+          -- let a partial identity number through the name box. Matched on
+          -- the plain names instead, word-prefix only (never a bare
+          -- substring), so a person cannot be found by a fragment buried
+          -- mid-name that happens to be common to many residents.
+          lower(public.immutable_unaccent(btrim(r.first_name) || ' ' || btrim(r.last_name))) like v_nq || '%'
+          or lower(public.immutable_unaccent(btrim(r.first_name) || ' ' || btrim(r.last_name))) like '% ' || v_nq || '%'
+          or lower(public.immutable_unaccent(btrim(r.last_name) || ' ' || btrim(r.first_name))) like v_nq || '%'
+          or lower(public.immutable_unaccent(btrim(r.last_name) || ' ' || btrim(r.first_name))) like '% ' || v_nq || '%'
+          -- Room: the label as painted on the door, exact match only (never
+          -- a prefix or substring) — a room holds several people, so a
+          -- loose room match would be a mini roll-call of the whole room,
+          -- which is exactly the "list" this function refuses to be.
+          or (rm.id is not null and lower(
+                b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number
+              ) = v_nq)
+          -- Identity number: EXACT match only, never a prefix or substring.
+          -- id_number is upper-cased on write (routes/residents.js), so both
+          -- sides are upper-cased here to match regardless of how it was
+          -- typed. A prefix match would let the number be enumerated one
+          -- digit at a time from a shared tablet; this closes that off
+          -- entirely rather than just making it slow.
+          or (r.id_number is not null and upper(r.id_number) = upper(btrim(coalesce(p_q, ''))))
+        )
+    )
+    select
+      m.m_id,
+      m.m_full_name,
+      -- The room is shown only to tell two same-named residents apart — by
+      -- default one resident's room is never revealed to whoever is standing
+      -- at the tablet.
+      case when count(*) over (partition by m.m_full_name) > 1 then m.m_room_label else null end,
+      m.m_checked_in_today
+    from matched m
+    order by m.m_full_name
+    limit 5;
+end;
+$$;
+
+
+--
+
 -- Name: roll_call_marks; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1333,7 +1470,7 @@ CREATE FUNCTION __TENANT__.profiles_clear_safeguarding_alert_for_guard() RETURNS
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
 begin
-  if new.role = 'guard' and (tg_op = 'INSERT' or old.role is distinct from new.role) then
+  if new.role in ('guard', 'kiosk') and (tg_op = 'INSERT' or old.role is distinct from new.role) then
     new.safeguarding_alert := false;
   end if;
   return new;
@@ -1351,7 +1488,7 @@ CREATE FUNCTION __TENANT__.profiles_clear_weekly_report_for_guard() RETURNS trig
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
 begin
-  if new.role = 'guard' and (tg_op = 'INSERT' or old.role is distinct from new.role) then
+  if new.role in ('guard', 'kiosk') and (tg_op = 'INSERT' or old.role is distinct from new.role) then
     new.weekly_report := false;
   end if;
   return new;
@@ -1815,7 +1952,7 @@ declare
   v_dup    boolean;
   v_out    __TENANT__.daily_compliance;
 begin
-  if not __TENANT__.is_staff() then
+  if not (__TENANT__.is_staff() or (__TENANT__.my_role() = 'kiosk' and p_source = 'kiosk')) then
     raise exception 'Not authorised to record check-ins' using errcode = '42501';
   end if;
 
@@ -2569,7 +2706,7 @@ CREATE TABLE __TENANT__.checkin_events (
     late_entry boolean DEFAULT false NOT NULL,
     client_ref uuid,
     source text DEFAULT 'desk'::text NOT NULL,
-    CONSTRAINT checkin_events_source_check CHECK ((source = ANY (ARRAY['desk'::text, 'door'::text])))
+    CONSTRAINT checkin_events_source_check CHECK ((source = ANY (ARRAY['desk'::text, 'door'::text, 'kiosk'::text])))
 );
 
 
@@ -2740,9 +2877,9 @@ CREATE TABLE __TENANT__.profiles (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     weekly_report boolean DEFAULT false NOT NULL,
     safeguarding_alert boolean DEFAULT false NOT NULL,
-    CONSTRAINT profiles_role_check CHECK ((role = ANY (ARRAY['guard'::text, 'supervisor'::text, 'admin'::text]))),
-    CONSTRAINT profiles_safeguarding_alert_not_guard CHECK ((NOT (safeguarding_alert AND (role = 'guard'::text)))),
-    CONSTRAINT profiles_weekly_report_not_guard CHECK ((NOT (weekly_report AND (role = 'guard'::text))))
+    CONSTRAINT profiles_role_check CHECK ((role = ANY (ARRAY['guard'::text, 'supervisor'::text, 'admin'::text, 'kiosk'::text]))),
+    CONSTRAINT profiles_safeguarding_alert_not_guard CHECK ((NOT (safeguarding_alert AND (role = ANY (ARRAY['guard'::text, 'kiosk'::text]))))),
+    CONSTRAINT profiles_weekly_report_not_guard CHECK ((NOT (weekly_report AND (role = ANY (ARRAY['guard'::text, 'kiosk'::text])))))
 );
 
 
@@ -4833,6 +4970,26 @@ GRANT ALL ON FUNCTION __TENANT__.issue_breach(p_resident_id uuid, p_kind text, p
 REVOKE ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION kiosk_checkin(p_resident_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.kiosk_checkin(p_resident_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.kiosk_checkin(p_resident_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.kiosk_checkin(p_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION kiosk_search(p_q text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.kiosk_search(p_q text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.kiosk_search(p_q text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.kiosk_search(p_q text) TO service_role;
 
 
 --
