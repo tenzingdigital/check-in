@@ -45,7 +45,8 @@ September 2026 (Slaney Manor — the manager reads these on her phone) reaches
 the copy as well as the code. The nightly email itself now names residents
 in its body instead of linking to a login: the household, room, children
 and ages for a guardian gap; the resident, age and room for an overnight
-absence or a check-in conflict; the resident, room and figure for a House
+absence; the resident, room, check-in time and last gate movement for a
+check-in conflict; the resident, room and figure for a House
 Rules count. The Sunday email's own body is unchanged — counts and a link —
 but its Word attachment (052) is now on by default rather than a switch a
 centre has to find; the switch to turn it off still exists. The register's
@@ -305,9 +306,9 @@ In & out register had the person out, named with room, the check-in time
 and the last gate movement (the "Check-ins recorded while signed out"
 report); and residents at the House Rules figures, named with room and
 which figure (the Absences tab for that night). Sent on any night a count
-is non-zero and every Sunday regardless. Every link still opens the named
-report for the reader who wants the full record, and opening it is audited
-like any other report.
+is non-zero and every Sunday regardless. Every link still opens the page with the
+full record; the three report links are audited like any other report, the
+Absences tab (a working view, not a report) is not.
 
 The Sunday Weekly register update (migrations 035 and 037), where the
 centre has turned it on — or at any time an administrator sends it by hand
@@ -429,7 +430,7 @@ list of people holding either is kept in
 - [ ] Render's and Resend's DPAs and SCCs on file; transfer impact assessment written
 - [ ] Database confirmed in Frankfurt on a paid plan with point-in-time recovery, and not the smallest plan (`docs/KNOWN-ISSUES.md` 19c)
 - [ ] Email configured (`RESEND_API_KEY`), so invitation links go to their owner and not to an administrator's screen
-- [ ] If the Weekly register update is turned on, the staff ticked "Gets the Sunday report" (Admin → Staff) are the right supervisors and admins — the email body carries no resident data (the Word attachment does, where the centre has also turned that on), so this is a check on who holds those roles rather than on what leaves by email
+- [ ] If the Weekly register update is turned on, the staff ticked "Gets the Sunday report" (Admin → Staff) are the right supervisors and admins — the email body carries counts only but the Word attachment, on by default (migration 055), names residents, so this is a check on who receives it
 - [ ] A named person at the centre who actions access and erasure requests, and a named person at Tenzing who receives breach reports
 - [ ] The list of people holding the external connection string is written down and short
 - [ ] The paper fallback sheet is printed and in the hut

@@ -430,7 +430,7 @@ async function nightlyEmail(schema, label) {
            -- coalesce: a household whose last active member departed between
            -- the snapshot step and this one would otherwise read "null family".
            coalesce((select string_agg(distinct btrim(r.last_name), ' / ' order by btrim(r.last_name)) from residents r
-              where r.household_id = g.household_id and r.status = 'active'), 'Household') || ' family' as household,
+              where r.household_id = g.household_id and r.status = 'active') || ' family', 'Household') as household,
            (select string_agg(distinct rl, ', ' order by rl) from (select ${ROOM} as rl from residents r
               where r.household_id = g.household_id and r.status = 'active' and r.room_id is not null) x) as room,
            (select string_agg(btrim(r.first_name) || ' ' || btrim(r.last_name) || ' (' || date_part('year', age(r.date_of_birth))::int || ')', ', ' order by r.date_of_birth)

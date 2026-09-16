@@ -197,11 +197,11 @@ rewritten, as for 053) or closed **before `hut-nightly`'s first run**,
 because a behind tenant is a failed cron every night until then, and its
 purges — the DPA's retention promise — do not run.
 
-Two follow-ups from the same review, for a migration 055: (1)
+Two follow-ups from the same review, for a migration 056: (1)
 `snapshot_guardian_gaps()` reads the gate *as it stands* and labels the
 rows `site_today() - 1`, so `jobs.js` only runs it between 00:00 and 05:59
 site time (`snapshotGate()`; a late manual re-run records "outside the
-snapshot window" and skips the nightly email too). 055 should make the
+snapshot window" and skips the nightly email too). 056 should make the
 snapshot as-of-midnight — the presence of each member at 00:00 from
 `gate_events`, not the latest event now — and take the last seven nights
 with `on conflict do nothing`, exactly as 027 did for
