@@ -8,9 +8,10 @@ and then, decisively: "the sole purpose is for residents to use this
 screen on a tablet to check themselves in for the night only … search
 only, no list, no filters."
 
-So this is not a fourth staff role. It is a **resident-facing kiosk**: a
-login that can do exactly two things — find one person, and record that
-person's check-in for today — and nothing else, enforced in the database.
+So this is not a fourth staff role. It is a **resident-facing kiosk** for
+the daily 24-hour check-in (not In & out): a login that can do exactly two
+things — find one adult resident, and record that person's check-in for
+today — and nothing else, enforced in the database.
 
 ## Decisions
 
@@ -33,9 +34,10 @@ person's check-in for today — and nothing else, enforced in the database.
   `source` check gains the value). No undo in the database — the register
   is append-only; the screen offers a 10-second "That's not me" which
   simply does not send until the 10 seconds pass (a local delay, not a
-  server undo). Children: the kiosk refuses to check in a resident under
-  the site's adult age ("Please ask a member of staff") — a child's
-  check-in needs an adult present.
+  server undo). Children are not on this screen at all: the daily
+  check-in is required only of adults (the site's adult age), so
+  `kiosk_search` returns adults only. Nothing about In & out — the kiosk
+  is the 24-hour register, never the door log.
 - **A dedicated page, `/kiosk.html`**: one search box, results as large
   buttons showing the name (and room only when disambiguating), a
   confirmation screen with the name large, "That's not me", then back to
@@ -86,6 +88,6 @@ every existing row expects `deny` for it, and the two kiosk routes expect
 `allow` for kiosk and `deny` for guard); search needs 2+ chars, returns
 ≤5, never DOB/ID, room only on a name collision, ID search exact-only;
 check-in writes `source='kiosk'` and shows in the register with the mark;
-a child is refused; rate limit fires at 61. DB suite: `is_staff()` is
+a child never appears in a kiosk search; rate limit fires at 61. DB suite: `is_staff()` is
 false for kiosk; a direct `select from residents` as kiosk returns
 nothing. Front end: the page parses, no list endpoint is ever called.
