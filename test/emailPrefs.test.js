@@ -35,12 +35,13 @@ test('headersFor gives both RFC 8058 headers for a link, and nothing for none', 
 test('KINDS names every kind the migrations accept (049 + 054), and only those', () => {
   assert.deepEqual(Object.keys(prefs.KINDS).sort(), ['guardian_alert', 'house_rules', 'nightly', 'safeguarding_alert', 'weekly_report']);
   assert.equal(prefs.KINDS.weekly_report.tick, 'weekly_report');
-  assert.equal(prefs.KINDS.house_rules.tick, null);
-  // The 22:00 alert and the nightly email share the retired alert's tick:
-  // one tick, one audience (054).
+  // The 22:00 alert, the nightly email and both retired kinds share the
+  // safeguarding_alert tick: one tick, one audience (054). House Rules had
+  // no tick of its own; an old link must still stop the email it became.
   assert.equal(prefs.KINDS.guardian_alert.tick, 'safeguarding_alert');
   assert.equal(prefs.KINDS.nightly.tick, 'safeguarding_alert');
-  assert.deepEqual(prefs.kindsForTick('safeguarding_alert'), ['guardian_alert', 'nightly', 'safeguarding_alert']);
+  assert.equal(prefs.KINDS.house_rules.tick, 'safeguarding_alert');
+  assert.deepEqual(prefs.kindsForTick('safeguarding_alert'), ['guardian_alert', 'nightly', 'safeguarding_alert', 'house_rules']);
   assert.deepEqual(prefs.kindsForTick('weekly_report'), ['weekly_report']);
   assert.ok(prefs.isKind('house_rules') && prefs.isKind('nightly') && !prefs.isKind('all') && !prefs.isKind(''));
 });

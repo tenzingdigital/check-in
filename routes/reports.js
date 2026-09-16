@@ -358,9 +358,10 @@ REPORTS.supervision = {
 // from the register as it is at the export, not as it was that night — a
 // child who has since turned eight reads (8), a family since moved reads the
 // new room. That is what a supervisor opening this in the morning wants
-// (who do I go and see), and the night's own numbers are in the two count
-// columns untouched. Every child in the household is listed, not only those
-// who were on site, because the snapshot recorded how many, not which.
+// (who do I go and see); the night's own guardians_out count and first_out_at
+// are the snapshot's, untouched. Every child in the household is listed, not
+// only those who were on site, because the snapshot recorded how many, not
+// which.
 REPORTS['guardian-gaps'] = {
   title: 'Children on site without a guardian',
   ranged: true,

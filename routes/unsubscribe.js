@@ -77,6 +77,11 @@ function choicePage(ctx, notice) {
   const body = [];
   if (notice) body.push(`<p class="hint"><b>${esc(notice)}</b></p>`);
   body.push(`<p>This link came from <b>${esc(thisOne)}</b>, sent to <b>${esc(profile.email)}</b>.</p>`);
+  // The kinds on the safeguarding_alert tick (054) are one setting, and the
+  // page must not read as if stopping one leaves the other.
+  if (prefs.kindsForTick('safeguarding_alert').includes(kind)) {
+    body.push(`<p>The nightly email and the 22:00 alert are one setting: stopping either stops both, and resuming either resumes both.</p>`);
+  }
   if (!stopped.has(kind)) {
     body.push(`<form method="post" action="/unsubscribe">${hidden}<input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="action" value="stop">
       <button class="btn" type="submit">Stop this email</button></form>`);
