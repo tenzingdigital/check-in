@@ -1972,6 +1972,9 @@ async function main() {
     assert.equal(later.subject, "Slaney: tonight — 3 to look at");
     assert.match(later.html, /Open Check-ins recorded while signed out/, "the button follows the first non-zero section");
 
+    // The old contract was counts; a caller still passing them gets the nil
+    // email, not a silent count-only message.
+    assert.equal(compose({ siteName: "Slaney", night: "2026-09-20", counts: { conflicts: 3 }, links }).subject, "Slaney: tonight — nothing to report");
     const nil = compose({ siteName: "Slaney", night: "2026-09-20", items: { guardian_gaps: [], children_away: [], conflicts: [], at_figures: [] }, links });
     assert.equal(nil.subject, "Slaney: tonight — nothing to report");
     for (const l of labels) assert.ok(nil.text.includes(l) && nil.html.includes(l), "a nil email still lists the four sections, so a Sunday's silence reads as a check that ran");
