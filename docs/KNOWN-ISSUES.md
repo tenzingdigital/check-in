@@ -137,6 +137,17 @@ a kiosk account exists there regardless, `kiosk_search`/`kiosk_checkin`
 being missing means both kiosk routes 500 for it. Either way, the tablet at
 that centre's door does not work until the tenant is brought current.
 
+**Migration 052 is the first migration to close its own gap, rather than
+leave it for the manual check above:** its `alter table public.app_settings
+add column … weekly_report_attach_document` is followed by a `do $$ …
+loop$$` block that runs the same `alter table … add column if not exists`
+against every `t_*` schema in `pg_namespace`, so `GET /api/settings` and the
+weekly job never 500 on a tenant provisioned before it. It is additive and
+idempotent, which is what makes reaching into every tenant schema safe from
+inside a migration file; a later migration adding another `app_settings`
+column should do the same rather than falling back to the manual
+`GET /api/tenants` check.
+
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every
 `t_*` schema at boot automatically, refusing to serve a schema still

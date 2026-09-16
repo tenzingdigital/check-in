@@ -80,4 +80,8 @@ assert.ok(buf.equals(docx(blocks)), 'byte-identical for identical input');
 // Unknown kinds are a programming error, not silently a paragraph.
 assert.throws(() => docx([{ kind: 'table', text: 'x' }]), /unknown block kind/);
 
+// esc() strips XML-illegal control characters, not just entity-escapes them (lib/xlsx.js parity).
+const ctrlDoc = entries(docx([{ kind: 'para', text: 'A\x0Bname' }]))['word/document.xml'];
+assert.ok(ctrlDoc.includes('Aname') && !ctrlDoc.includes('\x0B'), 'control characters are stripped from text');
+
 console.log('PASS: docx writer — container, parts, escaping, highlight, underline, determinism.');

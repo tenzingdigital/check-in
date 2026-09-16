@@ -14,3 +14,15 @@ alter table public.app_settings
   add column if not exists weekly_report_attach_document boolean not null default false;
 comment on column public.app_settings.weekly_report_attach_document is
   'Attach the Weekly Register Update to the Sunday email as a Word document. It names residents and rooms; off unless the centre turns it on (052).';
+
+-- database.js migrates public only (docs/KNOWN-ISSUES.md §4); a tenant
+-- schema provisioned before this file would keep the old column list and
+-- routes/settings.js would 500 on the select. Additive and idempotent, so it
+-- is safe to reach into every tenant schema from here.
+do $$
+declare s text;
+begin
+  for s in select nspname from pg_namespace where nspname like 't\_%' escape '\' loop
+    execute format('alter table %I.app_settings add column if not exists weekly_report_attach_document boolean not null default false', s);
+  end loop;
+end $$;

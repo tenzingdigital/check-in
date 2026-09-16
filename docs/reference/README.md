@@ -16,14 +16,27 @@ Made under section 83 of the International Protection Act 2026 (in force
   in the visitor log; visiting minors accompanied by an adult.
 - **3.3.9 Fire** — parents tell management if a child is not on the premises
   at evacuation time (e.g. at school).
-- **3.4.1 Report and reside / border procedure** — must confirm presence
-  **daily**; failing to report on **3 consecutive days** is a breach reported
-  to the IPO. Not eligible for the notified holiday periods. (A different
-  class of resident with a different threshold — not yet modelled.)
+- **3.1.1 'Report and reside' requirements** (under 3.1 The Law) — a
+  resident subject to section 102/103 of the Act must live at the place the
+  Minister specifies.
+- **3.4.1 Moving Accommodation Centre** — no one has the right to live in a
+  particular centre; IPAS may transfer a resident, with notice; refusing to
+  cooperate with a transfer is a breach.
+- **Absence from IPAS Accommodation for those with 'report and reside'
+  requirements** (an unnumbered sub-heading inside 3.4, between 3.4.1 and
+  3.4.2) — a resident subject to the asylum border procedure must confirm
+  presence **daily**; failing to report on **3 consecutive days** is a
+  breach reported to the IPO. Not eligible for the notified holiday periods.
+  (A different class of resident with a different threshold — not yet
+  modelled.)
 - **3.4.2 Absence** — outside the notified holiday periods, absence only in
   exceptional circumstances and authorised in advance (Notice of Absence
   form). Managers "operate a verification system to verify residents'
   absence" — the daily register. Unauthorised absences are reported to IPAS.
+- **3.4.3 Absent Without Authorisation** — an absence outside the permitted
+  holiday times and without authorisation, as in 3.4.2, is deemed "absent
+  without authorisation" for the purposes of 3.4.4 and 3.4.5 — the
+  definition the register's counting answers to.
 - **3.4.4 Duration of unauthorised absence** — a breach at **7 consecutive
   days**, or **10 days within a continuous 4-week period**. These are the
   two figures under Settings → House Rules thresholds.

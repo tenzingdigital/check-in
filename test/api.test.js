@@ -2490,6 +2490,14 @@ async function main() {
   await test("lastWeek is pure", async () => {
     const { lastWeek } = require("../lib/weeklyReport");
     assert.deepEqual(lastWeek("2026-09-13"), { from: "2026-09-06", to: "2026-09-12" });
+    // Monday and Wednesday resends after a missed Sunday still send the
+    // week ending the previous Saturday — the fix for F1.
+    assert.deepEqual(lastWeek("2026-09-14"), { from: "2026-09-06", to: "2026-09-12" });
+    assert.deepEqual(lastWeek("2026-09-16"), { from: "2026-09-06", to: "2026-09-12" });
+    // A Saturday is not yet closed, so the week ending the previous Saturday.
+    assert.deepEqual(lastWeek("2026-09-19"), { from: "2026-09-06", to: "2026-09-12" });
+    // Sunday: the week that just closed last night.
+    assert.deepEqual(lastWeek("2026-09-20"), { from: "2026-09-13", to: "2026-09-19" });
   });
 
   await test("compose() carries counts and a link, never a resident name, room, building or child marker — the security property", async () => {

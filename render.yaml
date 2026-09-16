@@ -201,6 +201,13 @@ services:
         value: "22"
       - key: PUBLIC_URL
         value: https://app.checksteady.com
+      # Mail credentials are set by hand on hut-nightly today; sync: false
+      # makes Render prompt for them here at blueprint sync instead of
+      # relying on somebody remembering (see README §5).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
 
   # -------------------------------------------------------------------------
   # The brochure site (checksteady.com) — static, no build step, published

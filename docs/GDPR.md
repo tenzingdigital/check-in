@@ -21,12 +21,15 @@ about this and are corrected.
 Updated again 10 September 2026 against migration 037 and the same day's
 rewrite of the email's content (`lib/weeklyReport.js`). The disclosure above
 lasted less than a day. Recipients of the Weekly register update are now a
-tick on the staff record, offered only to supervisors and admins. The email
-itself carries counts and a link only. Since migration 052 a centre may
-additionally attach the update as a Word document — names, rooms, dates and
-the child marker, exactly what the in-app report shows — to the same
-recipients; it is off by default and is the centre's decision. The Resend
-section and processor table below are corrected again.
+tick on the staff record, offered only to supervisors and admins, and the
+email itself carries counts and a link only — no resident name, room, date
+or child marker. The email now goes only to the centre's own staff, and no
+resident data leaves by it at all. The Resend section and processor table
+below are corrected again.
+
+Updated 16 September 2026 against migration 052: the Sunday email may carry
+the Weekly Register Update as a Word document, naming residents, where the
+centre turns that on.
 
 **This is not legal advice.** A system that records the daily presence of
 residents in accommodation, some of whom are in the international protection

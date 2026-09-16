@@ -11,6 +11,7 @@ and it is deliberately the first thing in the file.
 | **Web service** | `hut-check-in` — Node 22, serves `public/` and `/api` |
 | **Database** | `hut-db` — Render Postgres 16 |
 | **Nightly cron** | `hut-nightly` — the maintenance `pg_cron` used to run |
+| **Weekly cron** | `hut-weekly` — the Sunday Weekly Register Update, at 10:00 site time |
 | **Brochure site** | `checksteady-site` — static, published from `site/` |
 | **App URL** | `app.checksteady.com` |
 | **Site URL** | `checksteady.com` (and `www.`) |
@@ -337,13 +338,14 @@ vendor to sign up for and no keys to copy between dashboards.
 ### 1. Create the services
 
 Render dashboard → **New → Blueprint** → point at this repo. `render.yaml`
-creates all three resources in Frankfurt:
+creates all four resources in Frankfurt:
 
 | Resource | What it is |
 |---|---|
 | `hut-db` | Postgres 16. The register. |
 | `hut-check-in` | The Node web service — serves `public/` and `/api`. |
 | `hut-nightly` | The cron job that runs the maintenance functions. |
+| `hut-weekly` | The cron job that sends the Sunday Weekly Register Update. |
 
 `DATABASE_URL` is wired from the database into both services by the blueprint;
 you never paste a connection string anywhere.
@@ -527,16 +529,24 @@ out of the two working apps:
   close-out writes those days as not required, so they never count as
   missed; cards say *Away until*; a report covers a range. Nothing else is
   held.
-- **The Sunday email** (migrations 035 and 037): early Sunday the nightly
-  job emails the previous Sunday night through Saturday night as counts and
-  a link, never a resident name, to the staff ticked *Gets the Sunday
-  report* on their record — offered only to supervisors and admins, since
-  only they may run the report it summarises, and cleared automatically on
-  a demotion to guard. A switch under Settings turns the send on or off for
-  the site; *Send last week's now* checks it regardless of the switch.
+- **The Sunday email** (migrations 035 and 037): sent at 10:00 site time by
+  `hut-weekly`, the previous Sunday night through Saturday night as counts
+  and a link — and, where the centre has turned on the Word attachment
+  (migration 052), the Weekly register update as a document naming
+  residents — to the staff ticked *Gets the Sunday report* on their record —
+  offered only to supervisors and admins, since only they may run the
+  report it summarises, and cleared automatically on a demotion to guard. A
+  switch under Settings turns the send on or off for the site; *Send last
+  week's now* checks it regardless of the switch.
   **Permitted absence periods** (migration 036): the IPAS windows as dates
   under Settings; a holiday authorised outside them is recorded with a
   warning, never refused.
+- **Weekly register update as a Word document** (migration 052): a switch
+  under Settings attaches the Sunday email's underlying report as an
+  editable Word document — residents, rooms and dates named — for the
+  centre manager to forward to head office instead of compiling one by
+  hand; off by default, since it is the one place a resident's name leaves
+  by email.
 - **Room history** (migration 028): every room a resident has had, from
   when to when and who moved them, kept by a trigger as the room changes
   and closed when they leave. On the edit sheet and as a report. The label
@@ -761,8 +771,10 @@ A second cron, `hut-weekly`, sends the Sunday Weekly Register Update at 10:00
 site time. Render's cron clock is UTC and Ireland's is not, so it runs `node
 jobs.js weekly` at both 09:00 and 10:00 UTC every Sunday: the first run at or
 after 10:00 local sends it, the second finds it already sent and records that
-instead. It also waits on `hut-nightly`'s snapshot from the night before, so a
-week whose last night never ran is not quietly sent short. The new cron
+instead. For a site whose local time zone is west of UTC, both runs fall
+before 10:00 local and the return never sends — this schedule assumes
+Ireland/UK. It also waits on `hut-nightly`'s snapshot from the night before,
+so a week whose last night never ran is not quietly sent short. The new cron
 appears in Render after the blueprint sync; confirm it exists and has the
 same env vars as `hut-nightly` — and, because mail credentials
 (`RESEND_API_KEY`, `MAIL_FROM`) are set in the Render dashboard rather than
@@ -770,7 +782,9 @@ the blueprint, copy those two onto `hut-weekly` by hand as well, or the
 Sunday email never sends. If a Sunday return was missed, `node jobs.js weekly
 --force` from either cron's Render shell resends it by hand — it still
 respects "already sent today", so it cannot double-send one that already
-went.
+went, and because the week is anchored to the most recent Saturday rather
+than "yesterday", a resend on a later weekday still sends the week ending
+the previous Saturday, not the wrong week.
 
 ### 6. Point the front ends at the API
 
