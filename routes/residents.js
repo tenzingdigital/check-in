@@ -381,13 +381,21 @@ router.post('/:id/absences', wrap(async (req, res) => {
     const { rows } = await client.query('select * from authorise_absence($1, $2, $3, $4, $5)', [id, from, to, reason, guardian]);
     const { rows: named } = await client.query(
       `select a.*, p.full_name as approved_by_name from authorised_absences a left join profiles p on p.id = a.approved_by where a.id = $1`, [rows[0].id]);
-    // Permitted absence periods (migration 036): a holiday outside every
-    // window is still recorded; the answer says so.
+    // Permitted absence periods (migration 036); a maximum stay per period
+    // (050, the IPAS wording "no more than 2 weeks" for Ramadan and
+    // Easter). A holiday outside every window, or longer than the tightest
+    // containing window's maximum, is still recorded; the answer says so.
     let warning;
     if (reason === 'holiday') {
       const { rows: [w] } = await client.query(
-        `select (select count(*)::int from absence_windows) as n, inside_absence_window($1, $2) as inside`, [from, to]);
-      if (w.n > 0 && !w.inside) warning = 'Outside the permitted absence periods in Settings';
+        `select (select count(*)::int from absence_windows) as n,
+                (select name from absence_windows w where daterange(w.from_date, w.to_date, '[]') @> daterange($1, $2, '[]')
+                  order by (w.to_date - w.from_date) limit 1) as inside_name,
+                (select max_nights from absence_windows w where daterange(w.from_date, w.to_date, '[]') @> daterange($1, $2, '[]')
+                  order by (w.to_date - w.from_date) limit 1) as max_nights,
+                ($2::date - $1::date + 1) as nights`, [from, to]);
+      if (w.n > 0 && !w.inside_name) warning = 'Outside the permitted absence periods in Settings';
+      else if (w.max_nights && w.nights > w.max_nights) warning = `Longer than the ${w.max_nights} nights permitted for ${w.inside_name}`;
     }
     return { row: named[0] || rows[0], warning };
   }).catch((err) => {

@@ -216,15 +216,23 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------------------
-// Permitted absence periods (migration 036)
+// Permitted absence periods (migration 036; max_nights and PATCH: 050)
 // ---------------------------------------------------------------------------
 //   GET    /api/settings/absence-windows       any staff member
 //   POST   /api/settings/absence-windows       administrators
+//   PATCH  /api/settings/absence-windows/:id   administrators
 //   DELETE /api/settings/absence-windows/:id   administrators
+function maxNightsParam(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 365) throw new HttpError(400, 'Maximum nights must be a whole number between 1 and 365, or left blank');
+  return n;
+}
+
 router.get('/absence-windows', wrap(async (req, res) => {
   const rows = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `select id, name, from_date::text as from_date, to_date::text as to_date from absence_windows order by from_date, id`);
+      `select id, name, from_date::text as from_date, to_date::text as to_date, max_nights from absence_windows order by from_date, id`);
     return rows;
   });
   res.json(rows);
@@ -238,13 +246,45 @@ router.post('/absence-windows', wrap(async (req, res) => {
   const from = dateParam(body.from_date, 'from_date');
   const to = dateParam(body.to_date, 'to_date');
   if (to < from) throw new HttpError(400, 'The last day must not be before the first');
+  const maxNights = maxNightsParam(body.max_nights);
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
-      `insert into absence_windows (name, from_date, to_date, created_by) values ($1, $2, $3, $4)
-       returning id, name, from_date::text as from_date, to_date::text as to_date`, [name, from, to, req.session.userId]);
+      `insert into absence_windows (name, from_date, to_date, max_nights, created_by) values ($1, $2, $3, $4, $5)
+       returning id, name, from_date::text as from_date, to_date::text as to_date, max_nights`, [name, from, to, maxNights, req.session.userId]);
     return rows[0];
   }).catch((err) => { if (err && err.code === '42501') throw new HttpError(403, 'Only an administrator can change the permitted absence periods'); throw err; });
   res.status(201).json(row);
+}));
+
+router.patch('/absence-windows/:id', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can change the permitted absence periods');
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id < 1) throw new HttpError(400, 'Bad id');
+  const body = req.body || {};
+  const sets = [];
+  const args = [id];
+  const set = (col, val) => { args.push(val); sets.push(`${col} = $${args.length}`); };
+  if (Object.prototype.hasOwnProperty.call(body, 'name')) {
+    const name = String(body.name || '').trim();
+    if (!name || name.length > 60) throw new HttpError(400, 'Give the period a name (up to 60 characters)');
+    set('name', name);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'from_date')) set('from_date', dateParam(body.from_date, 'from_date'));
+  if (Object.prototype.hasOwnProperty.call(body, 'to_date')) set('to_date', dateParam(body.to_date, 'to_date'));
+  if (Object.prototype.hasOwnProperty.call(body, 'max_nights')) set('max_nights', maxNightsParam(body.max_nights));
+  if (!sets.length) throw new HttpError(400, 'Nothing to change');
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      `update absence_windows set ${sets.join(', ')} where id = $1
+       returning id, name, from_date::text as from_date, to_date::text as to_date, max_nights`, args);
+    return rows[0];
+  }).catch((err) => {
+    if (err && err.code === '23514') throw new HttpError(400, 'The last day must be on or after the first day.');
+    if (err && err.code === '42501') throw new HttpError(403, 'Only an administrator can change the permitted absence periods');
+    throw err;
+  });
+  if (!row) throw new HttpError(404, 'No such period');
+  res.json(row);
 }));
 
 router.delete('/absence-windows/:id', wrap(async (req, res) => {

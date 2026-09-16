@@ -2437,7 +2437,9 @@ CREATE TABLE __TENANT__.absence_windows (
     to_date date NOT NULL,
     created_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    max_nights integer,
     CONSTRAINT absence_windows_check CHECK ((to_date >= from_date)),
+    CONSTRAINT absence_windows_max_nights_check CHECK (((max_nights >= 1) AND (max_nights <= 365))),
     CONSTRAINT absence_windows_name_check CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)))
 );
 
@@ -5249,7 +5251,7 @@ GRANT ALL ON FUNCTION __TENANT__.weekly_register_rows_unchecked(p_from date, p_t
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.absence_windows TO service_role;
-GRANT SELECT,INSERT,DELETE ON TABLE __TENANT__.absence_windows TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.absence_windows TO authenticated;
 
 
 --

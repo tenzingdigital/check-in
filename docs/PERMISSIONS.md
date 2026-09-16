@@ -111,6 +111,7 @@ validation.
 | Change the site's settings, retention and feature switches<br><code>PATCH /api/settings</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Send the Weekly register update by email now<br><code>POST /api/settings/weekly-report/send</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Add a permitted absence period<br><code>POST /api/settings/absence-windows</code> | — | ✗ | ✗ | ✓ | ✓ |
+| Edit a permitted absence period<br><code>PATCH /api/settings/absence-windows/:id</code> | — | ✗ | ✗ | ✓ | ✓ |
 | Remove a permitted absence period<br><code>DELETE /api/settings/absence-windows/:id</code> | — | ✗ | ✗ | ✓ | ✓ |
 | List staff accounts<br><small>Names, roles and last sign-in; no more than the header of the app already shows</small><br><code>GET /api/staff</code> | — | ✓ | ✓ | ✓ | ✓ |
 | Invite a staff member<br><code>POST /api/staff</code> | — | ✗ | ✗ | ✓ | ✓ |

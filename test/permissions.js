@@ -109,6 +109,7 @@ module.exports = [
   { area: 'Administration', name: "Change the site's settings, retention and feature switches", method: 'PATCH', path: () => '/api/settings', body: () => ({ site_name: 'Matrix Site' }), expect: ADMIN },
   { area: 'Administration', name: "Send the Weekly register update by email now", method: 'POST', path: () => '/api/settings/weekly-report/send', body: () => ({}), expect: ADMIN },
   { area: 'Administration', name: 'Add a permitted absence period', method: 'POST', path: () => '/api/settings/absence-windows', body: () => ({ name: `Matrix ${crypto.randomInt(1e6)}`, from_date: '2030-01-01', to_date: '2030-01-02' }), expect: ADMIN },
+  { area: 'Administration', name: 'Edit a permitted absence period', method: 'PATCH', path: (fx) => `/api/settings/absence-windows/${fx.absenceWindowId}`, body: () => ({ name: 'Edited' }), expect: ADMIN, fresh: 'absenceWindow' },
   { area: 'Administration', name: 'Remove a permitted absence period', method: 'DELETE', path: (fx) => `/api/settings/absence-windows/${fx.absenceWindowId}`, expect: ADMIN, fresh: 'absenceWindow' },
   { area: 'Administration', name: 'List staff accounts', method: 'GET', path: () => '/api/staff', expect: STAFF, note: 'Names, roles and last sign-in; no more than the header of the app already shows' },
   { area: 'Administration', name: 'Invite a staff member', method: 'POST', path: () => '/api/staff', body: () => ({ email: `m${crypto.randomInt(1e9)}@hut.example`, full_name: 'Matrix Staff', role: 'guard' }), expect: ADMIN },

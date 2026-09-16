@@ -2563,6 +2563,85 @@ async function main() {
     assert.ok(audited.rows[0].n >= 2, "adding and removing a window should be audited");
   });
 
+  console.log("\n== a permitted absence period can be edited and carries a maximum stay (migration 050) ==");
+
+  await test("max_nights on POST/PATCH, PATCH is admin-only and 404s on a missing id, and a holiday over the maximum warns", async () => {
+    // (a) POST with max_nights: GET shows it.
+    const withMax = await wkAdmin.fetch("/api/settings/absence-windows", { method: "POST", body: { name: "Ramadan", from_date: "2030-04-18", to_date: "2030-05-02", max_nights: 14 } });
+    assert.equal(withMax.status, 201, withMax.text);
+    assert.equal(withMax.json.max_nights, 14);
+    const afterCreate = await api.fetch("/api/settings/absence-windows");
+    assert.equal(afterCreate.json.find((w) => w.id === withMax.json.id).max_nights, 14);
+
+    // (b) PATCH to_date and name; GET shows both. PATCH max_nights: null clears it.
+    const edited = await wkAdmin.fetch(`/api/settings/absence-windows/${withMax.json.id}`, { method: "PATCH", body: { name: "Ramadan (revised)", to_date: "2030-05-03" } });
+    assert.equal(edited.status, 200, edited.text);
+    assert.equal(edited.json.name, "Ramadan (revised)");
+    assert.equal(edited.json.to_date, "2030-05-03");
+    const afterEdit = await api.fetch("/api/settings/absence-windows");
+    const editedRow = afterEdit.json.find((w) => w.id === withMax.json.id);
+    assert.equal(editedRow.name, "Ramadan (revised)");
+    assert.equal(editedRow.to_date, "2030-05-03");
+
+    const cleared = await wkAdmin.fetch(`/api/settings/absence-windows/${withMax.json.id}`, { method: "PATCH", body: { max_nights: null } });
+    assert.equal(cleared.status, 200, cleared.text);
+    assert.equal(cleared.json.max_nights, null);
+
+    // PATCH by a supervisor -> 403.
+    const asSup = await supC.fetch(`/api/settings/absence-windows/${withMax.json.id}`, { method: "PATCH", body: { name: "Nope" } });
+    assert.equal(asSup.status, 403);
+
+    // PATCH a missing id -> 404.
+    const missing = await wkAdmin.fetch("/api/settings/absence-windows/987654321", { method: "PATCH", body: { name: "Nope" } });
+    assert.equal(missing.status, 404);
+
+    // PATCH to_date before from_date -> 400 with a sentence.
+    const badRange = await wkAdmin.fetch(`/api/settings/absence-windows/${withMax.json.id}`, { method: "PATCH", body: { from_date: "2030-05-03", to_date: "2030-05-02" } });
+    assert.equal(badRange.status, 400);
+    assert.match(badRange.json.error || "", /last day/i);
+
+    // Reset the window to the shape the warning test needs.
+    const reset = await wkAdmin.fetch(`/api/settings/absence-windows/${withMax.json.id}`, { method: "PATCH", body: { name: "Ramadan", from_date: "2030-04-18", to_date: "2030-05-02", max_nights: 14 } });
+    assert.equal(reset.status, 200, reset.text);
+
+    // (c) the warning. Raise the site's holiday cap so a 15-night holiday is
+    // not refused outright by authorise_absence() (029) before it ever
+    // reaches the max_nights check.
+    const raised = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { holiday_max_days: 30 } });
+    assert.equal(raised.status, 200, raised.text);
+
+    // Three residents, one per case: authorise_absence() refuses an
+    // overlapping absence for the same resident, and these ranges overlap
+    // each other.
+    const mkResident = async (first) => {
+      const r = await supC.fetch("/api/residents", { method: "POST", body: { first_name: first, last_name: "Ramadan", date_of_birth: "1990-01-01" } });
+      assert.equal(r.status, 201, r.text);
+      return r.json.id;
+    };
+    const withinId = await mkResident("Within");
+    const overId = await mkResident("Over");
+    const outsideId = await mkResident("Outside");
+
+    const withinLimit = await supC.fetch(`/api/residents/${withinId}/absences`, { method: "POST", body: { from_date: "2030-04-18", to_date: "2030-04-25", reason: "holiday" } });
+    assert.equal(withinLimit.status, 201, withinLimit.text);
+    assert.equal(withinLimit.json.warning, undefined, "8 nights is within the 14-night maximum");
+
+    const overLimit = await supC.fetch(`/api/residents/${overId}/absences`, { method: "POST", body: { from_date: "2030-04-18", to_date: "2030-05-02", reason: "holiday" } });
+    assert.equal(overLimit.status, 201, overLimit.text);
+    assert.match(overLimit.json.warning || "", /Longer than the 14 nights permitted for/);
+
+    const outsideStill = await supC.fetch(`/api/residents/${outsideId}/absences`, { method: "POST", body: { from_date: "2030-06-01", to_date: "2030-06-03", reason: "holiday" } });
+    assert.equal(outsideStill.status, 201, outsideStill.text);
+    assert.equal(outsideStill.json.warning, "Outside the permitted absence periods in Settings");
+
+    // Restore the site's holiday cap for the tests after this one.
+    const restored = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { holiday_max_days: 14 } });
+    assert.equal(restored.status, 200, restored.text);
+
+    const cleanup = await wkAdmin.fetch(`/api/settings/absence-windows/${withMax.json.id}`, { method: "DELETE" });
+    assert.equal(cleanup.status, 200, cleanup.text);
+  });
+
   console.log("\n== the weekly report flag on the staff record (migration 037) ==");
 
   await test("weekly_report defaults false, only an admin sets it, only a supervisor or admin may carry it, and demotion clears it", async () => {

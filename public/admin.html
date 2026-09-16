@@ -52,6 +52,7 @@
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .selfend { align-self: end; margin-top: 0; }
   .grid3 { display: grid; grid-template-columns: 1fr 2fr 80px; gap: 8px; }
+  .grid4 { display: grid; grid-template-columns: 1fr 2fr 80px 110px; gap: 8px; }
   /* Buildings tab */
   .bld { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
   .bldhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
@@ -96,6 +97,7 @@
   .archivedRooms summary { cursor: pointer; }
   .archivedRooms .pill .linkish { font-size: 11px; margin-left: 4px; }
   @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { .grid4 { grid-template-columns: 1fr; } }
   .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted); }
   .check input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
   .check b { color: var(--text); }
@@ -511,14 +513,15 @@
         <div class="mt8"><button class="btn ghost sm" type="button" id="stWeeklySend">Send last week's now</button>
           <p class="hint under">Emails last week's update to everyone ticked, so you can see what arrives. Asks first; a manual send is on the audit record.</p></div>
 
-        <h2 class="mt6">Permitted absence periods <button class="tip" type="button" data-tip="The dates IPAS notifies: Christmas, Ramadan, Easter, the summer school holiday. A holiday authorised outside these periods still goes through; the screen says so." aria-label="About permitted absence periods">?</button></h2>
+        <h2 class="mt6">Permitted absence periods <button class="tip" type="button" data-tip="The dates IPAS notifies: Christmas, Ramadan, Easter, the summer school holiday. A holiday authorised outside these periods still goes through; the screen says so. Each period can carry a maximum stay — the IPAS wording for Ramadan and Easter is no more than two weeks." aria-label="About permitted absence periods">?</button></h2>
         <div id="awList" class="list"></div>
-        <div class="grid3">
+        <div id="awForm" class="grid4">
           <input id="awName" class="field" type="text" maxlength="60" placeholder="Name, e.g. Summer 2026" aria-label="Period name">
           <input id="awFrom" class="field" type="date" aria-label="First day">
           <input id="awTo" class="field" type="date" aria-label="Last day">
+          <input id="awMax" class="field" type="number" min="1" max="365" placeholder="Max nights (optional)" aria-label="Maximum nights">
         </div>
-        <div class="actions"><button class="btn sm" type="button" id="awAdd">Add period</button></div>
+        <div class="actions"><button class="btn sm" type="button" id="awAdd">Add period</button><button class="btn ghost sm" type="button" id="awCancel" hidden>Cancel</button></div>
 
         <h2 class="mt6">Features for this site <button class="tip" type="button" data-tip="Each switch is off until you turn it on here, so a centre sees only what it uses. Turning one off hides the screens; nothing already recorded is deleted." aria-label="About feature switches">?</button></h2>
         <label class="check"><input id="stFeatBuildings" type="checkbox"> <span><b>Buildings and rooms.</b> A Buildings tab here, a Room on each resident's record, the room on every card.</span></label>
@@ -1996,25 +1999,52 @@ $("stWeeklySend").addEventListener("click", async () => {
     toast(`Delivered for ${out.from} to ${out.to} to ${out.sent} of ${out.recipients} recipient${out.recipients === 1 ? "" : "s"}`, "ok");
   }
 });
+let awRows = [];
+function awReset() {
+  delete $("awForm").dataset.editing;
+  $("awName").value = ""; $("awFrom").value = ""; $("awTo").value = ""; $("awMax").value = "";
+  $("awAdd").textContent = "Add period";
+  $("awCancel").hidden = true;
+}
 async function loadWindows() {
   const rows = await guarded(() => apiGet("/api/settings/absence-windows"), () => null);
   if (!rows) return;
+  awRows = rows;
   $("awList").innerHTML = rows.length ? rows.map((w) => `
-    <div class="report"><div><b>${esc(w.name)}</b><span class="hint">${esc(w.from_date)} to ${esc(w.to_date)}</span></div>
-      <button class="linkish" type="button" data-del-window="${w.id}" aria-label="Remove ${esc(w.name)}">remove</button></div>`).join("")
+    <div class="report"><div><b>${esc(w.name)}</b><span class="hint"> — ${esc(w.from_date)} to ${esc(w.to_date)}${w.max_nights ? ` — up to ${w.max_nights} night${w.max_nights === 1 ? "" : "s"}` : ""}</span></div>
+      <div class="row"><button class="linkish" type="button" data-edit-window="${w.id}" aria-label="Edit ${esc(w.name)}">edit</button>
+      <button class="linkish" type="button" data-del-window="${w.id}" aria-label="Remove ${esc(w.name)}">remove</button></div></div>`).join("")
     : '<p class="hint flush">No periods recorded. Holidays are never warned about until one is.</p>';
 }
 $("awAdd").addEventListener("click", async () => {
-  const body = { name: $("awName").value.trim(), from_date: $("awFrom").value, to_date: $("awTo").value };
-  const out = await guarded(() => apiPost("/api/settings/absence-windows", body), (err) => toast("Not added: " + err.message, "err"));
+  const editingId = $("awForm").dataset.editing;
+  const body = { name: $("awName").value.trim(), from_date: $("awFrom").value, to_date: $("awTo").value,
+                 max_nights: $("awMax").value === "" ? null : Number($("awMax").value) };
+  const out = editingId
+    ? await guarded(() => apiPatch(`/api/settings/absence-windows/${editingId}`, body), (err) => toast("Not saved: " + err.message, "err"))
+    : await guarded(() => apiPost("/api/settings/absence-windows", body), (err) => toast("Not added: " + err.message, "err"));
   if (!out) return;
-  $("awName").value = ""; $("awFrom").value = ""; $("awTo").value = "";
-  toast("Period added", "ok"); loadWindows();
+  awReset();
+  toast(editingId ? "Period saved" : "Period added", "ok");
+  loadWindows();
 });
+$("awCancel").addEventListener("click", awReset);
 $("awList").addEventListener("click", async (e) => {
+  const edit = e.target.closest("[data-edit-window]");
+  if (edit) {
+    const w = awRows.find((r) => String(r.id) === edit.dataset.editWindow);
+    if (!w) return;
+    $("awForm").dataset.editing = w.id;
+    $("awName").value = w.name; $("awFrom").value = w.from_date; $("awTo").value = w.to_date; $("awMax").value = w.max_nights ?? "";
+    $("awAdd").textContent = "Save changes";
+    $("awCancel").hidden = false;
+    $("awName").focus();
+    return;
+  }
   const btn = e.target.closest("[data-del-window]"); if (!btn) return;
   const out = await guarded(() => api(`/api/settings/absence-windows/${btn.dataset.delWindow}`, { method: "DELETE" }), (err) => toast("Not removed: " + err.message, "err"));
   if (!out) return;
+  if ($("awForm").dataset.editing === btn.dataset.delWindow) awReset();
   toast("Period removed", "ok"); loadWindows();
 });
 
