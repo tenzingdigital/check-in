@@ -692,7 +692,7 @@ CREATE FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_t
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
   select (p_from at time zone (select local_timezone from __TENANT__.app_settings where id))::date
-      <> (p_to   at time zone (select local_timezone from __TENANT__.app_settings where id))::date
+      <> ((p_to - interval '1 microsecond') at time zone (select local_timezone from __TENANT__.app_settings where id))::date
 $$;
 
 
@@ -3275,7 +3275,8 @@ CREATE VIEW __TENANT__.v_household_care AS
     ru.until,
     ru.overnight
    FROM (shape sh
-     LEFT JOIN running ru ON ((ru.household_id = sh.household_id)));
+     LEFT JOIN running ru ON ((ru.household_id = sh.household_id)))
+  WHERE __TENANT__.is_staff();
 
 
 --
@@ -5105,7 +5106,6 @@ GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO service_role;
 --
 
 REVOKE ALL ON FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone) TO service_role;
 
 
@@ -5955,8 +5955,8 @@ GRANT SELECT,INSERT,UPDATE ON TABLE __TENANT__.staff_roster TO authenticated;
 -- Name: TABLE supervision_arrangements; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.supervision_arrangements TO authenticated;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.supervision_arrangements TO service_role;
+GRANT SELECT ON TABLE __TENANT__.supervision_arrangements TO authenticated;
 
 
 --

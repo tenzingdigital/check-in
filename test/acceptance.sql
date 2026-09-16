@@ -37,7 +37,8 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('11111111-1111-1111-1111-111111111111', 'guard@hut.example',  '{"full_name":"Gina Guard","role":"guard"}'),
   ('22222222-2222-2222-2222-222222222222', 'super@hut.example',  '{"full_name":"Sam Supervisor","role":"supervisor"}'),
   ('33333333-3333-3333-3333-333333333333', 'admin@hut.example',  '{"full_name":"Ada Admin","role":"admin"}'),
-  ('44444444-4444-4444-4444-444444444444', 'nobody@hut.example', '{"full_name":"Suspended Sid"}');
+  ('44444444-4444-4444-4444-444444444444', 'nobody@hut.example', '{"full_name":"Suspended Sid"}'),
+  ('55555555-5555-5555-5555-555555555555', 'kiosk@hut.example',  '{"full_name":"Gate Kiosk","role":"kiosk"}');
 
 update public.profiles set active = false where id = '44444444-4444-4444-4444-444444444444';
 

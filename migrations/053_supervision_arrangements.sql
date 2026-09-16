@@ -34,7 +34,7 @@ alter table public.supervision_arrangements enable row level security;
 drop policy if exists supervision_read on public.supervision_arrangements;
 create policy supervision_read on public.supervision_arrangements for select using (public.is_staff());
 -- No insert/update/delete policies: writes go through the two functions.
-revoke all on public.supervision_arrangements from anon, public;
+revoke all on public.supervision_arrangements from anon, public, authenticated;
 grant select on public.supervision_arrangements to authenticated;
 
 drop trigger if exists supervision_audit on public.supervision_arrangements;
@@ -42,14 +42,16 @@ create trigger supervision_audit
   after insert or update or delete on public.supervision_arrangements
   for each row execute function public.audit_row();
 
--- Does [p_from, p_to) cross a local midnight? Compared on the site's clock.
+-- Does [p_from, p_to) cross a local midnight? Compared on the site's clock;
+-- p_to itself is exclusive, so an arrangement ending exactly at midnight
+-- (e.g. 20:00-00:00) is compared a microsecond before it, and does not count.
 create or replace function public.crosses_midnight(p_from timestamptz, p_to timestamptz)
 returns boolean language sql stable set search_path = public as $$
   select (p_from at time zone (select local_timezone from public.app_settings where id))::date
-      <> (p_to   at time zone (select local_timezone from public.app_settings where id))::date
+      <> ((p_to - interval '1 microsecond') at time zone (select local_timezone from public.app_settings where id))::date
 $$;
-revoke all on function public.crosses_midnight(timestamptz, timestamptz) from anon, public;
-grant execute on function public.crosses_midnight(timestamptz, timestamptz) to authenticated;
+-- Called only from inside record_supervision's SECURITY DEFINER body.
+revoke all on function public.crosses_midnight(timestamptz, timestamptz) from public, anon, authenticated;
 
 create or replace function public.record_supervision(
   p_household uuid, p_carer uuid, p_from timestamptz, p_to timestamptz, p_overnight boolean)
@@ -97,9 +99,9 @@ end $$;
 revoke all on function public.end_supervision(uuid) from public, anon;
 grant execute on function public.end_supervision(uuid) to authenticated;
 
--- One row per household with children: who is responsible, who is on site,
--- and the arrangement running right now, if any. The gate draws its care
--- lines from this; the 22:00 alert (piece B) reads it.
+-- One row per household with active members: who is responsible, who is on
+-- site, and the arrangement running right now, if any. The gate draws its
+-- care lines from this; the 22:00 alert (piece B) reads it.
 create or replace view public.v_household_care as
 with s as (select adult_age_years from public.app_settings where id),
 members as (
@@ -129,7 +131,8 @@ running as (
 )
 select sh.household_id, sh.guardians, sh.children, sh.guardians_on_site, sh.children_on_site,
        ru.arrangement_id, ru.carer_id, ru.carer_name, ru.carer_room_label, ru.until, ru.overnight
-  from shape sh left join running ru on ru.household_id = sh.household_id;
+  from shape sh left join running ru on ru.household_id = sh.household_id
+ where public.is_staff();
 revoke all on public.v_household_care from anon, public;
 grant select on public.v_household_care to authenticated;
 
@@ -145,19 +148,12 @@ begin
 end $$;
 revoke all on function public.purge_supervision_arrangements() from public, anon, authenticated;
 
--- database.js migrates public only (docs/KNOWN-ISSUES.md #4): a t_* tenant
--- schema gets tenant/template.sql once, at provisioning, and this file does
--- not revisit it. Unlike 052 (an existing per-tenant table whose stale
--- column list was already 500ing live routes), this is a brand-new table
--- that nothing yet calls per-tenant, so the same do-nothing-and-let
--- tenant_schema_gaps() surface it (048's documented policy) would have been
--- defensible. The table is created here anyway, per the plan; see the task
--- report for why the functions and view were deliberately left out of it.
-do $$
-declare s text;
-begin
-  for s in select nspname from pg_namespace where nspname like 't\_%' escape '\' loop
-    execute format('create table if not exists %I.supervision_arrangements (like public.supervision_arrangements including all)', s);
-    execute format('alter table %I.supervision_arrangements enable row level security', s);
-  end loop;
-end $$;
+-- No tenant backfill here, unlike 052: 052 added a column to a per-tenant
+-- table that every existing t_* schema already had, which the template
+-- cannot retroactively patch onto a schema already provisioned. This is a
+-- whole new table instead, which every schema provisioned from here on gets
+-- complete (table, policy, functions, view) straight from the regenerated
+-- template; an existing schema's gap is exactly what tenant_schema_gaps()
+-- (048) already surfaces, rather than a half-mirrored table this migration
+-- would otherwise leave with no policies, no grants and no functions to
+-- ever write to it.

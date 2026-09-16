@@ -1166,9 +1166,11 @@ select pg_temp.expect('053 view: carer named', :'view_carer_name'::text, 'Sup Ca
 \echo '--- refusals'
 set role authenticated;
 set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+-- A window past arr's end (+3h) so this fails on the household check alone,
+-- not also on the overlap check below.
 select pg_temp.expect('053 refuses a carer inside the household',
   pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'parent_id') ||
-    ', now(), now() + interval ''1 hour'', false)') like '%blocked%', true);
+    ', now() + interval ''6 hours'', now() + interval ''7 hours'', false)') like '%blocked%', true);
 select pg_temp.expect('053 refuses a child as carer',
   pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'otherkid_id') ||
     ', now() + interval ''4 hours'', now() + interval ''5 hours'', false)') like '%blocked%', true);
@@ -1205,6 +1207,13 @@ select pg_temp.expect('053 guard cannot record',
     ', now() + interval ''40 hours'', now() + interval ''41 hours'', false)') like '%blocked%', true);
 select count(*) as n from public.v_household_care where household_id = :'hh' \gset guard_
 select pg_temp.expect('053 guard can read the view', (:'guard_n')::integer >= 1, true);
+reset role;
+
+\echo '--- a kiosk session (migration 051: not staff) reads nothing from the view'
+set role authenticated;
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+select count(*) as n from public.v_household_care \gset kiosk_
+select pg_temp.expect('053 kiosk cannot read the view', (:'kiosk_n')::integer, 0);
 reset role;
 
 \echo '--- purge removes only rows older than the (temporarily lowered) retention'
