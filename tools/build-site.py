@@ -458,7 +458,7 @@ body = (
       <div><h3>House rules, counted not judged</h3><p>Consecutive nights and days absent in a window, each beside the figure in your settings. Breach notices issued are recorded so nobody sends two.</p></div>
       <div><h3>Rooms and contracted beds</h3><p>Buildings, floors and rooms, with physical beds and contracted beds held separately, plus the bed set-up and a vacancies report for what you can actually offer.</p></div>
       <div><h3>Permitted absence periods</h3><p>The dates IPAS notifies — Christmas, Ramadan, Easter, the summer holiday — are recorded once; a holiday authorised outside them still goes through, with a warning on the screen, never a refusal.</p></div>
-      <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app — no names, rooms or dates in the email. The full report, with names, is in the app and downloads as a spreadsheet.</p></div>
+      <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app — no names, rooms or dates in the email unless the centre chooses to attach the update as a Word document. The full report, with names, is in the app and downloads as a spreadsheet or a Word document.</p></div>
     </div>""") +
   sec("""    <h2>What an IPAS inspection asks for</h2>
     <p>Every register record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One printable document gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
@@ -612,7 +612,7 @@ body = (
     <div class="pairs">
       <div><h3>Families and rooms</h3><p>Households group parents and children, a room reads as a family, and children are on the daily register, marked not required rather than left off it.</p></div>
       <div><h3>Contracted beds and vacancies</h3><p>Physical beds and contracted beds held separately, room status open or under maintenance with a note, and a vacancies report for what the centre can actually offer.</p></div>
-      <div><h3>Weekly register update</h3><p>Every Sunday morning the staff you choose get an email with counts of absences, weekend updates, removals and room changes, and a link into the app — the names, rooms and dates stay in the app.</p></div>
+      <div><h3>Weekly register update</h3><p>Every Sunday morning the staff you choose get an email with counts of absences, weekend updates, removals and room changes, and a link into the app — the names, rooms and dates stay in the app unless you choose to attach the full update as a Word document.</p></div>
       <div><h3>Records for the Department</h3><p>Append-only check-ins, movements and drills, plus the register for any date and occupancy, export as spreadsheets — for the contracting Department, or for your own contract review.</p></div>
     </div>""") +
   sec("""    <h2>Moving on and moving in</h2>

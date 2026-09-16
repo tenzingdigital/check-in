@@ -228,7 +228,8 @@ async function notifyThresholds(schema, label) {
 // The Sunday Weekly Register Update (migration 035): on a Sunday, after
 // Saturday night's snapshot, the staff ticked to receive it (migration 037)
 // are emailed counts and a link, never a resident name (migration 038 — see
-// lib/weeklyReport.js compose()). The rows come from
+// lib/weeklyReport.js compose()) in the body; the Word attachment (052) is
+// the exception, where the centre has turned it on. The rows come from
 // weekly_register_rows_unchecked(), the owner's copy: the checked one asks
 // is_supervisor(), which a job is not.
 const weekly = require('./lib/weeklyReport');

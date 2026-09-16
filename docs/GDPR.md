@@ -280,16 +280,17 @@ The Sunday Weekly register update (migrations 035 and 037), where the
 centre has turned it on — or at any time an administrator sends it by hand
 from Settings, switch or no switch — goes to the centre's own staff ticked
 "Gets the Sunday report" on their record, offered only to supervisors and
-admins because only they may run the report it summarises. It carries no
-resident data at all: a count for resident absences, weekend updates,
+admins because only they may run the report it summarises. The email body
+carries no resident data: a count for resident absences, weekend updates,
 removals and room updates, and a link into the app. The names, rooms and
 dates behind those counts stay in the app, under Admin → Reports, where
 they can also be downloaded as a spreadsheet.
 
-**Where the centre turns on `weekly_report_attach_document` (migration 052),
-the same email carries the Weekly Register Update as a Word document: the
-five sections, one sentence per resident — name, building and room, the
-dates and nights, back-on date, approval — and the child marker the report
+**The Word attachment (migration 052).** Where the centre turns on
+`weekly_report_attach_document`, the same email carries the Weekly Register
+Update as a Word document: the five sections, one sentence per resident —
+name, building and room, the dates and nights, back-on date, approval —
+and the child marker the report
 already shows, with the not-approved rows highlighted and the instruction
 "please mark as unauthorised absence". Nothing the report does not show: no
 date of birth, identity number or evacuation need. It goes only to the
