@@ -602,18 +602,28 @@ function dayLabel(ymd) {
 function isoDate(d) { const p = (v) => String(v).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 
 // Quick ranges for a date pair: today, yesterday, this week (Monday to
-// today), this month. Returns [from, to] as YYYY-MM-DD in local time.
+// today), this month; and, for the registers that only exist once a night
+// has closed, the last 7 or 28 nights ending yesterday. Returns [from, to]
+// as YYYY-MM-DD in local time.
 function presetRange(name) {
   const t = new Date(); t.setHours(0, 0, 0, 0);
   const f = new Date(t);
   if (name === "yesterday") { f.setDate(f.getDate() - 1); return [isoDate(f), isoDate(f)]; }
+  if (name === "7nights" || name === "28nights") {
+    const y = new Date(t); y.setDate(y.getDate() - 1);
+    f.setDate(f.getDate() - (name === "7nights" ? 7 : 28));
+    return [isoDate(f), isoDate(y)];
+  }
   if (name === "week") { f.setDate(f.getDate() - ((f.getDay() + 6) % 7)); return [isoDate(f), isoDate(t)]; }
   if (name === "month") { f.setDate(1); return [isoDate(f), isoDate(t)]; }
   return [isoDate(t), isoDate(t)];
 }
-// Chips under a from/to pair. onPick runs after the inputs are set.
-function mountRangePresets(container, fromEl, toEl, onPick) {
-  container.innerHTML = [["today", "Today"], ["yesterday", "Yesterday"], ["week", "This week"], ["month", "This month"]]
+const DEFAULT_PRESETS = [["today", "Today"], ["yesterday", "Yesterday"], ["week", "This week"], ["month", "This month"]];
+// Chips under a from/to pair. onPick runs after the inputs are set. The
+// Log and History take the default four; a caller with a different set
+// (the Absences tab: nights that have closed) passes its own [key, label]s.
+function mountRangePresets(container, fromEl, toEl, onPick, presets = DEFAULT_PRESETS) {
+  container.innerHTML = presets
     .map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join("");
   container.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-preset]"); if (!b) return;

@@ -402,12 +402,28 @@
       <div id="residentList" class="list"></div>
     </section>
 
-    <!-- ---- absences (supervisors and admins): the list a manager reads
-         before writing a letter. Numbers the register already computes,
-         beside the figures in Settings. ---- -->
+    <!-- ---- absences (supervisors and admins): who missed the daily
+         register over a range — yesterday in one tap, a week by default —
+         one row per resident with the count and the dates, beside the
+         figures in Settings. The export goes through the reports route so
+         it asks for a reason and is on the record. ---- -->
     <section id="panelAbsences" role="tabpanel" aria-labelledby="tabAbsences" hidden>
+      <form class="row" id="absRange" autocomplete="off">
+        <input id="absFrom" class="field grow" type="date" aria-label="From">
+        <input id="absTo" class="field grow" type="date" aria-label="To">
+        <button class="btn ghost sm" type="submit">Show</button>
+      </form>
+      <div id="absPresets" class="chips" aria-label="Quick ranges"></div>
       <p class="hint flush" id="absIntro"></p>
-      <input id="absQ" class="field mt8" type="search" placeholder="Name or room…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Filter by name or room">
+      <p class="hint flush" id="absOpen" hidden>Last night's register is not closed yet — it closes at 01:30.</p>
+      <div class="row mt8">
+        <input id="absQ" class="field grow" type="search" placeholder="Name or room…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Filter by name or room">
+        <button type="button" class="btn sm" id="absExport" aria-expanded="false">Excel</button>
+      </div>
+      <form class="row mt8" id="absExportForm" hidden>
+        <input class="field grow" name="reason" type="text" maxlength="200" required placeholder="Reason for the export" aria-label="Reason for the export">
+        <button class="btn sm" type="submit">Download</button>
+      </form>
       <div class="tablewrap mt14"><table id="absTable"></table></div>
     </section>
 
@@ -784,56 +800,58 @@ async function loadResidents() {
    Absences (supervisors and admins)
    ====================================================================== */
 
-// Active residents with a run of missed nights or a missed day inside the
-// rolling window, worst first. Everything here is already on the list row
-// (v_resident_compliance via /api/residents?compliance=1); this tab only
-// puts the counts beside the figures in Settings. Residents whose only
-// misses are older than the window are not listed — their total is on the
-// register's detail sheet.
+// Who missed the daily register between the two dates: GET /api/absences,
+// one row per active resident with at least one miss, most missed first.
+// The range is the filter; the search box narrows the loaded rows without
+// asking the server again. Today is never in the range by default — the
+// row is open until the 00:30 job closes it — and when a chosen range does
+// reach into an unclosed night the server's closed_through lets us say so.
 async function loadAbsences() {
+  const from = $("absFrom").value, to = $("absTo").value;
+  if (!from || !to) { $("absIntro").textContent = "Pick two dates."; $("absTable").innerHTML = ""; return; }
   $("absIntro").textContent = "Loading…";
-  const rows = await guarded(
-    () => apiGet("/api/residents?q=&limit=1000&compliance=1"),
+  const out = await guarded(
+    () => apiGet(`/api/absences?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
     (err) => { Offline.noteFailure(err); showError("Could not load absences: " + err.message); },
   );
-  if (!rows) return;
+  if (!out) return;
   showError("");
-  renderAbsences(rows);
+  state.absRows = out;
+  renderAbsences();
 }
 
-function renderAbsences(rows) {
-  if (!rows.length) {
-    $("absIntro").textContent = "No residents on the register yet.";
-    $("absTable").innerHTML = "";
-    return;
-  }
+function renderAbsences() {
+  const out = state.absRows;
+  if (!out) return;
   const s = state.settings || {};
-  const src = rows[0] || {};
-  const nightLimit = src.warn_after_consecutive_nights ?? s.warn_after_consecutive_nights ?? 3;
-  const winLimit = src.absence_window_limit ?? s.absence_window_limit ?? 10;
-  const winDays = src.absence_window_days ?? s.absence_window_days ?? 28;
+  const nightLimit = s.warn_after_consecutive_nights ?? 3;
+  const winLimit = s.absence_window_limit ?? 10;
+  const winDays = s.absence_window_days ?? 28;
   const withRooms = !!s.feature_buildings;
+  const range = out.from === out.to ? `on ${dayLabel(out.from)}` : `between ${dayLabel(out.from)} and ${dayLabel(out.to)}`;
 
-  const q = ($("absQ").value || "").trim().toLowerCase();
-  const listed = rows
-    .filter((r) => r.status === "active" && ((r.consecutive_missed || 0) > 0 || (r.absent_in_window || 0) > 0))
-    .filter((r) => !q || String(r.full_name).toLowerCase().includes(q) || String(r.room_label || "").toLowerCase().includes(q) || String(r.room || "").toLowerCase() === q)
-    .sort((a, b) =>
-      (b.consecutive_missed || 0) - (a.consecutive_missed || 0) ||
-      (b.absent_in_window || 0) - (a.absent_in_window || 0) ||
-      String(a.full_name).localeCompare(String(b.full_name)));
-
+  $("absOpen").hidden = !(out.closed_through && out.to > out.closed_through);
   $("absIntro").textContent =
+    `Missed the register ${range}. ` +
     `Facts against the figures in Settings: ${nightLimit} consecutive nights, ${winLimit} days in ${winDays}. ` +
     `The app never decides that a threshold was met; the decision, and the letter, are the manager's.`;
 
+  const q = ($("absQ").value || "").trim().toLowerCase();
+  const listed = out.rows.filter((r) => !q ||
+    String(r.full_name).toLowerCase().includes(q) ||
+    String(r.building || "").toLowerCase().includes(q) ||
+    String(r.room || "").toLowerCase() === q);
+
   if (!listed.length) {
-    $("absTable").innerHTML = `<tbody><tr><td class="hint">Nobody has a run of missed nights or a missed day in the last ${winDays} days.</td></tr></tbody>`;
+    $("absTable").innerHTML = `<tbody><tr><td class="hint">${out.rows.length
+      ? "Nobody matching that name or room."
+      : `Nobody missed the register ${esc(range)}.`}</td></tr></tbody>`;
     return;
   }
 
-  const lastSeen = (r) => r.seen_today ? "Today" : (r.last_seen_on || "Never");
-  const head = ["Name", ...(withRooms ? ["Room"] : []), "Consecutive nights", `Absent in ${winDays} days`, "Last seen", "Today", "Breach report"];
+  const roomOf = (r) => [r.building, r.room].filter(Boolean).join(" · ");
+  const lastSeen = (r) => r.seen_today ? "Today" : (r.last_seen_on ? dayLabel(r.last_seen_on) : "Never");
+  const head = ["Name", ...(withRooms ? ["Room"] : []), "Missed", "Consecutive nights", `Absent in ${winDays} days`, "Last seen", "Today", "Breach report"];
   const KIND_SHORT = { house_rules: "house rules", misuse: "misuse" };
   $("absTable").innerHTML =
     `<thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>` +
@@ -841,11 +859,12 @@ function renderAbsences(rows) {
       const n = r.consecutive_missed || 0, w = r.absent_in_window || 0;
       return `<tr>` +
         `<td>${esc(r.full_name)}</td>` +
-        (withRooms ? `<td>${esc(r.room_label || "")}</td>` : "") +
+        (withRooms ? `<td>${esc(roomOf(r))}</td>` : "") +
+        `<td class="num"><b>${r.nights_missed} of ${r.nights_required}</b><br><small class="hint">${esc(r.missed_dates.map(dayLabel).join(", "))}</small></td>` +
         `<td class="num${n >= nightLimit ? " at" : ""}">${n} of ${nightLimit}</td>` +
         `<td class="num${w >= winLimit ? " at" : ""}">${w} of ${winLimit}</td>` +
         `<td>${esc(lastSeen(r))}</td>` +
-        `<td>${r.away ? `Away until ${esc(dayLabel(r.away.until))}` : r.seen_today ? "Checked in" : "Not yet checked in"}</td>` +
+        `<td>${r.seen_today ? "Checked in" : "Not yet checked in"}</td>` +
         `<td>${r.last_breach ? `${esc(KIND_SHORT[r.last_breach.kind] || r.last_breach.kind)} · ${esc(dayLabel(r.last_breach.issued_on))}` : "—"}</td>` +
       `</tr>`;
     }).join("")}</tbody>`;
@@ -2251,7 +2270,14 @@ document.addEventListener("click", (e) => {
 $("tabResidents").addEventListener("click", () => selectTab("residents"));
 $("tabAbsences").addEventListener("click", () => selectTab("absences"));
 let absQTimer = null;
-$("absQ").addEventListener("input", () => { clearTimeout(absQTimer); absQTimer = setTimeout(loadAbsences, 200); });
+$("absQ").addEventListener("input", () => { clearTimeout(absQTimer); absQTimer = setTimeout(renderAbsences, 120); });
+$("absRange").addEventListener("submit", (e) => { e.preventDefault(); loadAbsences(); });
+mountRangePresets($("absPresets"), $("absFrom"), $("absTo"), loadAbsences,
+  [["yesterday", "Yesterday"], ["7nights", "7 nights"], ["28nights", "28 nights"]]);
+// 7 nights, pressed, before the tab is first opened: selectTab() calls
+// loadAbsences(), which needs the two dates filled in.
+{ const [f, t] = presetRange("7nights"); $("absFrom").value = f; $("absTo").value = t; }
+$("absPresets").querySelector('[data-preset="7nights"]').setAttribute("aria-pressed", "true");
 $("tabBuildings").addEventListener("click", () => selectTab("buildings"));
 $("tabReports").addEventListener("click", () => selectTab("reports"));
 $("tabStaff").addEventListener("click", () => selectTab("staff"));
