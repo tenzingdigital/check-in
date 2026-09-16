@@ -828,10 +828,6 @@ async function enterApp() {
   try {
     session = await apiGet("/api/session");
     Offline.rememberSession(session);
-    // A kiosk login has exactly one page — it belongs on the tablet's search
-    // screen, not the register, whichever way it got here (a direct visit, or
-    // a stale tab left open from before the account was re-roled).
-    if (session?.profile?.role === "kiosk") { location.replace("/kiosk.html"); return; }
   } catch (err) {
     if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
     // The server is unreachable. A tab that was already signed in carries on
@@ -844,6 +840,14 @@ async function enterApp() {
       return showLogin("Cannot reach the server, and this tab was not signed in before the connection dropped. Try again when it returns.");
     }
   }
+
+  // A kiosk login has exactly one page — it belongs on the tablet's search
+  // screen, not the register, whichever way it got here (a direct visit, a
+  // stale tab left open from before the account was re-roled, or — the
+  // reason this check runs on whichever session is in hand rather than only
+  // the live one above — an offline reload that fell back to the remembered
+  // session because the network is down).
+  if (session?.profile?.role === "kiosk") { location.replace("/kiosk.html"); return; }
 
   const { profile, settings } = session;
   state.profile = profile;

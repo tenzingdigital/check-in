@@ -2121,15 +2121,20 @@ async function enterApp() {
   try {
     session = await apiGet("/api/session");
     Offline.rememberSession(session);
-    // A kiosk login has exactly one page — it belongs on the tablet's search
-    // screen, not admin, whichever way it got here (a direct visit, or a
-    // stale tab left open from before the account was re-roled).
-    if (session?.profile?.role === "kiosk") { location.replace("/kiosk.html"); return; }
   } catch (err) {
     if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
     Offline.noteFailure(err);
     return showLogin("The admin page needs a connection. Try again when it returns.");
   }
+
+  // A kiosk login has exactly one page — it belongs on the tablet's search
+  // screen, not admin, whichever way it got here (a direct visit, or a stale
+  // tab left open from before the account was re-roled). Checked after the
+  // try/catch, on whichever session is in hand, for the same reason
+  // index.html and checkin.html do — those two can carry on from a
+  // remembered session during an outage; admin.html cannot, but the check
+  // stays here so the three pages read the same way.
+  if (session?.profile?.role === "kiosk") { location.replace("/kiosk.html"); return; }
 
   const { profile, settings } = session;
   state.profile = profile;

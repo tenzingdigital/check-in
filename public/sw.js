@@ -19,12 +19,13 @@
    'self', so nothing about lib/security.js changes.
    ========================================================================= */
 
-const VERSION = "hut-shell-v2";
+const VERSION = "hut-shell-v3";
 const SHELL = [
   "/",
   "/index.html",
   "/checkin.html",
   "/admin.html",
+  "/kiosk.html",
   "/org.html",
   "/help.html",
   "/app-common.css",

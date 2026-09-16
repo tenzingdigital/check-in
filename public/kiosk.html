@@ -97,6 +97,14 @@
 </head>
 <body class="app-kiosk">
 
+<!-- Shown instead of #app while the server cannot be reached at all (a real
+     network/deploy outage, ApiError status 0) — never a reason to leave this
+     page: an offline reload must strand the tablet here, not on the staff
+     In & out app (see boot()'s retry loop below and sw.js's cached shell). -->
+<div id="reconnect" class="confirmPanel" hidden>
+  <p class="confirmSub">Cannot reach the server — trying again&hellip;</p>
+</div>
+
 <div id="app" hidden>
   <header class="kioskHead">
     <p class="brand">CheckSteady</p>
@@ -104,8 +112,6 @@
   </header>
 
   <main class="kiosk">
-    <div id="kioskError" class="alert" hidden></div>
-
     <section id="searchView">
       <input id="q" class="field kioskInput" type="search"
              placeholder="Your name, room or ID number"
@@ -163,6 +169,12 @@ function showView(name) {
 }
 
 function resetSearch() {
+  // Cancels whatever search is in flight or waiting on the debounce, so its
+  // answer can never land under the cleared input and show one resident's
+  // matches to the next one in the queue.
+  clearTimeout(searchTimer);
+  if (searchAbort) { searchAbort.abort(); searchAbort = null; }
+  searchToken += 1;
   $("q").value = "";
   $("results").innerHTML = "";
 }
@@ -218,9 +230,16 @@ async function runSearch(q) {
   } catch (err) {
     if (err.name === "AbortError") return;          // superseded by a newer search
     if (token !== searchToken) return;
-    if (err.status === 401) return handleUnauthenticated();
+    // 401: the session ended. 403: kiosk_search()'s own refusal — an account
+    // re-roled away from kiosk mid-shift without a fresh login — which would
+    // otherwise toast the same refusal on every keystroke. Both belong on
+    // the login screen, not this page.
+    if (err.status === 401 || err.status === 403) return handleUnauthenticated();
     toast(err.message, "err");
-    renderResults([]);
+    // Not "No match…" — that phrase is for a real empty result, and showing
+    // it alongside the toast would read as two contradictory messages about
+    // one search.
+    $("results").innerHTML = "";
     return;
   }
   if (token !== searchToken) return;                 // a newer query already won
@@ -258,7 +277,7 @@ async function doCheckin(resident) {
   try {
     await apiPost("/api/kiosk/checkin", { id: resident.id });
   } catch (err) {
-    if (err.status === 401) return handleUnauthenticated();
+    if (err.status === 401 || err.status === 403) return handleUnauthenticated();
     toast(err.message, "err");
     backToSearch();
     return;
@@ -294,13 +313,41 @@ function handleUnauthenticated() {
 }
 setUnauthenticatedHandler(handleUnauthenticated);
 
+// index.html and checkin.html register the shared service worker (sw.js)
+// unconditionally on load, before either page knows whether the session
+// is even a kiosk one — so in the normal flow (log in once on index.html,
+// which redirects here) it is already active well before this page is ever
+// reached. Registered here too, rather than relying on that, so a tablet
+// whose browser goes straight to /kiosk.html on every launch (bookmarked,
+// or Guided Access set to this URL directly) still gets the cached shell
+// that makes the reconnect loop below possible after a service restart —
+// see sw.js's SHELL list, which now includes this page.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => { /* http://localhost without the flag, or an old browser */ });
+}
+
+let bootRetryTimer = null;
+
+// A network/deploy outage (ApiError status 0 — see app-common.js's api())
+// is never a reason to leave this page: the tablet sits by a door with no
+// staff member watching it, and an offline reload used to fall through
+// sw.js's cached shell to the staff In & out app (fixed there too — see
+// sw.js's SHELL list). Show the reconnect message in its place and try
+// again every 10s until a real answer — a session or a 401 — comes back.
 async function boot() {
+  clearTimeout(bootRetryTimer);
   let session;
   try {
     session = await apiGet("/api/session");
-  } catch (_err) {
-    // No session, or the server could not be reached — either way this
-    // tablet has nothing to show; the login lives on index.html.
+  } catch (err) {
+    if (err.status === 0) {
+      $("app").hidden = true;
+      $("reconnect").hidden = false;
+      bootRetryTimer = setTimeout(boot, 10000);
+      return;
+    }
+    // A real refusal (401, or anything else the server actually answered
+    // with) — the login lives on index.html.
     return handleUnauthenticated();
   }
   const profile = session && session.profile;
@@ -316,6 +363,7 @@ async function boot() {
   // whatever the admin named this tablet's account, e.g. "Slaney gate tablet".
   $("kioskWho").textContent = profile.full_name || "";
 
+  $("reconnect").hidden = true;
   $("app").hidden = false;
   showView("search");
   noteActivity();
@@ -332,11 +380,15 @@ $("q").addEventListener("input", (e) => {
   searchTimer = setTimeout(() => runSearch(v), 250);
 });
 
+// Only when the search has narrowed to exactly one enabled result — a
+// resident tapping the keyboard's Search key (enterkeyhint="search") with
+// several people still on screen must never land on a stranger's confirm
+// screen because their name happened to sort first.
 $("q").addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   e.preventDefault();
-  const first = $("results").querySelector("button.kioskHit:not(:disabled)");
-  if (first) first.click();
+  const enabled = $("results").querySelectorAll("button.kioskHit:not(:disabled)");
+  if (enabled.length === 1) enabled[0].click();
 });
 
 $("results").addEventListener("click", (e) => {
