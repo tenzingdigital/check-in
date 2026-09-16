@@ -684,6 +684,20 @@ $$;
 
 --
 
+-- Name: crosses_midnight(timestamp with time zone, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+  select (p_from at time zone (select local_timezone from __TENANT__.app_settings where id))::date
+      <> (p_to   at time zone (select local_timezone from __TENANT__.app_settings where id))::date
+$$;
+
+
+--
+
 -- Name: email_link_key(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -800,6 +814,25 @@ begin
   return new;
 end;
 $$;
+
+
+--
+
+-- Name: end_supervision(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.end_supervision(p_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin can end a supervision arrangement' using errcode = '42501';
+  end if;
+  update __TENANT__.supervision_arrangements set ended_at = greatest(now(), from_at)
+   where id = p_id and ended_at is null;
+  if not found then raise exception 'No running arrangement with that id' using errcode = 'P0002'; end if;
+end $$;
 
 
 --
@@ -1763,6 +1796,24 @@ $$;
 
 --
 
+-- Name: purge_supervision_arrangements(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.purge_supervision_arrangements() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare n integer;
+begin
+  delete from __TENANT__.supervision_arrangements
+   where to_at < now() - make_interval(days => (select compliance_retention_days from __TENANT__.app_settings where id));
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+
+--
+
 -- Name: gate_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2136,6 +2187,44 @@ begin
   return v;
 end;
 $$;
+
+
+--
+
+-- Name: record_supervision(uuid, uuid, timestamp with time zone, timestamp with time zone, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.record_supervision(p_household uuid, p_carer uuid, p_from timestamp with time zone, p_to timestamp with time zone, p_overnight boolean) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_id uuid; v_adult_age int;
+begin
+  if not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin can record a supervision arrangement' using errcode = '42501';
+  end if;
+  if p_to <= p_from then raise exception 'The arrangement must end after it starts' using errcode = '22023'; end if;
+  select adult_age_years into v_adult_age from __TENANT__.app_settings where id;
+  if not exists (select 1 from __TENANT__.residents r where r.id = p_carer and r.status = 'active'
+                   and r.date_of_birth <= current_date - make_interval(years => v_adult_age)) then
+    raise exception 'The carer must be an active adult resident' using errcode = '22023';
+  end if;
+  if exists (select 1 from __TENANT__.residents r where r.id = p_carer and r.household_id = p_household) then
+    raise exception 'The carer must be outside the household' using errcode = '22023';
+  end if;
+  if exists (select 1 from __TENANT__.supervision_arrangements a
+              where a.household_id = p_household and a.ended_at is null
+                and tstzrange(a.from_at, a.to_at) && tstzrange(p_from, p_to)) then
+    raise exception 'This household already has an arrangement for part of that time' using errcode = '22023';
+  end if;
+  if __TENANT__.crosses_midnight(p_from, p_to) and not p_overnight then
+    raise exception 'An arrangement that runs past midnight needs the overnight approval ticked (House Rules 3.5.4)' using errcode = '22023';
+  end if;
+  insert into __TENANT__.supervision_arrangements (household_id, carer_id, from_at, to_at, overnight, recorded_by)
+  values (p_household, p_carer, p_from, p_to, p_overnight, auth.uid())
+  returning id into v_id;
+  return v_id;
+end $$;
 
 
 --
@@ -3031,6 +3120,26 @@ CREATE TABLE __TENANT__.staff_roster (
 
 --
 
+-- Name: supervision_arrangements; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.supervision_arrangements (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    household_id uuid NOT NULL,
+    carer_id uuid NOT NULL,
+    from_at timestamp with time zone NOT NULL,
+    to_at timestamp with time zone NOT NULL,
+    overnight boolean DEFAULT false NOT NULL,
+    recorded_by uuid NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    ended_at timestamp with time zone,
+    CONSTRAINT supervision_ended_inside CHECK (((ended_at IS NULL) OR (ended_at >= from_at))),
+    CONSTRAINT supervision_period CHECK ((to_at > from_at))
+);
+
+
+--
+
 -- Name: v_check_log; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -3111,6 +3220,62 @@ CREATE VIEW __TENANT__.v_evacuation_list AS
      LEFT JOIN __TENANT__.buildings b ON ((b.id = x.building_id)))
   WHERE ((r.status = 'active'::text) AND __TENANT__.is_staff())
   ORDER BY b.sort, x.building, (r.evac_need <> 'none'::text) DESC, v.last_name, v.first_name;
+
+
+--
+
+-- Name: v_household_care; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW __TENANT__.v_household_care AS
+ WITH s AS (
+         SELECT app_settings.adult_age_years
+           FROM __TENANT__.app_settings
+          WHERE app_settings.id
+        ), members AS (
+         SELECT r.household_id,
+            r.id,
+            v.presence,
+            (r.date_of_birth <= (CURRENT_DATE - make_interval(years => s.adult_age_years))) AS is_adult
+           FROM ((__TENANT__.residents r
+             CROSS JOIN s)
+             LEFT JOIN __TENANT__.v_resident_status v ON ((v.id = r.id)))
+          WHERE ((r.status = 'active'::text) AND (r.household_id IS NOT NULL))
+        ), shape AS (
+         SELECT members.household_id,
+            (count(*) FILTER (WHERE members.is_adult))::integer AS guardians,
+            (count(*) FILTER (WHERE (NOT members.is_adult)))::integer AS children,
+            (count(*) FILTER (WHERE (members.is_adult AND (members.presence = 'in'::text))))::integer AS guardians_on_site,
+            (count(*) FILTER (WHERE ((NOT members.is_adult) AND (members.presence = 'in'::text))))::integer AS children_on_site
+           FROM members
+          GROUP BY members.household_id
+        ), running AS (
+         SELECT DISTINCT ON (a.household_id) a.household_id,
+            a.id AS arrangement_id,
+            a.carer_id,
+            ((btrim(c.first_name) || ' '::text) || btrim(c.last_name)) AS carer_name,
+            rm.room_label AS carer_room_label,
+            a.to_at AS until,
+            a.overnight
+           FROM ((__TENANT__.supervision_arrangements a
+             JOIN __TENANT__.residents c ON ((c.id = a.carer_id)))
+             LEFT JOIN __TENANT__.v_resident_room rm ON ((rm.id = c.id)))
+          WHERE ((a.ended_at IS NULL) AND (now() >= a.from_at) AND (now() < a.to_at))
+          ORDER BY a.household_id, a.from_at DESC
+        )
+ SELECT sh.household_id,
+    sh.guardians,
+    sh.children,
+    sh.guardians_on_site,
+    sh.children_on_site,
+    ru.arrangement_id,
+    ru.carer_id,
+    ru.carer_name,
+    ru.carer_room_label,
+    ru.until,
+    ru.overnight
+   FROM (shape sh
+     LEFT JOIN running ru ON ((ru.household_id = sh.household_id)));
 
 
 --
@@ -3487,6 +3652,15 @@ ALTER TABLE ONLY __TENANT__.staff_roster
 
 --
 
+-- Name: supervision_arrangements supervision_arrangements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.supervision_arrangements
+    ADD CONSTRAINT supervision_arrangements_pkey PRIMARY KEY (id);
+
+
+--
+
 -- Name: visits visits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3720,6 +3894,22 @@ CREATE UNIQUE INDEX staff_roster_name_idx ON __TENANT__.staff_roster USING btree
 
 --
 
+-- Name: supervision_carer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX supervision_carer_idx ON __TENANT__.supervision_arrangements USING btree (carer_id, from_at DESC);
+
+
+--
+
+-- Name: supervision_household_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX supervision_household_idx ON __TENANT__.supervision_arrangements USING btree (household_id, from_at DESC);
+
+
+--
+
 -- Name: visits_arrived_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3876,6 +4066,14 @@ CREATE TRIGGER rooms_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.rooms 
 --
 
 CREATE TRIGGER staff_roster_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.staff_roster FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
+
+
+--
+
+-- Name: supervision_arrangements supervision_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER supervision_audit AFTER INSERT OR DELETE OR UPDATE ON __TENANT__.supervision_arrangements FOR EACH ROW EXECUTE FUNCTION __TENANT__.audit_row();
 
 
 --
@@ -4182,6 +4380,33 @@ ALTER TABLE ONLY __TENANT__.rooms
 
 ALTER TABLE ONLY __TENANT__.staff_roster
     ADD CONSTRAINT staff_roster_created_by_fkey FOREIGN KEY (created_by) REFERENCES __TENANT__.profiles(id) ON DELETE SET NULL;
+
+
+--
+
+-- Name: supervision_arrangements supervision_arrangements_carer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.supervision_arrangements
+    ADD CONSTRAINT supervision_arrangements_carer_id_fkey FOREIGN KEY (carer_id) REFERENCES __TENANT__.residents(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: supervision_arrangements supervision_arrangements_household_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.supervision_arrangements
+    ADD CONSTRAINT supervision_arrangements_household_id_fkey FOREIGN KEY (household_id) REFERENCES __TENANT__.households(id) ON DELETE CASCADE;
+
+
+--
+
+-- Name: supervision_arrangements supervision_arrangements_recorded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.supervision_arrangements
+    ADD CONSTRAINT supervision_arrangements_recorded_by_fkey FOREIGN KEY (recorded_by) REFERENCES __TENANT__.profiles(id);
 
 
 --
@@ -4662,6 +4887,21 @@ CREATE POLICY staff_roster_supervisor_update ON __TENANT__.staff_roster FOR UPDA
 
 --
 
+-- Name: supervision_arrangements; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.supervision_arrangements ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- Name: supervision_arrangements supervision_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY supervision_read ON __TENANT__.supervision_arrangements FOR SELECT USING (__TENANT__.is_staff());
+
+
+--
+
 -- Name: visits; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -4861,6 +5101,16 @@ GRANT ALL ON FUNCTION __TENANT__.close_out_due_through() TO service_role;
 
 --
 
+-- Name: FUNCTION crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.crosses_midnight(p_from timestamp with time zone, p_to timestamp with time zone) TO service_role;
+
+
+--
+
 -- Name: FUNCTION email_link_key(p_profile uuid); Type: ACL; Schema: public; Owner: -
 --
 
@@ -4904,6 +5154,16 @@ GRANT ALL ON FUNCTION __TENANT__.end_roll_call(p_id uuid, p_at timestamp with ti
 --
 
 REVOKE ALL ON FUNCTION __TENANT__.end_sessions_on_deactivate() FROM PUBLIC;
+
+
+--
+
+-- Name: FUNCTION end_supervision(p_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.end_supervision(p_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.end_supervision(p_id uuid) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.end_supervision(p_id uuid) TO service_role;
 
 
 --
@@ -5237,6 +5497,15 @@ GRANT ALL ON FUNCTION __TENANT__.purge_resident_views() TO service_role;
 
 --
 
+-- Name: FUNCTION purge_supervision_arrangements(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.purge_supervision_arrangements() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.purge_supervision_arrangements() TO service_role;
+
+
+--
+
 -- Name: TABLE gate_events; Type: ACL; Schema: public; Owner: -
 --
 
@@ -5319,6 +5588,16 @@ GRANT SELECT ON TABLE __TENANT__.visits TO authenticated;
 REVOKE ALL ON FUNCTION __TENANT__.record_staff_arrival(p_roster_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.record_staff_arrival(p_roster_id uuid) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.record_staff_arrival(p_roster_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION record_supervision(p_household uuid, p_carer uuid, p_from timestamp with time zone, p_to timestamp with time zone, p_overnight boolean); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.record_supervision(p_household uuid, p_carer uuid, p_from timestamp with time zone, p_to timestamp with time zone, p_overnight boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.record_supervision(p_household uuid, p_carer uuid, p_from timestamp with time zone, p_to timestamp with time zone, p_overnight boolean) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.record_supervision(p_household uuid, p_carer uuid, p_from timestamp with time zone, p_to timestamp with time zone, p_overnight boolean) TO service_role;
 
 
 --
@@ -5673,6 +5952,15 @@ GRANT SELECT,INSERT,UPDATE ON TABLE __TENANT__.staff_roster TO authenticated;
 
 --
 
+-- Name: TABLE supervision_arrangements; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.supervision_arrangements TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.supervision_arrangements TO service_role;
+
+
+--
+
 -- Name: TABLE v_check_log; Type: ACL; Schema: public; Owner: -
 --
 
@@ -5696,6 +5984,15 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_resident_room TO service
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_evacuation_list TO authenticated;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_evacuation_list TO service_role;
+
+
+--
+
+-- Name: TABLE v_household_care; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_household_care TO authenticated;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.v_household_care TO service_role;
 
 
 --

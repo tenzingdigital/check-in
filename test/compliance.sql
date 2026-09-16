@@ -1129,3 +1129,90 @@ select count(*)::integer as late_events,
  where resident_id = '77777777-7777-7777-7777-777777777777' and source = 'door' and late_entry \gset
 select pg_temp.expect('a late sign-in adds a late door check-in', (:'late_events')::integer, 1);
 update public.app_settings set feature_door_checkin = false;
+
+\echo ''
+\echo '=========== 053: CHILD-SUPERVISION ARRANGEMENTS (Appendix 5) ==========='
+-- Fixtures: a household of one adult and one child; a second adult outside
+-- it; a child outside it. Created as the owner; exercised as a supervisor
+-- and a guard.
+reset role;
+insert into public.households default values returning id as hh \gset
+insert into public.residents (first_name, last_name, date_of_birth, status, household_id)
+  values ('Sup', 'Parent', '1990-01-01', 'active', :'hh') returning id as parent_id \gset
+insert into public.residents (first_name, last_name, date_of_birth, status, household_id)
+  values ('Sup', 'Child', (current_date - interval '9 years')::date, 'active', :'hh') returning id as kid_id \gset
+insert into public.residents (first_name, last_name, date_of_birth, status)
+  values ('Sup', 'Carer', '1988-05-05', 'active') returning id as carer_id \gset
+insert into public.residents (first_name, last_name, date_of_birth, status)
+  values ('Sup', 'Otherkid', (current_date - interval '10 years')::date, 'active') returning id as otherkid_id \gset
+
+\echo '--- the view knows the household shape before any arrangement exists'
+select guardians, children, (arrangement_id is null) as no_arr
+  from public.v_household_care where household_id = :'hh' \gset shape_
+select pg_temp.expect('053 view: one guardian', (:'shape_guardians')::integer, 1);
+select pg_temp.expect('053 view: one child', (:'shape_children')::integer, 1);
+select pg_temp.expect('053 view: no arrangement yet', (:'shape_no_arr')::boolean, true);
+
+\echo '--- a supervisor records a daytime arrangement'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.record_supervision(:'hh', :'carer_id', now() - interval '1 hour', now() + interval '3 hours', false) as arr \gset
+reset role;
+select pg_temp.expect('053 record: returns an id', (:'arr')::uuid is not null, true);
+select arrangement_id, carer_name from public.v_household_care where household_id = :'hh' \gset view_
+select pg_temp.expect('053 view: running arrangement surfaces', :'view_arrangement_id'::uuid, (:'arr')::uuid);
+select pg_temp.expect('053 view: carer named', :'view_carer_name'::text, 'Sup Carer'::text);
+
+\echo '--- refusals'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.expect('053 refuses a carer inside the household',
+  pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'parent_id') ||
+    ', now(), now() + interval ''1 hour'', false)') like '%blocked%', true);
+select pg_temp.expect('053 refuses a child as carer',
+  pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'otherkid_id') ||
+    ', now() + interval ''4 hours'', now() + interval ''5 hours'', false)') like '%blocked%', true);
+select pg_temp.expect('053 refuses an overlap',
+  pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'carer_id') ||
+    ', now(), now() + interval ''1 hour'', false)') like '%blocked%', true);
+select pg_temp.expect('053 refuses crossing midnight without the overnight tick',
+  pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'carer_id') ||
+    ', now() + interval ''4 hours'', now() + interval ''30 hours'', false)') like '%blocked%', true);
+reset role;
+
+\echo '--- an overnight arrangement, ticked, is never refused for crossing midnight'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.record_supervision(:'hh', :'carer_id', now() + interval '4 hours', now() + interval '30 hours', true) as arr2 \gset
+reset role;
+select pg_temp.expect('053 accepts overnight when ticked', (:'arr2')::uuid is not null, true);
+
+\echo '--- ending early: the running one vanishes from the view'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.end_supervision(:'arr');
+reset role;
+select (arrangement_id is null) as no_arr from public.v_household_care where household_id = :'hh' \gset ended_
+select pg_temp.expect('053 ended arrangement leaves the view', (:'ended_no_arr')::boolean, true);
+select (ended_at is not null) as has_ended from public.supervision_arrangements where id = :'arr' \gset e_
+select pg_temp.expect('053 ended_at is set', (:'e_has_ended')::boolean, true);
+
+\echo '--- a guard may read but not record or end'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('053 guard cannot record',
+  pg_temp.try('x', 'select public.record_supervision(' || quote_literal(:'hh') || ', ' || quote_literal(:'carer_id') ||
+    ', now() + interval ''40 hours'', now() + interval ''41 hours'', false)') like '%blocked%', true);
+select count(*) as n from public.v_household_care where household_id = :'hh' \gset guard_
+select pg_temp.expect('053 guard can read the view', (:'guard_n')::integer >= 1, true);
+reset role;
+
+\echo '--- purge removes only rows older than the (temporarily lowered) retention'
+update public.app_settings set compliance_retention_days = 30;
+update public.supervision_arrangements set from_at = now() - interval '40 days', to_at = now() - interval '39 days'
+ where id = :'arr';
+select public.purge_supervision_arrangements() as n \gset purge_
+update public.app_settings set compliance_retention_days = 2555;
+select pg_temp.expect('053 purge removes the old row', (:'purge_n')::integer >= 1, true);
+select count(*) as n from public.supervision_arrangements where household_id = :'hh' \gset remaining_
+select pg_temp.expect('053 purge keeps the current one', (:'remaining_n')::integer, 1);
