@@ -3207,6 +3207,15 @@ async function main() {
       const cl = client(base);
       return settle(cl, await cl.fetch("/api/session", { method: "POST", body: { email, password: PASSWORD } }), email);
     };
+    // A kiosk of its own for the matrix, made here rather than reusing
+    // kiosk@hut.example: the "self check-in kiosk (migration 051)" block
+    // below creates that account, and this test runs first — a second
+    // auth.create_user for the same address would fail the unique check.
+    const mkKiosk = async (email) => {
+      await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, [email, PASSWORD, "Matrix Kiosk", "kiosk"]));
+      const cl = client(base);
+      return settle(cl, await cl.fetch("/api/session", { method: "POST", body: { email, password: PASSWORD } }), email);
+    };
     // Fresh sessions for the guard and the supervisor: the staff tests above
     // end sessions on purpose (a disabled account, a password reset).
     // A login here may be judged unusual (a new device for an account that
@@ -3228,8 +3237,8 @@ async function main() {
     await withOwner((c) => c.query(`update public.app_settings set mfa_email = false where id`));
     const guardC = await relogin(EMAIL);
     const supM = await relogin("sup2@hut.example");
-    const clients = { anon: client(base), guard: guardC, supervisor: supM, admin: await mkAdmin("matrixadmin@hut.example", false), platform: await mkAdmin("matrixplatform@hut.example", true) };
-    const EMAILS = { guard: EMAIL, supervisor: "sup2@hut.example", admin: "matrixadmin@hut.example", platform: "matrixplatform@hut.example" };
+    const clients = { anon: client(base), guard: guardC, kiosk: await mkKiosk("matrixkiosk@hut.example"), supervisor: supM, admin: await mkAdmin("matrixadmin@hut.example", false), platform: await mkAdmin("matrixplatform@hut.example", true) };
+    const EMAILS = { guard: EMAIL, kiosk: "matrixkiosk@hut.example", supervisor: "sup2@hut.example", admin: "matrixadmin@hut.example", platform: "matrixplatform@hut.example" };
 
     // Fixtures, remade on demand for the rows that consume them.
     const fx = { today: siteToday() };
@@ -4004,6 +4013,108 @@ async function main() {
     await assert.rejects(
       withOwner((c) => c.query(`update public.profiles set safeguarding_alert = true where id = $1`, [kioskId])),
       /profiles_safeguarding_alert_not_guard/);
+  });
+
+  console.log("\n== the kiosk HTTP routes: the gate, /api/kiosk/search, /api/kiosk/checkin ==");
+
+  // The same account the DB-level tests above use, over HTTP this time — a
+  // login helper because the matrix test's own settle()/relogin() are scoped
+  // to that test.
+  const loginAs = async (email) => {
+    const cl = client(base);
+    const res = await cl.fetch("/api/session", { method: "POST", body: { email, password: PASSWORD } });
+    assert.equal(res.status, 200, `${email}: ${res.text}`);
+    if (res.json.mfa_required) {
+      const done = await cl.fetch("/api/session/mfa", { method: "POST", body: { challenge: res.json.challenge, code: lastCode() } });
+      assert.equal(done.status, 200, `${email} code: ${done.text}`);
+    }
+    return cl;
+  };
+  const kioskC = await loginAs("kiosk@hut.example");
+  // A guard client of this section's own: every `guardC` declared earlier in
+  // this file lives inside a different test's own callback scope.
+  const guardHttp = await loginAs(EMAIL);
+
+  await test("the gate refuses a kiosk session everything but its own two routes, and lets it read and end its own session", async () => {
+    for (const path of ["/api/residents", `/api/residents/${aoifeId}/compliance`, "/api/checkins", "/api/settings"]) {
+      const res = await kioskC.fetch(path);
+      assert.equal(res.status, 403, `${path}: ${res.text}`);
+      assert.equal(res.json.error, "This login can only check residents in.");
+    }
+    const session = await kioskC.fetch("/api/session");
+    assert.equal(session.status, 200, "GET /api/session stays open so the tablet can learn its role and the site name");
+    assert.equal(session.json.profile.role, "kiosk");
+  });
+
+  await test("POST /api/kiosk/search: two letters minimum, and never a date of birth or an id number", async () => {
+    const short = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: "a" } });
+    assert.equal(short.status, 400, short.text);
+    assert.match(short.json.error, /two letters/i);
+
+    const found = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: "ailb" } });
+    assert.equal(found.status, 200, found.text);
+    assert.ok(found.json.results.length >= 1 && found.json.results.length <= 5);
+    const hit = found.json.results.find((r) => r.full_name === "Ailbhe Kioskington");
+    assert.ok(hit, "Ailbhe Kioskington was not among the results");
+    assert.equal(hit.id, aoifeId);
+    assert.deepEqual(Object.keys(hit).sort(), ["checked_in_today", "full_name", "id", "room_label"],
+      "no date of birth, id number, or any other field the tablet has no business holding");
+  });
+
+  await test("a guard reaches neither kiosk route: kiosk_search()/kiosk_checkin()'s own refusal surfaces as a 403", async () => {
+    const search = await guardHttp.fetch("/api/kiosk/search", { method: "POST", body: { q: "ailb" } });
+    assert.equal(search.status, 403, search.text);
+    assert.match(search.json.error, /not authorised/i);
+    const checkin = await guardHttp.fetch("/api/kiosk/checkin", { method: "POST", body: { id: aoifeId } });
+    assert.equal(checkin.status, 403, checkin.text);
+    assert.match(checkin.json.error, /not authorised/i);
+  });
+
+  await test("POST /api/kiosk/checkin records today's presentation, visible on the resident's compliance row as a guard would see it", async () => {
+    const made = await supC.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Httpflow", last_name: "Kiosktester", date_of_birth: "1988-08-08" },
+    });
+    assert.equal(made.status, 201, made.text);
+    const residentId = made.json.id;
+
+    const checkin = await kioskC.fetch("/api/kiosk/checkin", { method: "POST", body: { id: residentId, full_name: "Httpflow Kiosktester" } });
+    assert.equal(checkin.status, 200, checkin.text);
+    assert.equal(checkin.json.ok, true);
+    assert.equal(checkin.json.full_name, "Httpflow Kiosktester");
+    assert.ok(checkin.json.checked_in_at, "checked_in_at was not carried in the response");
+    assert.ok(!Number.isNaN(Date.parse(checkin.json.checked_in_at)), "checked_in_at must be a real ISO timestamp");
+
+    const seenByGuard = await guardHttp.fetch(`/api/residents/${residentId}/compliance`);
+    assert.equal(seenByGuard.status, 200, seenByGuard.text);
+    assert.equal(seenByGuard.json.seen_today, true, "the guard's own view of the register must show today's presentation");
+    assert.ok(seenByGuard.json.checkins_today_events.some((e) => e.source === "kiosk"),
+      "the event recorded by the kiosk route must carry source='kiosk'");
+  });
+
+  await test("POST /api/kiosk/checkin: an unknown resident id is refused with the DB's own sentence", async () => {
+    const res = await kioskC.fetch("/api/kiosk/checkin", { method: "POST", body: { id: "00000000-0000-0000-0000-000000000000" } });
+    assert.equal(res.status, 404, res.text);
+    assert.match(res.json.error, /not a resident who checks in here/i);
+  });
+
+  await test("60 searches a minute is the limit; the 61st is refused, on an account of its own so the budget above is untouched", async () => {
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["kiosk-limit@hut.example", PASSWORD, "Gate tablet 2", "kiosk"]));
+    const limitC = await loginAs("kiosk-limit@hut.example");
+    let last;
+    for (let i = 0; i < 61; i++) {
+      last = await limitC.fetch("/api/kiosk/search", { method: "POST", body: { q: "ailb" } });
+      if (i < 60) assert.equal(last.status, 200, `search ${i + 1}: ${last.text}`);
+    }
+    assert.equal(last.status, 429, last.text);
+    assert.equal(last.json.error, "Too many searches — wait a moment.");
+  });
+
+  await test("DELETE /api/session as kiosk ends the session, unaffected by the gate", async () => {
+    const res = await kioskC.fetch("/api/session", { method: "DELETE" });
+    assert.equal(res.status, 200, res.text);
+    const after = await kioskC.fetch("/api/session");
+    assert.equal(after.status, 401, "the session cookie must actually be gone");
   });
 
   server.close();

@@ -32,15 +32,27 @@ const SUPERVISOR = { anon: 'unauth', guard: 'deny', supervisor: 'allow', admin: 
 const ADMIN = { anon: 'unauth', guard: 'deny', supervisor: 'deny', admin: 'allow' };
 const PLATFORM = { anon: 'unauth', guard: 'deny', supervisor: 'deny', admin: 'deny', platform: 'allow' };
 const ANYONE = { anon: 'allow', guard: 'allow', supervisor: 'allow', admin: 'allow' };
+// The self check-in kiosk (migration 051 + the gate in lib/auth.js): a
+// shared tablet, not staff. It may search for one adult and record its own
+// check-in; supervisors and admins may exercise the same two doors, per
+// kiosk_search()/kiosk_checkin()'s own guard. Everywhere else in this file,
+// a row that says nothing about 'kiosk' means deny — see expectFor() below —
+// because lib/auth.js's requireSession refuses that role every route but
+// these two, plus reading and ending its own session.
+const KIOSK = { anon: 'unauth', kiosk: 'allow', guard: 'deny', supervisor: 'allow', admin: 'allow' };
 
 const dob = '1990-01-01';
 
 module.exports = [
   // ---- own account -------------------------------------------------------
-  { area: 'Own account', name: 'Who am I (session, settings, feature switches)', method: 'GET', path: () => '/api/session', expect: STAFF },
+  { area: 'Own account', name: 'Who am I (session, settings, feature switches)', method: 'GET', path: () => '/api/session', expect: { ...STAFF, kiosk: 'allow' }, note: 'A kiosk session may read this too, so the tablet can learn its own role and the site name' },
   { area: 'Own account', name: 'Is the nightly job on time (health banner)', method: 'GET', path: () => '/api/session/health', expect: STAFF },
-  { area: 'Own account', name: 'Log out', method: 'DELETE', path: () => '/api/session', expect: ANYONE, note: 'Ends the session cookie; harmless when there is none', endsSession: true },
-  { area: 'Own account', name: 'Ask for a password-reset link', method: 'POST', path: () => '/api/password-reset', body: () => ({ email: 'nobody@hut.example' }), expect: ANYONE, note: 'Same answer whether or not the address exists' },
+  { area: 'Own account', name: 'Log out', method: 'DELETE', path: () => '/api/session', expect: { ...ANYONE, kiosk: 'allow' }, note: 'Ends the session cookie; harmless when there is none', endsSession: true },
+  { area: 'Own account', name: 'Ask for a password-reset link', method: 'POST', path: () => '/api/password-reset', body: () => ({ email: 'nobody@hut.example' }), expect: { ...ANYONE, kiosk: 'allow' }, note: 'Same answer whether or not the address exists; mounted ahead of the kiosk gate like every other unauthenticated route' },
+
+  // ---- the self check-in kiosk (a shared tablet, not staff) ---------------
+  { area: 'Self check-in tablet', name: 'Search for one adult resident by name, room or exact ID', method: 'POST', path: () => '/api/kiosk/search', body: () => ({ q: 'an' }), expect: KIOSK },
+  { area: 'Self check-in tablet', name: 'Record my own daily check-in', method: 'POST', path: (fx) => '/api/kiosk/checkin', body: (fx) => ({ id: fx.residentId }), expect: KIOSK },
 
   // ---- the gate and the register (every staff member) ---------------------
   { area: 'Gate and register', name: 'Search residents (name, age, state; never the ID number)', method: 'GET', path: () => '/api/residents?q=a&compliance=1', expect: STAFF },
@@ -127,5 +139,12 @@ module.exports = [
   { area: 'Organisation', name: 'Close a centre (drops its schema)', method: 'DELETE', path: (fx) => `/api/tenants/${fx.tenantId}`, body: (fx) => ({ confirm_slug: fx.tenantSlug }), expect: PLATFORM, fresh: 'tenant' },
 ];
 
-module.exports.ROLES = ['anon', 'guard', 'supervisor', 'admin', 'platform'];
-module.exports.expectFor = (row, role) => row.expect[role] || (role === 'platform' ? row.expect.admin : undefined);
+module.exports.ROLES = ['anon', 'guard', 'kiosk', 'supervisor', 'admin', 'platform'];
+// A row that never mentions 'kiosk' means deny for it: the kiosk role is
+// deliberately not staff (see KIOSK above, and lib/auth.js's requireSession),
+// so unless a row says otherwise, the tablet is refused everything on this
+// list. Checked after the platform fallback so a row naming both wins as
+// written; a row naming neither falls all the way through to deny.
+module.exports.expectFor = (row, role) => row.expect[role]
+  || (role === 'platform' ? row.expect.admin : undefined)
+  || (role === 'kiosk' ? 'deny' : undefined);

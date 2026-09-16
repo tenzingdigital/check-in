@@ -16,7 +16,7 @@ const { ROLES, expectFor } = rows;
 const OUT = path.join(__dirname, '..', 'docs', 'PERMISSIONS.md');
 
 const SYMBOL = { allow: '✓', deny: '✗', unauth: '—', hidden: 'hidden' };
-const HEAD = ['Logged out', 'Guard', 'Supervisor', 'Admin', 'Platform admin'];
+const HEAD = ['Logged out', 'Guard', 'Kiosk', 'Supervisor', 'Admin', 'Platform admin'];
 
 function table(area) {
   const lines = [

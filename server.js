@@ -184,6 +184,9 @@ app.use('/api/session', require('./routes/session'));
 app.use('/api/password-reset', require('./routes/password-reset'));
 
 app.use('/api', auth.requireSession);
+// The self check-in kiosk (migration 051): the only two routes a 'kiosk'
+// session may reach, per requireSession's own gate above.
+app.use('/api/kiosk', require('./routes/kiosk'));
 app.use('/api/residents', require('./routes/residents'));
 app.use('/api', require('./routes/buildings'));
 app.use('/api', require('./routes/rollcall'));
