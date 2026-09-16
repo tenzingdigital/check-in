@@ -1838,6 +1838,7 @@ async function loadReports() {
         <button class="btn ghost sm" type="button" data-view="${esc(r.name)}">View</button>
         <button class="btn ghost sm" type="button" data-csv="${esc(r.name)}">CSV</button>
         <button class="btn sm" type="button" data-xlsx="${esc(r.name)}">Excel</button>
+        ${r.name === "weekly" ? `<button class="btn sm" type="button" data-docx="${esc(r.name)}">Word</button>` : ""}
       </div>
     </div>`).join("");
 
@@ -1939,6 +1940,7 @@ $("reportForm").addEventListener("submit", (e) => e.preventDefault());
 $("reportList").addEventListener("click", async (e) => {
   const csvBtn = e.target.closest("[data-csv]");
   const xlsxBtn = e.target.closest("[data-xlsx]");
+  const docxBtn = e.target.closest("[data-docx]");
   const viewBtn = e.target.closest("[data-view]");
   if (csvBtn) {
     const q = reportQuery(csvBtn.dataset.csv); if (!q) return;
@@ -1948,6 +1950,9 @@ $("reportList").addEventListener("click", async (e) => {
     // cannot execute a cell that begins "=". Same URL, same audit row.
     const q = reportQuery(xlsxBtn.dataset.xlsx); if (!q) return;
     window.location.href = q + "&format=xlsx"; toast("Export recorded and downloading", "ok");
+  } else if (docxBtn) {
+    const q = reportQuery(docxBtn.dataset.docx); if (!q) return;
+    window.location.href = q + "&format=docx"; toast("Export recorded and downloading", "ok");
   } else if (viewBtn) {
     const q = reportQuery(viewBtn.dataset.view); if (!q) return;
     const out = await guarded(() => apiGet(q + "&format=json"), (err) => toast("Could not load: " + err.message, "err"));

@@ -2709,6 +2709,25 @@ async function main() {
     assert.equal((await wkAdmin.fetch(`/api/staff/${target.json.id}/weekly-report`, { method: "POST", body: { on: false } })).status, 200);
   });
 
+  await test("the Weekly register update downloads as a Word document; no other report does", async () => {
+    const today = siteToday();
+    const from = (() => { const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - 6); return d.toISOString().slice(0, 10); })();
+    const noReason = await wkAdmin.fetch(`/api/reports/weekly?from=${from}&to=${today}&format=docx`);
+    assert.equal(noReason.status, 400);
+    const asGuard = await api.fetch(`/api/reports/weekly?from=${from}&to=${today}&reason=test&format=docx`);
+    assert.equal(asGuard.status, 403);
+    const other = await wkAdmin.fetch(`/api/reports/register?from=${from}&to=${today}&reason=test&format=docx`);
+    assert.equal(other.status, 400);
+    assert.match(other.json.error, /Only the Weekly register update is available as a Word document/);
+    const doc = await wkAdmin.fetch(`/api/reports/weekly?from=${from}&to=${today}&reason=Sunday+return&format=docx`);
+    assert.equal(doc.status, 200);
+    assert.match(doc.headers.get("content-type"), /wordprocessingml\.document/);
+    assert.match(doc.headers.get("content-disposition"), new RegExp(`Weekly-Register-Update-week-ending-${today}\\.docx`));
+    assert.ok(doc.text.startsWith("PK"));
+    const { rows } = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'weekly' order by at desc limit 1`));
+    assert.match(rows[0].note, /^Sunday return \[/, "the Word export is audited like every other format");
+  });
+
   await test("the nightly step sends on a Sunday when on, and records why it did not otherwise", async () => {
     const { weeklyRegister } = require("../jobs");
     const mickId = (await withOwner((c) => c.query(`select id from auth.users where email = 'mick@example.ie'`))).rows[0].id;

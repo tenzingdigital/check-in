@@ -15,7 +15,7 @@
 //   roll-call-marks  who was marked safe on each roll call, by whom
 //   room-history     every room each resident has had
 //   breaches    breach reports issued to IPAS in the range (migration 029)
-//   weekly      the Sunday Weekly Register Update: absence spans, weekend, removals, rooms (migration 035)
+//   weekly      the Sunday Weekly Register Update: absence spans, weekend, removals, rooms (migration 035); also as a Word document (format=docx): the Sunday return in the centre manager's layout (052)
 //   missed      who missed the daily register over a range, one row per resident with the dates (the Absences tab's export)
 //
 // Supervisors and admins. A reason is required and every export is written
@@ -51,6 +51,7 @@ const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const { HttpError, dateParam } = require('../lib/api');
+const weekly = require('../lib/weeklyReport');
 
 const router = express.Router();
 
@@ -482,14 +483,24 @@ router.get('/reports/:name', wrap(async (req, res) => {
   if (!reason || reason.length > 200) throw new HttpError(400, 'Give the reason for the export (up to 200 characters)');
   const format = req.query.format === 'json' ? 'json'
               : req.query.format === 'xlsx' ? 'xlsx'
+              : req.query.format === 'docx' ? 'docx'
               : 'csv';
+  // The Word document is the Sunday return in the centre manager's own
+  // layout (lib/weeklyReport.js document()); it exists for that report and
+  // no other, so any other report asked for as Word is a mistake, not CSV.
+  if (format === 'docx' && req.params.name !== 'weekly') {
+    throw new HttpError(400, 'Only the Weekly register update is available as a Word document');
+  }
   let from = null, to = null;
   if (def.ranged) ({ from, to } = rangeParams(req.query));
 
-  const rows = await db.withIdentity(req.session.userId, async (client) => {
+  const { rows, site } = await db.withIdentity(req.session.userId, async (client) => {
     await client.query('select note_report($1, $2, $3, $4)', [req.params.name, reason, from, to]);
     const { rows } = await client.query(def.sql, def.ranged ? [from, to] : []);
-    return rows;
+    const site = format === 'docx'
+      ? (await client.query(`select site_name, to_char(site_today(), 'YYYY-MM-DD') as today from app_settings where id`)).rows[0]
+      : null;
+    return { rows, site };
   }).catch((err) => {
     if (err && err.code === '42501') throw new HttpError(403, def.admin ? 'Only an administrator can see who viewed a record' : 'Only a supervisor or admin can export a report');
     throw err;
@@ -505,6 +516,12 @@ router.get('/reports/:name', wrap(async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}${range}-${stamp}.xlsx"`);
     return res.send(xlsx(rows, { sheetName: def.title }));
+  }
+  if (format === 'docx') {
+    const doc = weekly.document({ siteName: site.site_name, from, to, rows, generatedOn: site.today });
+    res.setHeader('Content-Type', doc.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.filename}"`);
+    return res.send(doc.buffer);
   }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}${range}-${stamp}.csv"`);
