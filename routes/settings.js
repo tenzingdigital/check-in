@@ -245,7 +245,7 @@ router.post('/absence-windows', wrap(async (req, res) => {
   if (!name || name.length > 60) throw new HttpError(400, 'Give the period a name (up to 60 characters)');
   const from = dateParam(body.from_date, 'from_date');
   const to = dateParam(body.to_date, 'to_date');
-  if (to < from) throw new HttpError(400, 'The last day must not be before the first');
+  if (to < from) throw new HttpError(400, 'The last day must be on or after the first day');
   const maxNights = maxNightsParam(body.max_nights);
   const row = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
@@ -279,7 +279,7 @@ router.patch('/absence-windows/:id', wrap(async (req, res) => {
        returning id, name, from_date::text as from_date, to_date::text as to_date, max_nights`, args);
     return rows[0];
   }).catch((err) => {
-    if (err && err.code === '23514') throw new HttpError(400, 'The last day must be on or after the first day.');
+    if (err && err.code === '23514') throw new HttpError(400, 'The last day must be on or after the first day');
     if (err && err.code === '42501') throw new HttpError(403, 'Only an administrator can change the permitted absence periods');
     throw err;
   });

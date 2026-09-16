@@ -217,16 +217,18 @@
      glance, and on a big monitor a single 760px column wastes the screen.
      Widen this page only (the header bar and the bottom multi-select bar
      are shared markup, so they're widened here too, scoped by .page-admin)
-     and lay residents out two-up. Everything else — buildings, reports,
-     staff, absences, and every detail/edit sheet — keeps its width; staff
-     cards get an actions row that would wrap oddly two-up, so only
-     #residentList gets the grid. */
+     and lay residents out two-up. .wrap is <main>, so every tab panel
+     widens with it — buildings, reports, staff, absences and the rest;
+     only the fixed .detail sheet keeps its 760px width. Staff cards get an
+     actions row that would wrap oddly two-up, so only #residentList gets
+     the grid. */
   @media (min-width: 1100px) {
     .page-admin .wrap, .page-admin .bar, .page-admin .multibar { max-width: 1180px; }
     .page-admin #residentList {
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
     }
     .page-admin #residentList .letter { grid-column: 1 / -1; }
+    .page-admin #residentList > .empty { grid-column: 1 / -1; }
   }
 </style>
 </head>
@@ -1965,6 +1967,7 @@ const SETTINGS_FIELDS = {
 const FEATURE_FIELDS = { feature_buildings: "stFeatBuildings", feature_evacuation: "stFeatEvac", feature_households: "stFeatHouseholds", feature_visitors: "stFeatVisitors", feature_door_checkin: "stFeatDoorCheckin", mfa_email: "stMfa", notify_thresholds_email: "stNotify", weekly_report_email: "stWeekly" };
 
 async function loadSettings() {
+  awReset();
   const s = await guarded(() => apiGet("/api/settings"), (err) => showError("Could not load settings: " + err.message));
   if (!s) return;
   showError("");
@@ -2027,7 +2030,7 @@ async function loadWindows() {
   if (!rows) return;
   awRows = rows;
   $("awList").innerHTML = rows.length ? rows.map((w) => `
-    <div class="report"><div><b>${esc(w.name)}</b><span class="hint"> — ${esc(w.from_date)} to ${esc(w.to_date)}${w.max_nights ? ` — up to ${w.max_nights} night${w.max_nights === 1 ? "" : "s"}` : ""}</span></div>
+    <div class="report"><div><b>${esc(w.name)}</b><span class="hint">${esc(w.from_date)} to ${esc(w.to_date)}${w.max_nights ? ` — up to ${w.max_nights} night${w.max_nights === 1 ? "" : "s"}` : ""}</span></div>
       <div class="row"><button class="linkish" type="button" data-edit-window="${w.id}" aria-label="Edit ${esc(w.name)}">edit</button>
       <button class="linkish" type="button" data-del-window="${w.id}" aria-label="Remove ${esc(w.name)}">remove</button></div></div>`).join("")
     : '<p class="hint flush">No periods recorded. Holidays are never warned about until one is.</p>';

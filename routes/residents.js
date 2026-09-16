@@ -389,11 +389,11 @@ router.post('/:id/absences', wrap(async (req, res) => {
     if (reason === 'holiday') {
       const { rows: [w] } = await client.query(
         `select (select count(*)::int from absence_windows) as n,
-                (select name from absence_windows w where daterange(w.from_date, w.to_date, '[]') @> daterange($1, $2, '[]')
-                  order by (w.to_date - w.from_date) limit 1) as inside_name,
-                (select max_nights from absence_windows w where daterange(w.from_date, w.to_date, '[]') @> daterange($1, $2, '[]')
-                  order by (w.to_date - w.from_date) limit 1) as max_nights,
-                ($2::date - $1::date + 1) as nights`, [from, to]);
+               t.name as inside_name, t.max_nights, ($2::date - $1::date + 1) as nights
+          from (select 1) x
+          left join lateral (select name, max_nights from absence_windows w
+                              where daterange(w.from_date, w.to_date, '[]') @> daterange($1::date, $2::date, '[]')
+                              order by (w.to_date - w.from_date), w.id limit 1) t on true`, [from, to]);
       if (w.n > 0 && !w.inside_name) warning = 'Outside the permitted absence periods in Settings';
       else if (w.max_nights && w.nights > w.max_nights) warning = `Longer than the ${w.max_nights} nights permitted for ${w.inside_name}`;
     }

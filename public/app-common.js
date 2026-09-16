@@ -30,9 +30,6 @@ function liftToastAboveBar(el) {
   el.style.bottom = bar ? `${bar.offsetHeight + 12}px` : "";
 }
 
-// Successes fade; errors stay until tapped. A guard who looked up at the
-// person and back down again must still be able to read why the tap did
-// not record. Tapping the toast dismisses it either way.
 // A toast that does not go away, for work that takes a while. The bulk
 // actions send one request per resident, sequentially — ten people on a slow
 // hut connection is long enough that a guard reasonably concludes nothing is
@@ -65,6 +62,11 @@ function progress(msg, done, total) {
   }
 }
 
+// A success hides itself after 3.2s; an error stays up for 6s so a guard who
+// looked up at the person and back down again can still read why the tap did
+// not record. Tapping the toast dismisses either kind immediately, and
+// typing in a reason field clears a standing error the moment they start
+// fixing it (dismissToastOnInput).
 function toast(msg, kind = "ok") {
   const el = $("toast");
   el.textContent = msg;

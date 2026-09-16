@@ -109,6 +109,19 @@ exist yet — it answers the ordinary 404 "link is not valid" page:
 finds nothing. Nothing is dropped by 049, so a rolling deploy of the code
 itself is still safe for `public`.
 
+**Migration 050 is invisible to `tenant_schema_gaps()`**: it adds
+`absence_windows.max_nights` and a grant, no function. A `t_*` tenant
+provisioned before 050 reports no gap but 500s on `GET/POST
+/api/settings/absence-windows` (Settings shows an empty period list, no
+error) and on authorising any holiday (rolled back). Before deploying, run:
+`select nspname from pg_namespace where nspname like 't\_%' and not exists
+(select 1 from information_schema.columns where table_schema = nspname and
+table_name = 'absence_windows' and column_name = 'max_nights');` and for
+each row: `alter table t_x.absence_windows add column if not exists
+max_nights integer check (max_nights between 1 and 365); grant update on
+t_x.absence_windows to authenticated;`. (Checked 16 Sep 2026: no such
+tenant existed.)
+
 **The decision that is still open:** whether to go further and build the
 second migration ledger (apply pending per-tenant migrations to every
 `t_*` schema at boot automatically, refusing to serve a schema still

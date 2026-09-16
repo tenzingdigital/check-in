@@ -2634,6 +2634,28 @@ async function main() {
     assert.equal(outsideStill.status, 201, outsideStill.text);
     assert.equal(outsideStill.json.warning, "Outside the permitted absence periods in Settings");
 
+    // (d) two equal-length windows both containing the holiday, created in a
+    // known order: the warning must name and size from the SAME row — the
+    // one with the lower id — never mixing the name of one with the
+    // max_nights of the other (the two-scalar-subquery bug this replaces
+    // could pick either independently on a length tie).
+    const tieLow = await wkAdmin.fetch("/api/settings/absence-windows", { method: "POST", body: { name: "Tie Low", from_date: "2030-08-01", to_date: "2030-08-10", max_nights: 3 } });
+    assert.equal(tieLow.status, 201, tieLow.text);
+    const tieHigh = await wkAdmin.fetch("/api/settings/absence-windows", { method: "POST", body: { name: "Tie High", from_date: "2030-08-01", to_date: "2030-08-10", max_nights: 20 } });
+    assert.equal(tieHigh.status, 201, tieHigh.text);
+    assert.ok(tieLow.json.id < tieHigh.json.id, "created first, so it has the lower id");
+
+    const tieId = await mkResident("Tie");
+    const tieHoliday = await supC.fetch(`/api/residents/${tieId}/absences`, { method: "POST", body: { from_date: "2030-08-03", to_date: "2030-08-07", reason: "holiday" } });
+    assert.equal(tieHoliday.status, 201, tieHoliday.text);
+    assert.equal(tieHoliday.json.warning, "Longer than the 3 nights permitted for Tie Low",
+      "5 nights over the lower-id window's 3-night max — name and figure must come from the same row");
+
+    const tieCleanup1 = await wkAdmin.fetch(`/api/settings/absence-windows/${tieLow.json.id}`, { method: "DELETE" });
+    assert.equal(tieCleanup1.status, 200, tieCleanup1.text);
+    const tieCleanup2 = await wkAdmin.fetch(`/api/settings/absence-windows/${tieHigh.json.id}`, { method: "DELETE" });
+    assert.equal(tieCleanup2.status, 200, tieCleanup2.text);
+
     // Restore the site's holiday cap for the tests after this one.
     const restored = await wkAdmin.fetch("/api/settings", { method: "PATCH", body: { holiday_max_days: 14 } });
     assert.equal(restored.status, 200, restored.text);
