@@ -291,21 +291,22 @@ working branch.** Spec: `docs/superpowers/specs/2026-09-10-weekly-register-updat
   beds. One SQL function builds the rows and the sentences; the report
   under Admin → Reports, viewed or downloaded as a CSV, reads them in
   full, but the emailed version reads only their counts (below).
-- *Sent on Sunday at 10:00 site time; counts and a link, plus, where the
-  centre turns it on, the update as a Word document* (migrations 037,
-  052): the staff ticked "Gets the Sunday report" on their record —
-  offered only to supervisors and admins, since only they may run the
-  report it summarises — are emailed the previous Sunday night through
-  Saturday night as a count per section and a link into the app, never a
-  resident name, room or date in the email body. A switch under Settings
-  turns the send on or off for the site; "Send last week's now" checks it
-  regardless of the switch, on the audit record. Recipients moved off a
-  comma-separated address list typed into Settings: they are now always
-  known staff, so a colleague who leaves stops receiving resident data
-  automatically, and because the email body carries no resident data,
-  none of it lives on in an inbox, a forward, or a mail provider's own
-  backups outside the app's retention rules — except where a centre has
-  turned on the Word attachment, which does name residents.
+- *Sent on Sunday at 10:00 site time; counts and a link, plus, on by
+  default since migration 055, the update as a Word document* (migrations
+  037, 052, 055): the staff ticked "Gets the Sunday report" on their
+  record — offered only to supervisors and admins, since only they may
+  run the report it summarises — are emailed the previous Sunday night
+  through Saturday night as a count per section and a link into the app,
+  never a resident name, room or date in the email body. A switch under
+  Settings turns the send on or off for the site; "Send last week's now"
+  checks it regardless of the switch, on the audit record. Recipients
+  moved off a comma-separated address list typed into Settings: they are
+  now always known staff, so a colleague who leaves stops receiving
+  resident data automatically, and because the email body carries no
+  resident data, none of it lives on in an inbox, a forward, or a mail
+  provider's own backups outside the app's retention rules — except the
+  Word attachment, on by default since 055, which does name residents;
+  a centre can turn it off under Settings.
 - *The IPAS permitted periods*: dates under Settings; a holiday outside
   every window is recorded with a warning, never refused.
 - *The iPad as a fixed terminal*: a manifest and the Apple meta tags, so

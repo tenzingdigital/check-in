@@ -11,8 +11,8 @@
 -- recorded while the gate had the person out — and the switch for the one
 -- nightly email that replaces the House Rules reminder (032) and the
 -- overnight safeguarding alert (041). "Children on site without a guardian"
--- is a section of that email: a count, with a link to the named report for
--- that night. It was drafted as a separate evening email as well (a
+-- is a section of that email: the households, named, with a link to the
+-- report for that night. It was drafted as a separate evening email as well (a
 -- names-now function, an unsubscribe kind of its own, a third cron); the
 -- owner ruled against a separate email and it was folded into the nightly
 -- one before this file was ever deployed, which is why the file keeps its
@@ -42,7 +42,7 @@ create table if not exists public.overnight_guardian_gaps (
   primary key (night, household_id)
 );
 comment on table public.overnight_guardian_gaps is
-  'One row per night per household that had children on site, no guardian on site and no supervision arrangement running when the snapshot was taken (054). Counts and a time; the names are one tap away behind a login.';
+  'One row per night per household that had children on site, no guardian on site and no supervision arrangement running when the snapshot was taken (054). Counts and a time; the household and children are named in the nightly email and the report.';
 
 alter table public.overnight_guardian_gaps enable row level security;
 drop policy if exists guardian_gaps_read on public.overnight_guardian_gaps;

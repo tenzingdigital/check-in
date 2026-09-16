@@ -574,17 +574,23 @@ out of the two working apps:
   *Departed* marks them all departed from one date, or *Family* makes them
   one household.
 - **The nightly email** (migration 054, replacing the House Rules reminder
-  of 032 and the overnight safeguarding alert of 041): after the snapshot,
-  the staff ticked *Gets the nightly email* are emailed one message of
-  four counts, each with a link to the screen that has the names —
-  children on site without a guardian (the named report for that night),
-  children away overnight without authorisation, check-ins recorded while
-  signed out, and residents at the House Rules figures — never a name.
-  Sent on the nights there is anything to count, and every Sunday
-  regardless. One switch under Settings, `nightly_email`; the old House
-  Rules switch is retired (its column stays, unread). Needs
-  `RESEND_API_KEY` and `MAIL_FROM`. There is no separate evening email:
-  the owner ruled the count and its link are the whole of it.
+  of 032 and the overnight safeguarding alert of 041; naming residents in
+  its body since migration 055, the owner's ruling of 16 September 2026):
+  after the snapshot, the staff ticked *Gets the nightly email* are
+  emailed one message of four sections, each naming who it is about and
+  linking to the screen with the full record — households with children
+  on site and no guardian (family, room, children with ages, adults
+  signed out and the first sign-out time; the named report for that
+  night), children away overnight without authorisation (name, age,
+  room), check-ins recorded while signed out (name, room, the check-in
+  time and the last gate movement), and residents at the House Rules
+  figures (name, room, which figure). Sent on the nights there is
+  anything to count, and every Sunday regardless. One switch under
+  Settings, `nightly_email`; the old House Rules switch is retired (its
+  column stays, unread). Needs `RESEND_API_KEY` and `MAIL_FROM`. There is
+  no separate evening email: the owner ruled that a section of the
+  nightly email, naming the household and linking to the report, is the
+  whole of it.
 - **Rooms archived, not deleted** (migration 031): a room that has been
   lived in keeps its history when taken out of use and can be restored;
   nobody can be moved into it meanwhile. Each room carries the beds
@@ -795,14 +801,16 @@ went, and because the week is anchored to the most recent Saturday rather
 than "yesterday", a resend on a later weekday still sends the week ending
 the previous Saturday, not the wrong week.
 
-The nightly run also sends **the nightly email** (migration 054) after the
-snapshot: one message, "Tonight at <site>", to the staff ticked *Gets the
-nightly email*, with four sections in a fixed order —
+The nightly run also sends **the nightly email** (migration 054; naming
+residents since 055) after the snapshot: one message, "Tonight at <site>",
+to the staff ticked *Gets the nightly email*, with four sections in a
+fixed order —
 **Children on site without a guardian**, **Children away overnight without
 authorisation**, **Check-ins recorded while signed out** and **At the House
-Rules figures** — each a count and a link to the page that has the names,
-never a name itself. The first links to the *Children on site without a
-guardian* report for that night, not the live Families tab. It goes on any night a count is non-zero and every
+Rules figures** — each naming who it is about, with a count and a link to
+the page that has the full record. The first links to the *Children on
+site without a guardian* report for that night, not the live Families tab.
+It goes on any night a count is non-zero and every
 Sunday regardless, so a silent week is never mistaken for a job that
 stopped; `job_runs` records it as `nightly-email` either way. The
 guardian-gap snapshot it counts is a job of its own, `snapshot-guardian-gaps`,

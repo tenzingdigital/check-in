@@ -40,6 +40,20 @@ the login. The owner ruled against a separate evening email that would
 have named residents in its body; none was released. The "What leaves by
 email" section and the processor table say so.
 
+Updated 17 September 2026 against migration 055: the owner's ruling of 16
+September 2026 (Slaney Manor — the manager reads these on her phone) reaches
+the copy as well as the code. The nightly email itself now names residents
+in its body instead of linking to a login: the household, room, children
+and ages for a guardian gap; the resident, age and room for an overnight
+absence or a check-in conflict; the resident, room and figure for a House
+Rules count. The Sunday email's own body is unchanged — counts and a link —
+but its Word attachment (052) is now on by default rather than a switch a
+centre has to find; the switch to turn it off still exists. The register's
+own audience already has a login and already sees these names, so a name in
+an email to that same, ticked audience is the same disclosure as the report
+they open, not a new one. The "What leaves by email" section, the processor
+table and the Settings copy are corrected below.
+
 **This is not legal advice.** A system that records the daily presence of
 residents in accommodation, some of whom are in the international protection
 process, is systematic monitoring of people who are frequently vulnerable.
@@ -269,26 +283,31 @@ resident data ever reaches that site, but a centre's data protection
 officer should know a third party is in the browser on that domain.
 
 **What leaves by email.** Invitations and password resets carry no resident
-data: a staff member's own address, name and a single-use link. The nightly
-email and the Sunday update below carry counts and a link only — no
-resident is named in the email body. One exception, chosen per centre:
-the Sunday update can be attached as a Word document (below).
+data: a staff member's own address, name and a single-use link. The Sunday
+update's own body still carries counts and a link only — no resident is
+named there. The nightly email is the exception, since migration 055: it
+names residents in its body, to the centre's own ticked staff. The Sunday
+update's Word attachment does too, and since the same migration is on by
+default (below).
 
 The nightly email (migration 054, replacing the House Rules reminder of
-032 and the overnight safeguarding alert of 041), where the centre has
-turned `nightly_email` on, goes after the night closes to the centre's own
-active supervisors and administrators ticked "Gets the nightly email" on
-their staff record: four counts, each with a link into the app —
-households with children on site and no guardian at midnight (the
-"Children on site without a guardian" report for that night), children
-away overnight with no authorised absence (the "Absent overnight" report),
-check-ins recorded while the In & out register had the person out (the
-"Check-ins recorded while signed out" report), and residents at the House
-Rules figures (the Absences tab for that night). Sent on any night a count
-is non-zero and every Sunday regardless. The names, rooms and times behind
-the counts stay in the app. The "children on site without a guardian"
-count links to a report that names the household and its children, behind
-the login, and opening it is audited like any other report.
+032 and the overnight safeguarding alert of 041; naming residents since
+055), where the centre has turned `nightly_email` on, goes after the night
+closes to the centre's own active supervisors and administrators ticked
+"Gets the nightly email" on their staff record: four sections, each naming
+who it is about and linking into the app for the full record —
+households with children on site and no guardian at midnight, named with
+their room, children and ages, adults signed out and when the first of
+them left (the "Children on site without a guardian" report for that
+night); children away overnight with no authorised absence, named with
+age and room (the "Absent overnight" report); check-ins recorded while the
+In & out register had the person out, named with room, the check-in time
+and the last gate movement (the "Check-ins recorded while signed out"
+report); and residents at the House Rules figures, named with room and
+which figure (the Absences tab for that night). Sent on any night a count
+is non-zero and every Sunday regardless. Every link still opens the named
+report for the reader who wants the full record, and opening it is audited
+like any other report.
 
 The Sunday Weekly register update (migrations 035 and 037), where the
 centre has turned it on — or at any time an administrator sends it by hand
@@ -300,21 +319,21 @@ removals and room updates, and a link into the app. The names, rooms and
 dates behind those counts stay in the app, under Admin → Reports, where
 they can also be downloaded as a spreadsheet.
 
-**The Word attachment (migration 052).** Where the centre turns on
-`weekly_report_attach_document`, the same email carries the Weekly Register
-Update as a Word document: the five sections, one sentence per resident —
-name, building and room, the dates and nights, back-on date, approval —
-and the child marker the report
-already shows, with the not-approved rows highlighted and the instruction
+**The Word attachment (migrations 052 and 055).** On by default: unless
+the centre turns `weekly_report_attach_document` off, the same email
+carries the Weekly Register Update as a Word document: the five sections,
+one sentence per resident — name, building and room, the dates and nights,
+back-on date, approval — and the child marker the report already shows,
+with the not-approved rows highlighted and the instruction
 "please mark as unauthorised absence". Nothing the report does not show: no
 date of birth, identity number or evacuation need. It goes only to the
 ticked supervisors and admins, whose accounts already see the same report;
 the exposure it adds is the mail channel itself (the recipient's mailbox,
-its provider, and forwarding), which is why it is off by default and the
-Settings copy says what it names. The attachment travels to Resend, the
+its provider, and forwarding), which is why the Settings copy says what it
+names and a centre can turn it off. The attachment travels to Resend, the
 email provider, as part of the message, and Resend retains sent messages by
 default; the DPA's processor table must list that. The nightly email never
-carries an attachment.
+carries an attachment — it names residents in its own body instead.
 
 Every recurring email carries an Unsubscribe link (migration 049) that
 works without a login and stops that one email or all of them; the fact is
@@ -323,9 +342,10 @@ reinstate by ticking the person again. Login codes, invitations and
 password resets carry no such link.
 
 Neither recurring email carries a date of birth, an identity-document
-number, an evacuation need or free text about a person. No recurring email
-names a resident in its body; the Sunday Word attachment (migration 052,
-a per-site switch) is the one exception.
+number, an evacuation need or free text about a person. The nightly email
+names a resident, household or room in its body (migration 055); the
+Sunday email's own body does not — its Word attachment does, on by default
+since the same migration, and a centre can turn that off.
 
 **How those messages are built.** Each is sent as plain text and as a
 styled part carrying the same words, laid out by `layout()` in
@@ -369,7 +389,7 @@ may be in dispute with staff, that matters.
 | Processor | Purpose | Where |
 |---|---|---|
 | Render Services, Inc. | Hosting, the managed database, backups, the nightly scheduler | Frankfurt (EU); fixed at creation in `render.yaml` |
-| Resend, Inc. | Invitation and password-reset email to staff; the nightly email and the Sunday Weekly register update carry counts and a link only, to the centre's own ticked supervisors and administrators; where a centre turns it on, the Sunday Word document (resident names, rooms, dates) — all retained by Resend as sent-message content | EU/US; see DPA section 6 |
+| Resend, Inc. | Invitation and password-reset email to staff; the Sunday Weekly register update carries counts and a link in its body, to the centre's own ticked supervisors and administrators; the nightly email and, on by default, the Sunday Word document name residents, households and rooms — all retained by Resend as sent-message content | EU/US; see DPA section 6 |
 
 Both are US companies with EU data residency, so the transfer basis (Standard
 Contractual Clauses plus the EU–US Data Privacy Framework, as each provider

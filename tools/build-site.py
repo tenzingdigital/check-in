@@ -443,7 +443,7 @@ faqs = [
  ("Where is the data held?",
   "In the European Union — Frankfurt — encrypted in transit and at rest. Each centre's records live in their own separate database schema, so one centre's staff cannot reach another's data even by accident."),
  ("What is the weekly register update?",
-  "A Sunday-morning email to the staff you choose with counts of resident absences, weekend updates, removals and room updates over the past week, and a link to the full report. The email carries counts and a link; a centre can also choose to attach the update as a Word document — the same five sections, one sentence per resident, ready to review and forward — and the report downloads from the app as a spreadsheet or a Word document."),
+  "A Sunday-morning email to the staff you choose with counts of resident absences, weekend updates, removals and room updates over the past week, and a link to the full report. The email itself carries counts and a link; the update also arrives attached as a Word document — the same five sections, one sentence per resident, ready to review and forward — on by default, and a centre can turn that off. The report also downloads from the app as a spreadsheet or a Word document."),
  ("Is this built for direct provision centres specifically?",
   "It was built with the feedback of an accommodation centre manager, and the vocabulary — permitted absences, house rules, TRC and IRP, contracted beds — is that of IPAS-contracted accommodation. The same register works for any residential centre that keeps a daily record of who was seen."),
 ]
@@ -458,12 +458,12 @@ body = (
       <div><h3>House rules, counted not judged</h3><p>Consecutive nights and days absent in a window, each beside the figure in your settings. Breach notices issued are recorded so nobody sends two.</p></div>
       <div><h3>Rooms and contracted beds</h3><p>Buildings, floors and rooms, with physical beds and contracted beds held separately, plus the bed set-up and a vacancies report for what you can actually offer.</p></div>
       <div><h3>Permitted absence periods</h3><p>The dates IPAS notifies — Christmas, Ramadan, Easter, the summer holiday — are recorded once; a holiday authorised outside them still goes through, with a warning on the screen, never a refusal.</p></div>
-      <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app — no names, rooms or dates in the email unless the centre chooses to attach the update as a Word document. The full report, with names, is in the app and downloads as a spreadsheet or a Word document.</p></div>
+      <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app, and the full update attached as a Word document naming residents and rooms — on by default, though a centre can turn that off. The full report is also in the app and downloads as a spreadsheet or a Word document.</p></div>
     </div>""") +
   sec("""    <h2>What an IPAS inspection asks for</h2>
     <p>Every register record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One printable document gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
     <h2>Children away overnight, and the nightly email</h2>
-    <p>Children are on the daily register but are not required to check in — the app requires a check-in only from adults — so the app derives an overnight absence from the In &amp; out register instead. One nightly email to the staff you tick carries four counts, each with a link into the app: children away overnight with no authorised absence, children on site with no guardian on site, check-ins recorded while the person was signed out at the gate, and residents at the house rules figures. A count and a link each, never a name; the count of children without a guardian links to the named report for that night. One switch, on where the centre already received the emails it replaces, and off otherwise. All of it is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
+    <p>Children are on the daily register but are not required to check in — the app requires a check-in only from adults — so the app derives an overnight absence from the In &amp; out register instead. One nightly email to the staff you tick names, in its body, each household with children on site and no guardian (family, room, children with ages, adults signed out and when the first of them left), each child away overnight with no authorised absence, each check-in recorded while the person was signed out at the gate, and each resident at the house rules figures — with a link into the app alongside each. One switch, on where the centre already received the emails it replaces, and off otherwise. All of it is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
   sec("""    <h2>Getting started without a project</h2>
     <p>Import the spreadsheet you already keep — names, dates of birth, rooms, ID numbers, evacuation needs — and see a verdict for every line before anything is written. Turn on only the parts you use: rooms, families, visitors and evacuation needs are each a switch, and a centre that leaves one off never sees it.</p>""") +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
@@ -612,7 +612,7 @@ body = (
     <div class="pairs">
       <div><h3>Families and rooms</h3><p>Households group parents and children, a room reads as a family, and children are on the daily register, marked not required rather than left off it.</p></div>
       <div><h3>Contracted beds and vacancies</h3><p>Physical beds and contracted beds held separately, room status open or under maintenance with a note, and a vacancies report for what the centre can actually offer.</p></div>
-      <div><h3>Weekly register update</h3><p>Every Sunday morning the staff you choose get an email with counts of absences, weekend updates, removals and room changes, and a link into the app — the names, rooms and dates stay in the app unless you choose to attach the full update as a Word document.</p></div>
+      <div><h3>Weekly register update</h3><p>Every Sunday morning the staff you choose get an email with counts of absences, weekend updates, removals and room changes, and a link into the app, with the full update also attached as a Word document naming residents and rooms — on by default, though you can turn that off.</p></div>
       <div><h3>Records for the Department</h3><p>Append-only check-ins, movements and drills, plus the register for any date and occupancy, export as spreadsheets — for the contracting Department, or for your own contract review.</p></div>
     </div>""") +
   sec("""    <h2>Moving on and moving in</h2>
@@ -674,7 +674,7 @@ faqs = [
  ("Does the app hold the refuge's address or location?",
   "No. A site is a name, with buildings and rooms under it — there is no postal-address field for a site, a building or a resident anywhere in the app."),
  ("Does anyone outside the service see the data?",
-  "No. Each site's records live in their own separate database schema in the EU, the Sunday email carries counts only unless your service chooses to attach the full update, and the app itself holds no analytics or tracking."),
+  "No. Each site's records live in their own separate database schema in the EU, the Sunday email carries counts in its body and, by default, the update attached as a Word document naming residents, and the nightly email to your ticked staff names the residents behind each of its four checks — all to the service's own accounts, and the app itself holds no analytics or tracking."),
  ("Can a resident's record be removed when they leave?",
   "A departed resident is archived, with their history kept for the retention period you set. If a service wants a record erased sooner, an administrator can erase it."),
  ("Is it a case-management or treatment-record system?",
@@ -695,7 +695,7 @@ body = (
     <p>The register holds as little as the job needs, and what it holds is described here precisely, not summarised.</p>
     <div class="pairs">
       <div><h3>No postal address, anywhere</h3><p>The app has no postal-address field for a site, a building or a resident.</p></div>
-      <div><h3>Counts only, unless you choose otherwise</h3><p>The Sunday email to your own staff carries counts and a link into the app. Attaching the full update as a document, with names, is a switch your service turns on — or never does.</p></div>
+      <div><h3>Names go to your own staff only</h3><p>The Sunday email carries counts and a link in its body, with the full update attached as a document naming residents, on by default — turn it off under Settings if your service wants counts only. The nightly email names each of its four checks in the body, to the staff you tick, and reaches nobody outside the service.</p></div>
       <div><h3>Identity documents, optional</h3><p>TRC or IRP can be recorded as printed if a service needs it. It is an optional field, left blank by any service that does not use it.</p></div>
       <div><h3>Logged, on a connected phone</h3><p>Opening a resident's record on a connected phone — the register sheet, the edit sheet, an export — is logged with who and when. A sheet read from a phone's offline copy is not.</p></div>
       <div><h3>One schema per site, in the EU</h3><p>Hosted in Frankfurt, encrypted in transit and at rest, with each site's records in their own separate database schema.</p></div>
