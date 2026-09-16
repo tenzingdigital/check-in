@@ -178,6 +178,30 @@ services:
       - key: PUBLIC_URL
         value: https://app.checksteady.com
 
+  # The Sunday Weekly Register Update, at 10:00 site time. Render's cron is
+  # UTC and Ireland is not, so it runs at both 09:00 and 10:00 UTC on Sundays:
+  # jobs.js sends on the first run at or after 10:00 local and records
+  # "before 10:00" or "already sent today" on the other. It also waits for
+  # Saturday night's snapshot (hut-nightly, 00:30) — a week missing its last
+  # night would quietly omit it. Same env as hut-nightly, same reasons.
+  - type: cron
+    name: hut-weekly
+    runtime: node
+    region: frankfurt
+    plan: starter
+    schedule: "0 9,10 * * 0"
+    buildCommand: npm install
+    startCommand: node jobs.js weekly
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hut-db
+          property: connectionString
+      - key: NODE_VERSION
+        value: "22"
+      - key: PUBLIC_URL
+        value: https://app.checksteady.com
+
   # -------------------------------------------------------------------------
   # The brochure site (checksteady.com) — static, no build step, published
   # straight from ./site. Same pattern as the scheduler repo's

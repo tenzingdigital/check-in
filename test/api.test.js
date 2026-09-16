@@ -2785,6 +2785,45 @@ async function main() {
     await withOwner((c) => c.query(`update public.profiles set weekly_report = false where id = $1`, [mickId]));
   });
 
+  await test("sendGate(): Sunday, at or after 10:00 site time, with last night's snapshot — or force", async () => {
+    const { sendGate } = require("../jobs");
+    assert.equal(sendGate({ dow: 6, localHour: 10, snapshotOk: true }), "not Sunday");
+    assert.equal(sendGate({ dow: 7, localHour: 9, snapshotOk: true }), "before 10:00");
+    assert.equal(sendGate({ dow: 7, localHour: 10, snapshotOk: false }), "snapshot not run");
+    assert.equal(sendGate({ dow: 7, localHour: 10, snapshotOk: true }), null);
+    assert.equal(sendGate({ dow: 7, localHour: 11, snapshotOk: true }), null);
+    assert.equal(sendGate({ dow: 3, localHour: 2, snapshotOk: false, force: true }), null, "force bypasses every calendar and clock gate");
+  });
+
+  await test("the weekly step records the gate that stopped it, and the nightly run no longer sends it", async () => {
+    const jobs = require("../jobs");
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = true`));
+    const mickId = (await withOwner((c) => c.query(`select id from auth.users where email = 'mick@example.ie'`))).rows[0].id;
+    await withOwner((c) => c.query(`update public.profiles set weekly_report = true where id = $1`, [mickId]));
+    const before = (global.__mailSink || []).length;
+    assert.equal(await jobs.weeklyRegister("public", ""), true);
+    const run = (await withOwner((c) => c.query(`select result from public.job_runs where job = 'weekly-register-email' order by id desc limit 1`))).rows[0];
+    // Whatever today is, an unforced run in the test cluster cannot send:
+    // either it is not Sunday, or it is before 10:00 / after, in which case
+    // the snapshot job has not run in this cluster today.
+    assert.ok(["not Sunday", "before 10:00", "snapshot not run", "already sent today"].includes(run.result), run.result);
+    assert.equal((global.__mailSink || []).length, before, "nothing sent by an unforced run in the test cluster");
+    // The nightly `main()` must not send the weekly email any more: run it in
+    // 'nightly' mode and check the weekly job left no new row with a send.
+    const runsBefore = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'weekly-register-email'`))).rows[0].n;
+    await jobs.main(undefined, { keepPool: true });
+    const runsAfter = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'weekly-register-email'`))).rows[0].n;
+    assert.equal(runsAfter, runsBefore, "the nightly run does not touch the weekly job at all");
+    // And 'weekly' mode runs only the weekly job.
+    const closeBefore = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'close-out-compliance-days'`))).rows[0].n;
+    await jobs.main("weekly", { keepPool: true });
+    const closeAfter = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'close-out-compliance-days'`))).rows[0].n;
+    assert.equal(closeAfter, closeBefore, "weekly mode runs no other job");
+    assert.equal((await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'weekly-register-email'`))).rows[0].n, runsBefore + 1, "weekly mode ran the weekly job once");
+    await withOwner((c) => c.query(`update public.app_settings set weekly_report_email = false`));
+    await withOwner((c) => c.query(`update public.profiles set weekly_report = false where id = $1`, [mickId]));
+  });
+
   console.log("\n== permitted absence periods (migration 036) ==");
 
   await test("an administrator keeps the IPAS windows; a holiday outside them carries a warning, other reasons never do", async () => {

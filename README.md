@@ -757,6 +757,18 @@ introduced.** Inside Supabase the schedule lived in the database and survived
 everything; here it is a separate Render resource that somebody can delete
 while tidying up, and the register would degrade silently.
 
+A second cron, `hut-weekly`, sends the Sunday Weekly Register Update at 10:00
+site time. Render's cron clock is UTC and Ireland's is not, so it runs `node
+jobs.js weekly` at both 09:00 and 10:00 UTC every Sunday: the first run at or
+after 10:00 local sends it, the second finds it already sent and records that
+instead. It also waits on `hut-nightly`'s snapshot from the night before, so a
+week whose last night never ran is not quietly sent short. The new cron
+appears in Render after the blueprint sync; confirm it exists and has the
+same env vars as `hut-nightly` — and, because mail credentials
+(`RESEND_API_KEY`, `MAIL_FROM`) are set in the Render dashboard rather than
+the blueprint, copy those two onto `hut-weekly` by hand as well, or the
+Sunday email never sends.
+
 ### 6. Point the front ends at the API
 
 Nothing to do. The apps call `/api` on their own origin, served by the same

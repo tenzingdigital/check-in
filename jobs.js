@@ -12,6 +12,12 @@
    run late; close_out_compliance_days() explicitly backfills any day it
    missed, which is what makes an external scheduler acceptable here.
 
+   Two crons run this file (render.yaml):
+     hut-nightly   00:30 UTC daily      node jobs.js          close-out, purges, snapshot, the two nightly emails
+     hut-weekly    09:00 and 10:00 UTC  node jobs.js weekly   the Sunday Weekly Register Update, once, at 10:00 site time
+   Two hours because Render's cron is UTC and the site's clock is not: the
+   first run at or after 10:00 local sends, the other records why it did not.
+
    `close-out` is the one that is not optional. Without it, daily_compliance
    only ever gains rows from record_checkin() — the positive path — so nobody
    is ever recorded as having missed a day and the register silently stops
@@ -324,6 +330,23 @@ async function safeguardingNightly(schema, label) {
   }
 }
 
+// When the Sunday return may go. Four things, in this order, each recorded
+// in job_runs when it stops the run: it is Sunday at the site; it is 10:00
+// or later there (the centre manager reviews it over Sunday-morning coffee,
+// not at 01:30, and by 10:00 the night workers who left on Saturday are
+// back and read as such); Saturday night's snapshot ran, since a week
+// missing its last night would quietly omit it; and nothing has already
+// gone today (checked by the caller, not here — see weeklyRegister()).
+// `force` — `node jobs.js` by hand, and the tests — is "send now regardless
+// of when" and skips the first three; it never skips the fourth.
+function sendGate({ dow, localHour, snapshotOk, force = false }) {
+  if (force) return null;
+  if (dow !== 7) return 'not Sunday';
+  if (localHour < 10) return 'before 10:00';
+  if (!snapshotOk) return 'snapshot not run';
+  return null;
+}
+
 async function weeklyRegister(schema, label, { force = false } = {}) {
   const name = 'weekly-register-email';
   const started = Date.now();
@@ -331,24 +354,32 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
     const summary = await withOwnerIn(schema, async (client) => {
       const { rows: [s] } = await client.query(
         `select weekly_report_email as on, weekly_report_attach_document as attach, site_name, local_timezone,
-                to_char(site_today(), 'YYYY-MM-DD') as today, extract(isodow from site_today())::int as dow
+                to_char(site_today(), 'YYYY-MM-DD') as today, extract(isodow from site_today())::int as dow,
+                extract(hour from now() at time zone local_timezone)::int as local_hour
            from app_settings where id`);
       if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
       // Recipients are the staff ticked to receive it (migration 037), not a
       // setting: every address is a known person with a login.
       const staff = await weekly.recipients(client);
       if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
-      if (s.dow !== 7 && !force) { await record(client, name, true, 'not Sunday'); return 'not Sunday'; }
+      const { rows: snap } = await client.query(
+        `select 1 from job_runs
+          where job = 'snapshot-overnight-absences' and ok
+            and (ran_at at time zone $1)::date = $2::date limit 1`,
+        [s.local_timezone, s.today]);
+      const stop = sendGate({ dow: s.dow, localHour: s.local_hour, snapshotOk: snap.length > 0, force });
+      if (stop) { await record(client, name, true, stop); return stop; }
       // Idempotence: a second run today (an operator re-running `node
       // jobs.js` after some other step failed) must not email head office
       // twice. A successful send's result always ends "emailed" (see below);
-      // 'off', 'no recipients' and 'not Sunday' do not match, so they never
-      // block a later run once the condition that produced them changes.
-      // `force` bypasses only the Sunday gate above (its documented job, for
-      // manual and test runs) — it does NOT bypass this. A forced run is
-      // still a real send with a real duplicate-email risk if run twice, and
-      // the guard being real under force is also what makes it possible to
-      // test without waiting for an actual Sunday.
+      // 'off', 'no recipients' and the calendar/clock/snapshot gates do not
+      // match, so they never block a later run once the condition that
+      // produced them changes.
+      // `force` bypasses the calendar and clock gates in sendGate() above
+      // (its documented job, for manual and test runs) — it does NOT bypass
+      // this. A forced run is still a real send with a real duplicate-email
+      // risk if run twice, and the guard being real under force is also what
+      // makes it possible to test without waiting for an actual Sunday.
       // Match a run that actually DELIVERED to somebody. The old pattern was
       // `result ~ 'emailed$'`, which "12 rows, 0/3 emailed" also matches —
       // mail.send() never throws, it returns {delivered:false} — so a total
@@ -402,7 +433,8 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
   }
 }
 
-async function main() {
+async function main(mode = process.argv[2], { keepPool = false } = {}) {
+  if (mode !== undefined && mode !== 'weekly') throw new Error(`[jobs] unknown mode "${mode}"`);
   let failed = 0;
 
   const { rows: tenants } = await withOwner((client) => client.query(
@@ -422,6 +454,14 @@ async function main() {
     // day it missed, so a centre that later activates has its register closed
     // out from where it left off on the next run.
     const live = t.status === 'trial' || t.status === 'active';
+
+    // 'weekly' mode is the Sunday cron: only the weekly return, for every
+    // live tenant, and none of the nightly maintenance around it.
+    if (mode === 'weekly') {
+      if (live && !(await weeklyRegister(schema, label))) failed += 1;
+      continue;
+    }
+
     if (!live) console.log(`[jobs] ${label}${t.status} — purges only`);
 
     for (const [name, sql, liveOnly] of TENANT_JOBS) {
@@ -430,12 +470,11 @@ async function main() {
       if (!ok) failed += 1;
       if (name === 'close-out-compliance-days' && !(await notifyThresholds(schema, label))) failed += 1;
       if (name === 'snapshot-overnight-absences') {
-        // A failed snapshot already counted above; a Sunday email built on a
-        // week missing Saturday night would quietly omit it, so the weekly
-        // report is skipped rather than sent, and that is not a second
-        // failure — only recorded, so the skip is visible in job_runs.
+        // A failed snapshot already counted above. The weekly return no
+        // longer runs from here at all — see 'weekly' mode above and
+        // hut-weekly in render.yaml, which checks this same snapshot itself
+        // via sendGate(). Only the safeguarding alert is decided here now.
         if (ok) {
-          if (!(await weeklyRegister(schema, label))) failed += 1;
           // The alert reads the snapshot the step above just wrote, so it
           // depends on it exactly as the weekly return does: a missing night
           // is indistinguishable from "nobody was away", and an alert built
@@ -443,8 +482,6 @@ async function main() {
           // seen. Skip and record the skip rather than send that.
           if (!(await safeguardingNightly(schema, label))) failed += 1;
         } else {
-          console.log(`[jobs] ${label}weekly-register-email: skipped — snapshot-overnight-absences failed`);
-          await withOwnerIn(schema, (client) => record(client, 'weekly-register-email', true, 'skipped: snapshot failed')).catch(() => {});
           console.log(`[jobs] ${label}overnight-safeguarding-alert: skipped — snapshot-overnight-absences failed`);
           await withOwnerIn(schema, (client) => record(client, 'overnight-safeguarding-alert', true, 'skipped: snapshot failed')).catch(() => {});
         }
@@ -452,18 +489,21 @@ async function main() {
     }
   }
 
-  for (const [name, sql] of PLATFORM_JOBS) {
-    if (!(await runJob("public", "", name, sql))) failed += 1;
+  if (mode !== 'weekly') {
+    for (const [name, sql] of PLATFORM_JOBS) {
+      if (!(await runJob("public", "", name, sql))) failed += 1;
+    }
   }
 
-  await closePool();
+  if (!keepPool) await closePool();
   if (failed) {
     console.error(`[jobs] ${failed} job(s) failed`);
-    process.exit(1);
+    if (!keepPool) process.exit(1);
   }
+  return failed;
 }
 
-module.exports = { notifyThresholds, weeklyRegister };
+module.exports = { notifyThresholds, weeklyRegister, sendGate, main };
 if (require.main === module) main().catch((err) => {
   console.error("[jobs] fatal:", err);
   process.exit(1);
