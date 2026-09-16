@@ -90,6 +90,11 @@
   .legend .nowrap { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
   .legend .person { min-height: 26px; padding: 2px 8px 2px 6px; font-size: 12px; cursor: default; border-color: transparent; background: transparent; }
   .legend .person:hover { background: transparent; border-color: transparent; }
+  /* A family card's member row is a div, not the clickable chip .person
+     styles it borrows for its dot/pill look — only the name inside it
+     opens a record. */
+  .famMembers .person { cursor: default; }
+  .famMembers .person:hover { border-color: var(--line); background: var(--surface); }
   .roomsForm .actions { margin-top: 0; }
   .roomEdit { border-top: 1px dashed var(--line); padding-top: 8px; }
   .roomEdit .lbl { margin-top: 0; }
@@ -815,6 +820,17 @@ async function ensureFamilies() {
   if (out) state.families = out;
   return out;
 }
+// A join/leave/end made from the edit sheet invalidates the cached
+// households: the sheet's own widget refetches itself (see renderCare), but
+// the Families tab's cards behind it — if that's the tab actually showing —
+// would otherwise sit stale (or, until next read, briefly find nothing at
+// all, since state.families is null right after a change). Reload them now
+// when they're the visible thing; otherwise just drop the cache and let the
+// next ensureFamilies()/loadFamilies() refetch.
+function invalidateFamilies() {
+  state.families = null;
+  if (state.tab === "families") loadFamilies();
+}
 function careLine(c) {
   return `Children with ${esc(c.carer_name)}${c.carer_room_label ? ` · ${esc(c.carer_room_label)}` : ""} until ${esc(dayTime(c.until))}${c.overnight ? " · overnight approved" : ""}`;
 }
@@ -975,6 +991,8 @@ function closeCareForm() {
 $("cfCancel").addEventListener("click", closeCareForm);
 $("cfFrom").addEventListener("change", updateOvernightForce);
 $("cfTo").addEventListener("change", updateOvernightForce);
+$("cfFrom").addEventListener("input", updateOvernightForce);
+$("cfTo").addEventListener("input", updateOvernightForce);
 $("cfCarer").addEventListener("input", () => {
   $("cfCarerId").value = "";
   const box = $("cfCarerResults");
@@ -1335,7 +1353,7 @@ async function openResident(id) {
 function renderDetail(rec, summary) {
   state.selected = rec;
   const el = $("detail");
-  if (!rec) { el.hidden = true; el.innerHTML = ""; return; }
+  if (!rec) { el.hidden = true; el.innerHTML = ""; refreshHhCare = () => {}; return; }
   $("addForm").hidden = true;
   const departed = rec.status === "departed";
   const type = rec.id_type || "";
@@ -1499,7 +1517,9 @@ function renderDetail(rec, summary) {
         toast("Removed from the family", "ok");
         rec.household_id = out.household_id ?? null;
         state.families = null;
-        renderMembers(); renderCare(); loadResidents();
+        renderMembers(); renderCare();
+        invalidateFamilies();
+        loadResidents();
       };
     };
     // The supervision widget: only shown once the resident is in a
@@ -1527,6 +1547,7 @@ function renderDetail(rec, summary) {
         toast("Arrangement ended", "ok");
         state.families = null;
         renderCare();
+        invalidateFamilies();
       };
       const newBtn = $("hhNewCare");
       if (newBtn) newBtn.onclick = () => openCareForm(rec.household_id);
@@ -1542,7 +1563,9 @@ function renderDetail(rec, summary) {
       toast("Added to the family", "ok"); $("hhWith").value = "";
       rec.household_id = out.household_id;
       state.families = null;
-      renderMembers(); renderCare(); loadResidents();
+      renderMembers(); renderCare();
+      invalidateFamilies();
+      loadResidents();
     });
   }
 
@@ -2584,7 +2607,11 @@ $("famDepart").addEventListener("click", departMany);
 // The ✕ on the sheet, Escape, or a tap on the page behind it — see
 // mountSheetDismiss() in app-common.js. Escape inside a field of the edit
 // form is left to the field, so a stray key never discards the changes.
-mountSheetDismiss(() => renderDetail(null));
+// #careForm is a sibling of #detail (it needs to float over either the
+// Families tab or the edit sheet), so a click inside it — or Escape with
+// focus in one of its fields — reads to mountSheetDismiss as a tap outside
+// #detail. Guard the close so an open #careForm keeps the sheet behind it.
+mountSheetDismiss(() => { if ($("careForm").hidden) renderDetail(null); });
 
 document.addEventListener("click", (e) => {
   const chip = e.target.closest("button.person[data-open]");
