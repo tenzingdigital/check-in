@@ -125,6 +125,8 @@ module.exports = [
   { area: 'Reports', name: 'Export a report (register, attendance, movements, occupancy, evacuation, drills); logged', method: 'GET', path: (fx) => `/api/reports/register?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: SUPERVISOR },
   { area: 'Reports', name: 'Who missed the register over a range (the Absences tab); not logged', method: 'GET', path: (fx) => `/api/missed?from=${fx.today}&to=${fx.today}`, expect: SUPERVISOR },
   { area: 'Reports', name: 'Child supervision arrangements over a range; logged', method: 'GET', path: (fx) => `/api/reports/supervision?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: SUPERVISOR },
+  { area: 'Reports', name: 'Children on site without a guardian, night by night; logged', method: 'GET', path: (fx) => `/api/reports/guardian-gaps?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: SUPERVISOR },
+  { area: 'Reports', name: 'Check-ins recorded while signed out at the gate; logged', method: 'GET', path: (fx) => `/api/reports/checkin-conflicts?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: SUPERVISOR },
   { area: 'Reports', name: 'Who viewed which record (the access log)', method: 'GET', path: (fx) => `/api/reports/access?from=${fx.today}&to=${fx.today}&reason=matrix&format=json`, expect: ADMIN },
 
   // ---- the resident's rights and the site (admins) ------------------------

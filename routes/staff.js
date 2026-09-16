@@ -15,6 +15,7 @@ const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const mail = require('../lib/mail');
 const { HttpError, translateDbError, uuidParam } = require('../lib/api');
+const prefs = require('../lib/emailPrefs');
 
 const router = express.Router();
 
@@ -249,7 +250,13 @@ router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
     );
     // Ticking someone back on is also the admin's way of undoing an
     // unsubscribe (049): the row is what the staff card shows, so it must go.
-    if (on && rows[0]) await client.query(`delete from email_opt_outs where profile_id = $1 and kind = 'safeguarding_alert'`, [id]);
+    // Every kind that reads this tick (054: the 22:00 alert, the nightly
+    // email and the retired alert's own kind), or the tick and a row would
+    // disagree the moment the admin looked away.
+    if (on && rows[0]) {
+      await client.query(`delete from email_opt_outs where profile_id = $1 and kind = any($2::text[])`,
+        [id, prefs.kindsForTick('safeguarding_alert')]);
+    }
     return rows[0];
   }).catch((err) => { throw translateDbError(err); });
 

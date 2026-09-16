@@ -118,6 +118,8 @@ validation.
 | Export a report (register, attendance, movements, occupancy, evacuation, drills); logged<br><code>GET /api/reports/register</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Who missed the register over a range (the Absences tab); not logged<br><code>GET /api/missed</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Child supervision arrangements over a range; logged<br><code>GET /api/reports/supervision</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
+| Children on site without a guardian, night by night; logged<br><code>GET /api/reports/guardian-gaps</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
+| Check-ins recorded while signed out at the gate; logged<br><code>GET /api/reports/checkin-conflicts</code> | — | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Who viewed which record (the access log)<br><code>GET /api/reports/access</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 
 ## Administration

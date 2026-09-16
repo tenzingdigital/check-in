@@ -18,6 +18,8 @@
 //   weekly      the Sunday Weekly Register Update: absence spans, weekend, removals, rooms (migration 035); also as a Word document (format=docx): the Sunday return in the centre manager's layout (052)
 //   missed      who missed the daily register over a range, one row per resident with the dates (the Absences tab's export)
 //   supervision  Appendix 5 child-supervision arrangements in the range (053)
+//   guardian-gaps      households that had children on site, no guardian on site and no arrangement at the midnight snapshot, night by night (054)
+//   checkin-conflicts  daily check-ins recorded while the In & out register had the person out (054)
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -348,6 +350,59 @@ REPORTS.supervision = {
           cross join (select local_timezone from app_settings where id) tz
          where (a.from_at at time zone tz.local_timezone)::date <= $2 and (a.to_at at time zone tz.local_timezone)::date >= $1
          order by a.from_at desc`,
+};
+
+// The nightly snapshot's record of households that had children on site
+// with no guardian on site and no supervision arrangement running (054).
+// The row is counts and a time; the household, room and children are read
+// from the register as it is at the export, not as it was that night — a
+// child who has since turned eight reads (8), a family since moved reads the
+// new room. That is what a supervisor opening this in the morning wants
+// (who do I go and see), and the night's own numbers are in the two count
+// columns untouched. Every child in the household is listed, not only those
+// who were on site, because the snapshot recorded how many, not which.
+REPORTS['guardian-gaps'] = {
+  title: 'Children on site without a guardian',
+  ranged: true,
+  sql: `select g.night::text as night,
+               hh.household_label as household,
+               (select string_agg(distinct rr.room_label, ', ' order by rr.room_label)
+                  from v_resident_room rr where rr.household_id = g.household_id and rr.room_label is not null) as room,
+               (select string_agg(btrim(k.first_name) || ' ' || btrim(k.last_name) || ' (' || date_part('year', age(k.date_of_birth))::integer || ')', ', ' order by k.date_of_birth)
+                  from residents k
+                 where k.household_id = g.household_id and k.status = 'active'
+                   and k.date_of_birth > current_date - make_interval(years => s.adult_age_years)) as children,
+               g.guardians_out,
+               to_char(g.first_out_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as first_out_at
+          from overnight_guardian_gaps g
+          left join lateral (select household_label from v_resident_room where household_id = g.household_id limit 1) hh on true
+          cross join (select local_timezone, adult_age_years from app_settings where id) s
+         where g.night between $1 and $2
+         order by g.night desc, hh.household_label`,
+};
+
+// Check-ins recorded while the In & out register had the person out (054):
+// v_checkin_conflicts, ranged on the check-in's site date. The register is
+// append-only, so the check-in stands; this list is the correction. A
+// last_gate_movement of 'never signed in' is a person the gate has no
+// record of at all, which is the same conflict with less to go on.
+REPORTS['checkin-conflicts'] = {
+  title: 'Check-ins recorded while signed out',
+  ranged: true,
+  sql: `select to_char(c.occurred_at at time zone s.local_timezone, 'YYYY-MM-DD') as date,
+               btrim(r.first_name) || ' ' || btrim(r.last_name) as resident,
+               to_char(c.occurred_at at time zone s.local_timezone, 'HH24:MI') as time,
+               p.full_name as recorded_by,
+               c.source,
+               coalesce(c.last_gate_kind, 'never signed in') as last_gate_movement,
+               to_char(c.last_gate_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as last_gate_at
+          from v_checkin_conflicts c
+          join residents r on r.id = c.resident_id
+          left join profiles p on p.id = c.guard_id
+          cross join (select local_timezone from app_settings where id) s
+         where c.occurred_at >= ($1::date::timestamp) at time zone s.local_timezone
+           and c.occurred_at <  (($2::date + 1)::timestamp) at time zone s.local_timezone
+         order by c.occurred_at desc, r.last_name, r.first_name`,
 };
 
 // Authorised absences overlapping the range, and who was marked safe on
