@@ -12,6 +12,7 @@ and it is deliberately the first thing in the file.
 | **Database** | `hut-db` — Render Postgres 16 |
 | **Nightly cron** | `hut-nightly` — the maintenance `pg_cron` used to run |
 | **Weekly cron** | `hut-weekly` — the Sunday Weekly Register Update, at 10:00 site time |
+| **Evening cron** | `hut-evening` — the 22:00 guardian alert, at 22:00 site time |
 | **Brochure site** | `checksteady-site` — static, published from `site/` |
 | **App URL** | `app.checksteady.com` |
 | **Site URL** | `checksteady.com` (and `www.`) |
@@ -338,7 +339,7 @@ vendor to sign up for and no keys to copy between dashboards.
 ### 1. Create the services
 
 Render dashboard → **New → Blueprint** → point at this repo. `render.yaml`
-creates all four resources in Frankfurt:
+creates all five resources in Frankfurt:
 
 | Resource | What it is |
 |---|---|
@@ -346,6 +347,7 @@ creates all four resources in Frankfurt:
 | `hut-check-in` | The Node web service — serves `public/` and `/api`. |
 | `hut-nightly` | The cron job that runs the maintenance functions. |
 | `hut-weekly` | The cron job that sends the Sunday Weekly Register Update. |
+| `hut-evening` | The cron job that sends the 22:00 guardian alert. |
 
 `DATABASE_URL` is wired from the database into both services by the blueprint;
 you never paste a connection string anywhere.
@@ -469,14 +471,16 @@ The reset link is the only one of the three that helps the *last remaining
 admin*, who has nobody above them to do it.
 
 Every recurring email — the Sunday Weekly register update, the nightly
-safeguarding alert and the nightly House Rules reminder — carries its own
-Unsubscribe link and the RFC 8058 headers that let a mail client one-click
-it, both built from `PUBLIC_URL` the same as the links above; unset it and
-the email still sends, just with no link to unsubscribe from. The link
-opens `/unsubscribe`, needs no login, and touches only that one person's
-own preference. Admin → Staff shows who used it and when, and re-ticking
-the box reinstates them — except for the House Rules reminder, which has
-no tick; there an admin presses Reinstate on their staff card instead.
+email and the 22:00 guardian alert — carries its own Unsubscribe link and
+the RFC 8058 headers that let a mail client one-click it, both built from
+`PUBLIC_URL` the same as the links above; unset it and the email still
+sends, just with no link to unsubscribe from. The link opens
+`/unsubscribe`, needs no login, and touches only that one person's own
+preference. Admin → Staff shows who used it and when, and re-ticking the
+box reinstates them. The nightly email and the 22:00 alert share one tick,
+so stopping either stops both. A link in an email sent before migration
+054 — the old overnight safeguarding alert or House Rules reminder — still
+works and stops the nightly email that replaced them.
 
 ### 4. Add the rest of the staff, and the residents
 
@@ -573,11 +577,23 @@ out of the two working apps:
 - **Several residents at once** under Admin → Residents: tick people, then
   *Departed* marks them all departed from one date, or *Family* makes them
   one household.
-- **The nightly House Rules reminder** (migration 032, off by default):
-  after close-out, supervisors and admins are emailed the counts at or over
-  a figure and a link to the pre-filled Absences report for that night —
-  never a name — on the nights there is anyone to count. Needs
-  `RESEND_API_KEY` and `MAIL_FROM`.
+- **The nightly email** (migration 054, replacing the House Rules reminder
+  of 032 and the overnight safeguarding alert of 041): after the snapshot,
+  the staff ticked *Gets the nightly email and the 22:00 alert* are emailed
+  one message of four counts, each with a link to the screen that has the
+  names — children on site without a guardian, children away overnight
+  without authorisation, check-ins recorded while signed out, and residents
+  at the House Rules figures — never a name. Sent on the nights there is
+  anything to count, and every Sunday regardless. One switch under
+  Settings, `nightly_email`; the old House Rules switch is retired (its
+  column stays, unread). Needs `RESEND_API_KEY` and `MAIL_FROM`.
+- **The 22:00 guardian alert** (migration 054): at 22:00 site time, the same
+  staff are emailed the households with children on site, every guardian
+  signed out at the gate and no supervision arrangement recorded — the
+  household, the children with their ages, the guardians and when they
+  went out, the room. It is the one email that names residents, because it
+  needs acting on that night; see `docs/GDPR.md`. Behind `feature_households`
+  and the same `nightly_email` switch.
 - **Rooms archived, not deleted** (migration 031): a room that has been
   lived in keeps its history when taken out of use and can be restored;
   nobody can be moved into it meanwhile. Each room carries the beds
@@ -785,6 +801,41 @@ respects "already sent today", so it cannot double-send one that already
 went, and because the week is anchored to the most recent Saturday rather
 than "yesterday", a resend on a later weekday still sends the week ending
 the previous Saturday, not the wrong week.
+
+The nightly run also sends **the nightly email** (migration 054) after the
+snapshot: one message, "Tonight at <site>", to the staff ticked *Gets the
+nightly email and the 22:00 alert*, with four sections in a fixed order —
+**Children on site without a guardian**, **Children away overnight without
+authorisation**, **Check-ins recorded while signed out** and **At the House
+Rules figures** — each a count and a link to the page that has the names,
+never a name itself. It goes on any night a count is non-zero and every
+Sunday regardless, so a silent week is never mistaken for a job that
+stopped; `job_runs` records it as `nightly-email` either way. It replaced
+two emails: the House Rules reminder (032, which went to every supervisor
+and admin) and the overnight safeguarding alert (041). Their job names
+(`notify-thresholds-email`, `overnight-safeguarding-alert`) are no longer
+written, and the House Rules switch under Settings is gone — the
+`notify_thresholds_email` column stays until a later migration drops it,
+but nothing reads it. Hut-nightly needs `RESEND_API_KEY` and `MAIL_FROM`
+for this, as it always did for the two it replaced.
+
+A third cron, `hut-evening`, sends **the 22:00 guardian alert** (migration
+054): the households with children on site, every guardian signed out at
+the gate and no supervision arrangement recorded, named — the one email
+from this app that names residents, to the same ticked staff, because at
+22:00 a manager has to go to a door and a count cannot say which. As with
+the Sunday return, Render's clock is UTC and Ireland's is not, so it runs
+`node jobs.js evening` at both 21:00 and 22:00 UTC every day: the first run
+at or after 22:00 local sends, the other records "before 22:00" or
+"already sent today". It needs `feature_households` and `nightly_email` on
+under Settings and at least one person ticked, or it records why it sent
+nothing; a clear evening records "nothing to report" and sends nothing.
+`node jobs.js evening --force` from a Render shell sends it now, by hand —
+still once a day. After the blueprint sync that creates it, Render prompts
+for `RESEND_API_KEY` and `MAIL_FROM` on the new cron (they are `sync:
+false` in the blueprint), the same as `hut-weekly`; then tick *Gets the
+nightly email and the 22:00 alert* on each manager's staff card, since
+that one tick is the audience for both.
 
 ### 6. Point the front ends at the API
 

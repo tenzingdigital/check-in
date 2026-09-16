@@ -12,12 +12,15 @@
    run late; close_out_compliance_days() explicitly backfills any day it
    missed, which is what makes an external scheduler acceptable here.
 
-   Two crons run this file (render.yaml):
-     hut-nightly   00:30 UTC daily      node jobs.js          close-out, purges, snapshot, the two nightly emails
+   Three crons run this file (render.yaml):
+     hut-nightly   00:30 UTC daily      node jobs.js          close-out, purges, snapshots, the one nightly email
      hut-weekly    09:00 and 10:00 UTC  node jobs.js weekly   the Sunday Weekly Register Update, once, at 10:00 site time
-     node jobs.js weekly --force   by hand: resend a missed Sunday return (still once per day)
-   Two hours because Render's cron is UTC and the site's clock is not: the
-   first run at or after 10:00 local sends, the other records why it did not.
+     hut-evening   21:00 and 22:00 UTC  node jobs.js evening  the 22:00 guardian alert, once, at 22:00 site time
+     node jobs.js weekly --force    by hand: resend a missed Sunday return (still once per day)
+     node jobs.js evening --force   by hand: send the 22:00 alert now (still once per day)
+   Two hours each for the weekly and evening runs because Render's cron is
+   UTC and the site's clock is not: the first run at or after the hour sends,
+   the other records why it did not.
 
    `close-out` is the one that is not optional. Without it, daily_compliance
    only ever gains rows from record_checkin() — the positive path — so nobody
@@ -137,97 +140,10 @@ async function runJob(schema, label, name, sql) {
   }
 }
 
-// The House Rules reminder (migration 032): after close-out, where the
-// centre has turned it on and email is configured, every active supervisor
-// and administrator gets the counts of residents at or over a figure, and a
-// link to the pre-filled Absences report for last night — never a name. Sent
-// only on nights there is anyone to count. The app states facts; the
-// letter is the manager's.
+// The emails the jobs send. lib/mail.js sends; each composer below shapes
+// one message; lib/emailPrefs.js (required at the top) mints the per-person
+// footer link and the List-Unsubscribe headers that go with it.
 const mail = require('./lib/mail');
-async function notifyThresholds(schema, label) {
-  const name = 'notify-thresholds-email';
-  const started = Date.now();
-  try {
-    const summary = await withOwnerIn(schema, async (client) => {
-      const { rows: [s] } = await client.query(
-        `select notify_thresholds_email as on, site_name, warn_after_consecutive_nights as nights,
-                absence_window_limit as win_limit, absence_window_days as win_days,
-                to_char(site_today() - 1, 'YYYY-MM-DD') as night from app_settings where id`);
-      if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
-      // The register views filter on is_staff(), which the nightly job is
-      // not; the same two figures are computed here from the ledger, with
-      // the definitions of migration 015 (closed, required, not presented;
-      // the streak counts days after the latest presented day).
-      const { rows } = await client.query(
-        `with t as (
-           select (select count(*)::int from daily_compliance x
-                    where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
-                      and x.compliance_date > coalesce((select max(y.compliance_date) from daily_compliance y
-                                                         where y.resident_id = r.id and y.required and y.presented and y.closed_at is not null), '1900-01-01'::date)) as consecutive_missed,
-                  (select count(*)::int from daily_compliance x
-                    where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
-                      and x.compliance_date > site_today() - $3::int) as absent_in_window
-             from residents r where r.status = 'active')
-         select * from t where consecutive_missed >= $1 or absent_in_window >= $2`, [s.nights, s.win_limit, s.win_days]);
-      if (!rows.length) { await record(client, name, true, 'nobody at a figure'); return 'nobody'; }
-      const { rows: to } = await client.query(
-        `select p.id, u.email, p.full_name from profiles p join auth.users u on u.id = p.id
-          where p.active and p.role in ('supervisor', 'admin') and u.email is not null
-            and not exists (select 1 from email_opt_outs o where o.profile_id = p.id and o.kind = 'house_rules')`);
-      if (!to.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
-      const figures = `Figures in Settings: ${s.nights} consecutive nights; ${s.win_limit} days absent in ${s.win_days}. A resident can be at both figures.`;
-      const decision = 'The app records the facts; whether a letter or a breach report follows is the manager\'s decision. ' +
-        'Authorised absences are already left out. The names behind these counts are in the app under Admin → Absences.';
-      const nConsecutive = rows.filter((r) => r.consecutive_missed >= s.nights).length;
-      const nWindow = rows.filter((r) => r.absent_in_window >= s.win_limit).length;
-      const link = reportLink({ tab: 'absences', from: s.night, to: s.night });
-      const ctaLabel = `Open Absences for ${safeguarding.dayMonth(s.night)}`;
-      const rowsForLayout = [
-        { label: 'At the consecutive-nights figure', value: String(nConsecutive) },
-        { label: 'At the days-in-window figure', value: String(nWindow) },
-      ];
-      const text = `${s.site_name || 'CheckSteady'}: ${rows.length} resident${rows.length === 1 ? '' : 's'} at or over a House Rules figure after last night's close-out.\n\n` +
-        `${figures}\n\n` +
-        `At the consecutive-nights figure: ${nConsecutive}\nAt the days-in-window figure: ${nWindow}\n\n` +
-        (link ? `${ctaLabel}: ${link}\n\n` : '') +
-        `${decision}`;
-      // Counts and a link, never a name — see docs/GDPR.md, "What leaves by
-      // email". The names behind these counts stay behind the login, on
-      // Admin → Absences.
-      const layoutArgs = {
-        siteName: s.site_name,
-        heading: `House Rules reminder, ${safeguarding.dayMonth(s.night)}`,
-        figure: { value: String(rows.length), label: 'residents at or over a House Rules figure', tone: 'attention' },
-        paragraphs: [`After last night's close-out. ${figures}`],
-        rows: rowsForLayout,
-        cta: link ? { href: link, label: ctaLabel } : null,
-        notes: [decision],
-      };
-      const slug = await prefs.slugForSchema(client, schema);
-      let delivered = 0;
-      for (const r of to) {
-        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'house_rules' });
-        const footer = mail.textFooter(unsubscribe);
-        const out = await mail.send({
-          to: r.email,
-          subject: `${s.site_name || 'CheckSteady'}: ${rows.length} at a House Rules figure`,
-          text: footer ? `${text}\n\n${footer}` : text,
-          html: mail.layout({ ...layoutArgs, unsubscribe }),
-          headers: prefs.headersFor(unsubscribe),
-        });
-        if (out.delivered) delivered += 1;
-      }
-      await record(client, name, true, `${rows.length} listed, ${delivered}/${to.length} emailed`);
-      return `${rows.length} listed, ${delivered}/${to.length} emailed`;
-    });
-    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
-    return true;
-  } catch (err) {
-    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
-    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
-    return false;
-  }
-}
 
 // The Sunday Weekly Register Update (migration 035): on a Sunday, after
 // Saturday night's snapshot, the staff ticked to receive it (migration 037)
@@ -238,6 +154,8 @@ async function notifyThresholds(schema, label) {
 // is_supervisor(), which a job is not.
 const weekly = require('./lib/weeklyReport');
 const safeguarding = require('./lib/safeguardingAlert');
+const guardian = require('./lib/guardianAlert');
+const nightly = require('./lib/nightlyEmail');
 
 // The cron process has no request to build a link from, so it reads
 // PUBLIC_URL directly (see render.yaml). Unset — a misconfigured deploy — is
@@ -258,82 +176,6 @@ function reportLink(params) {
   if (!configured) return null;
   const query = params ? `?${new URLSearchParams(params)}` : '';
   return `${configured}/admin.html${query}`;
-}
-
-// The overnight safeguarding alert (041). Runs every night, unlike the weekly
-// return, because the thing it reports on happens every night.
-//
-// An under-18 away overnight with no authorised absence recorded reaches no
-// other screen in this app: v_resident_compliance evaluates 'exempt' before
-// everything else, so a child never has required_today true, never appears
-// under Not seen, and never reaches attention_list(). The source is the In &
-// out register — overnight_absences is derived from gate_events (027) —
-// because children are not on the daily register at all.
-//
-// A clear night still sends. That was asked for: it is evidence the check
-// ran. The subject differs between the two so a nightly nil does not train
-// people to filter the one that matters, and job_runs records every run
-// either way, so the mail is a convenience and never the only evidence.
-async function safeguardingNightly(schema, label) {
-  const name = 'overnight-safeguarding-alert';
-  const started = Date.now();
-  try {
-    const summary = await withOwnerIn(schema, async (client) => {
-      const { rows: [s] } = await client.query(
-        `select site_name, local_timezone,
-                to_char(site_today() - 1, 'YYYY-MM-DD') as night,
-                to_char(site_today(), 'YYYY-MM-DD') as today
-           from app_settings where id`);
-      if (!s) { await record(client, name, true, 'no settings'); return 'no settings'; }
-
-      const staff = await safeguarding.recipients(client);
-      if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
-
-      // Same idempotence shape as the weekly return, and for the same reason:
-      // an operator re-running `node jobs.js` must not send twice. "at least
-      // one delivered" rather than merely "ran", so a night that reached
-      // nobody retries instead of recording itself as done.
-      const { rows: already } = await client.query(
-        `select 1 from job_runs
-           where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
-             and (ran_at at time zone $2)::date = $3::date
-           limit 1`,
-        [name, s.local_timezone, s.today]);
-      if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
-
-      const { rows: [c] } = await client.query('select overnight_safeguarding_count($1) as n', [s.night]);
-      const count = Number(c.n) || 0;
-
-      const slug = await prefs.slugForSchema(client, schema);
-      let delivered = 0;
-      for (const r of staff) {
-        // One compose per person: the footer link is theirs alone.
-        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'safeguarding_alert' });
-        const { subject, text, html } = safeguarding.compose({
-          siteName: s.site_name,
-          night: s.night,
-          count,
-          link: reportLink({ tab: 'reports', report: 'overnight', from: s.night, to: s.night }),
-          unsubscribe,
-        });
-        const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
-        if (out.delivered) delivered += 1;
-      }
-      const result = `${count} to look at, ${delivered}/${staff.length} emailed`;
-      const allDelivered = delivered === staff.length;
-      await record(client, name, allDelivered, result);
-      if (!allDelivered) {
-        console.error(`[jobs] ${name}: ${staff.length - delivered} of ${staff.length} recipients did not receive the overnight alert`);
-      }
-      return result;
-    });
-    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
-    return true;
-  } catch (err) {
-    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
-    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
-    return false;
-  }
 }
 
 // When the Sunday return may go. Four things, in this order, each recorded
@@ -443,13 +285,224 @@ async function weeklyRegister(schema, label, { force = false } = {}) {
   }
 }
 
+// When the 22:00 guardian alert may go: at 22:00 site time or later. One
+// gate, because the other things the Sunday return waits for do not apply —
+// it is every day, and it reads the gate as it stands rather than a
+// snapshot. 22:00 is when a child left for the evening has plainly been left
+// overnight, and early enough that a manager can still go to a door. `force`
+// (`node jobs.js evening --force`, and the tests) skips the clock and only
+// the clock: "already sent today" is checked by the caller and still stops
+// a second run, so a forced run cannot double-send.
+function eveningGate({ localHour, force = false }) {
+  if (force) return null;
+  if (localHour < 22) return 'before 22:00';
+  return null;
+}
+
+// The 22:00 guardian alert (054). A household with children on site, every
+// guardian signed OUT at the gate and no supervision arrangement running is
+// the one fact in this app a count cannot serve: somebody has to go to a
+// door tonight, and needs to know which. So this is the one email that
+// names residents in its body (lib/guardianAlert.js says why, and
+// docs/GDPR.md records it), and it goes only to the staff ticked for the
+// safeguarding alert — supervisors and admins with a login, whose duty it
+// is to act. Behind feature_households, because the fact is defined by
+// households, and behind nightly_email, the one switch for both messages.
+//
+// guardian_gaps_now() is the supervisor's function run as the owner: it
+// refuses a guard by identity and lets a caller with none through, exactly
+// as email_link_key() (049) does, which is why it is never granted to anon.
+async function guardianAlert(schema, label, { force = false } = {}) {
+  const name = 'guardian-alert-email';
+  const started = Date.now();
+  try {
+    const summary = await withOwnerIn(schema, async (client) => {
+      const { rows: [s] } = await client.query(
+        `select nightly_email as on, feature_households as households, site_name, local_timezone,
+                to_char(site_today(), 'YYYY-MM-DD') as today,
+                extract(hour from now() at time zone local_timezone)::int as local_hour
+           from app_settings where id`);
+      if (!s || !s.on) { await record(client, name, true, 'off'); return 'off'; }
+      if (!s.households) { await record(client, name, true, 'households off'); return 'households off'; }
+      const staff = await safeguarding.recipients(client);
+      if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
+      const stop = eveningGate({ localHour: s.local_hour, force });
+      if (stop) { await record(client, name, true, stop); return stop; }
+      // Once a day, and "once" means delivered to somebody: the same guard
+      // as the weekly return, for the same reasons (see weeklyRegister()).
+      // The two cron hours make a second run a certainty, not a mishap.
+      const { rows: already } = await client.query(
+        `select 1 from job_runs
+           where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
+             and (ran_at at time zone $2)::date = $3::date
+           limit 1`,
+        [name, s.local_timezone, s.today]);
+      if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
+      const { rows: gaps } = await client.query('select * from guardian_gaps_now()');
+      // A clear evening sends nothing. Unlike the nightly email there is no
+      // Sunday nil: a message that names nobody has no door to point at,
+      // and job_runs is the evidence the check ran.
+      if (!gaps.length) { await record(client, name, true, 'nothing to report'); return 'nothing to report'; }
+
+      const slug = await prefs.slugForSchema(client, schema);
+      let delivered = 0;
+      for (const r of staff) {
+        // One compose per person: the footer link is theirs alone.
+        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'guardian_alert' });
+        const { subject, text, html } = guardian.compose({
+          siteName: s.site_name,
+          gaps,
+          link: reportLink({ tab: 'families' }),
+          unsubscribe,
+          timeZone: s.local_timezone,
+        });
+        const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
+        if (out.delivered) delivered += 1;
+      }
+      const result = `${gaps.length} households, ${delivered}/${staff.length} emailed`;
+      const allDelivered = delivered === staff.length;
+      await record(client, name, allDelivered, result);
+      if (!allDelivered) {
+        console.error(`[jobs] ${name}: ${staff.length - delivered} of ${staff.length} recipients did not receive the guardian alert`);
+      }
+      return result;
+    });
+    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
+    return true;
+  } catch (err) {
+    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
+    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
+    return false;
+  }
+}
+
+// The one nightly email (054), "Tonight at <site>". It replaced two: the
+// House Rules reminder (032), which went to every supervisor and admin
+// after close-out, and the overnight safeguarding alert (041), which went
+// to the ticked staff after the snapshot. One message now, after the
+// snapshot, to the ticked staff, with four sections in a fixed order — each
+// a count and a link, never a name (lib/nightlyEmail.js):
+//
+//   children on site without a guardian        overnight_guardian_gaps, written below
+//   children away overnight without authorisation   overnight_safeguarding_count() (041)
+//   check-ins recorded while signed out        checkin_conflict_count() (054)
+//   at the House Rules figures                 the thresholds of 032, computed here
+//
+// An under-18 away overnight with no authorised absence recorded reaches no
+// other screen in this app: v_resident_compliance evaluates 'exempt' before
+// everything else, so a child never has required_today true, never appears
+// under Not seen, and never reaches attention_list(). The source is the In &
+// out register — overnight_absences is derived from gate_events (027) —
+// because children are not on the daily register at all.
+//
+// Sent on any night something is non-zero, and every Sunday regardless, so
+// a week of silence is never mistaken for a job that stopped. job_runs
+// records every run either way; the mail is a convenience and never the
+// only evidence.
+async function nightlyEmail(schema, label) {
+  const name = 'nightly-email';
+  const started = Date.now();
+  try {
+    const summary = await withOwnerIn(schema, async (client) => {
+      const { rows: [s] } = await client.query(
+        `select nightly_email as on, site_name, local_timezone,
+                warn_after_consecutive_nights as nights, absence_window_limit as win_limit, absence_window_days as win_days,
+                to_char(site_today() - 1, 'YYYY-MM-DD') as night,
+                to_char(site_today(), 'YYYY-MM-DD') as today,
+                extract(isodow from site_today())::int as dow
+           from app_settings where id`);
+      if (!s) { await record(client, name, true, 'no settings'); return 'no settings'; }
+
+      // The night's record of children on site with no guardian, for the
+      // Children-without-a-guardian report, taken before any switch is
+      // read: the report is kept whether or not anyone is emailed about it.
+      // A re-run is free (on conflict do nothing).
+      await client.query('select snapshot_guardian_gaps($1::date)', [s.night]);
+
+      if (!s.on) { await record(client, name, true, 'off'); return 'off'; }
+      const staff = await safeguarding.recipients(client);
+      if (!staff.length) { await record(client, name, true, 'no recipients'); return 'no recipients'; }
+
+      // Same idempotence shape as the weekly return, and for the same reason:
+      // an operator re-running `node jobs.js` must not send twice. "at least
+      // one delivered" rather than merely "ran", so a night that reached
+      // nobody retries instead of recording itself as done.
+      const { rows: already } = await client.query(
+        `select 1 from job_runs
+           where job = $1 and ok and result ~ '[1-9][0-9]*/[0-9]+ emailed$'
+             and (ran_at at time zone $2)::date = $3::date
+           limit 1`,
+        [name, s.local_timezone, s.today]);
+      if (already.length) { await record(client, name, true, 'already sent today'); return 'already sent today'; }
+
+      const { rows: [gaps] } = await client.query('select count(*)::int as n from overnight_guardian_gaps where night = $1::date', [s.night]);
+      const { rows: [away] } = await client.query('select overnight_safeguarding_count($1::date) as n', [s.night]);
+      const { rows: [conflicts] } = await client.query('select checkin_conflict_count($1::date) as n', [s.night]);
+      // The register views filter on is_staff(), which the nightly job is
+      // not; the same two figures are computed here from the ledger, with
+      // the definitions of migration 015 (closed, required, not presented;
+      // the streak counts days after the latest presented day).
+      const { rows: figures } = await client.query(
+        `with t as (
+           select (select count(*)::int from daily_compliance x
+                    where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
+                      and x.compliance_date > coalesce((select max(y.compliance_date) from daily_compliance y
+                                                         where y.resident_id = r.id and y.required and y.presented and y.closed_at is not null), '1900-01-01'::date)) as consecutive_missed,
+                  (select count(*)::int from daily_compliance x
+                    where x.resident_id = r.id and x.required and not x.presented and x.closed_at is not null
+                      and x.compliance_date > site_today() - $3::int) as absent_in_window
+             from residents r where r.status = 'active')
+         select * from t where consecutive_missed >= $1 or absent_in_window >= $2`, [s.nights, s.win_limit, s.win_days]);
+      const counts = {
+        guardian_gaps: Number(gaps.n) || 0,
+        children_away: Number(away.n) || 0,
+        conflicts: Number(conflicts.n) || 0,
+        at_figures: figures.length,
+      };
+      const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+      if (!total && s.dow !== 7) { await record(client, name, true, 'nothing to report'); return 'nothing to report'; }
+
+      // Each link lands on the page that has the names, for the night the
+      // count is about — see reportLink() above.
+      const links = {
+        families: reportLink({ tab: 'families' }),
+        overnight: reportLink({ tab: 'reports', report: 'overnight', from: s.night, to: s.night }),
+        conflicts: reportLink({ tab: 'reports', report: 'checkin-conflicts', from: s.night, to: s.night }),
+        absences: reportLink({ tab: 'absences', from: s.night, to: s.night }),
+      };
+      const slug = await prefs.slugForSchema(client, schema);
+      let delivered = 0;
+      for (const r of staff) {
+        // One compose per person: the footer link is theirs alone.
+        const unsubscribe = await prefs.linkFor(client, { slug, profileId: r.id, kind: 'nightly' });
+        const { subject, text, html } = nightly.compose({ siteName: s.site_name, night: s.night, counts, links, unsubscribe });
+        const out = await mail.send({ to: r.email, subject, text, html, headers: prefs.headersFor(unsubscribe) });
+        if (out.delivered) delivered += 1;
+      }
+      const result = `${total} to look at, ${delivered}/${staff.length} emailed`;
+      const allDelivered = delivered === staff.length;
+      await record(client, name, allDelivered, result);
+      if (!allDelivered) {
+        console.error(`[jobs] ${name}: ${staff.length - delivered} of ${staff.length} recipients did not receive the nightly email`);
+      }
+      return result;
+    });
+    console.log(`[jobs] ${label}${name}: ok (${summary}) in ${Date.now() - started}ms`);
+    return true;
+  } catch (err) {
+    console.error(`[jobs] ${label}${name}: FAILED — ${err.message}`);
+    await withOwnerIn(schema, (client) => record(client, name, false, err.message)).catch(() => {});
+    return false;
+  }
+}
+
 async function main(mode = process.argv[2], { keepPool = false, force = process.argv.includes('--force') } = {}) {
   // 'nightly' is accepted as a synonym for no mode at all — the test process
   // calls main() explicitly rather than relying on the argv default, and
   // `main(undefined, ...)` would otherwise re-read process.argv[2] instead of
   // meaning "no mode".
-  const nightly = mode === undefined || mode === 'nightly';
-  if (!nightly && mode !== 'weekly') throw new Error(`[jobs] unknown mode "${mode}"`);
+  const isNightly = mode === undefined || mode === 'nightly';
+  if (!isNightly && mode !== 'weekly' && mode !== 'evening') throw new Error(`[jobs] unknown mode "${mode}"`);
   let failed = 0;
 
   const { rows: tenants } = await withOwner((client) => client.query(
@@ -471,11 +524,17 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
     const live = t.status === 'trial' || t.status === 'active';
 
     // 'weekly' mode is the Sunday cron: only the weekly return, for every
-    // live tenant, and none of the nightly maintenance around it. `force`
-    // only applies here — `node jobs.js weekly --force` is the manual resend
-    // of a missed Sunday return; nightly mode ignores it.
+    // live tenant, and none of the nightly maintenance around it. 'evening'
+    // mode is the 22:00 cron: only the guardian alert, likewise. `force`
+    // applies to those two — `node jobs.js weekly --force` is the manual
+    // resend of a missed Sunday return, `node jobs.js evening --force` the
+    // manual send of the alert; nightly mode ignores it.
     if (mode === 'weekly') {
       if (live && !(await weeklyRegister(schema, label, { force }))) failed += 1;
+      continue;
+    }
+    if (mode === 'evening') {
+      if (live && !(await guardianAlert(schema, label, { force }))) failed += 1;
       continue;
     }
 
@@ -485,28 +544,27 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
       if (liveOnly && !live) continue;
       const ok = await runJob(schema, label, name, sql);
       if (!ok) failed += 1;
-      if (name === 'close-out-compliance-days' && !(await notifyThresholds(schema, label))) failed += 1;
       if (name === 'snapshot-overnight-absences') {
         // A failed snapshot already counted above. The weekly return no
         // longer runs from here at all — see 'weekly' mode above and
         // hut-weekly in render.yaml, which checks this same snapshot itself
-        // via sendGate(). Only the safeguarding alert is decided here now.
+        // via sendGate(). Only the nightly email is decided here now.
         if (ok) {
-          // The alert reads the snapshot the step above just wrote, so it
+          // The email reads the snapshot the step above just wrote, so it
           // depends on it exactly as the weekly return does: a missing night
-          // is indistinguishable from "nobody was away", and an alert built
+          // is indistinguishable from "nobody was away", and an email built
           // on one would say "nothing to report" about a child nobody has
           // seen. Skip and record the skip rather than send that.
-          if (!(await safeguardingNightly(schema, label))) failed += 1;
+          if (!(await nightlyEmail(schema, label))) failed += 1;
         } else {
-          console.log(`[jobs] ${label}overnight-safeguarding-alert: skipped — snapshot-overnight-absences failed`);
-          await withOwnerIn(schema, (client) => record(client, 'overnight-safeguarding-alert', true, 'skipped: snapshot failed')).catch(() => {});
+          console.log(`[jobs] ${label}nightly-email: skipped — snapshot-overnight-absences failed`);
+          await withOwnerIn(schema, (client) => record(client, 'nightly-email', true, 'skipped: snapshot failed')).catch(() => {});
         }
       }
     }
   }
 
-  if (mode !== 'weekly') {
+  if (isNightly) {
     for (const [name, sql] of PLATFORM_JOBS) {
       if (!(await runJob("public", "", name, sql))) failed += 1;
     }
@@ -520,7 +578,7 @@ async function main(mode = process.argv[2], { keepPool = false, force = process.
   return failed;
 }
 
-module.exports = { notifyThresholds, weeklyRegister, sendGate, main };
+module.exports = { weeklyRegister, sendGate, guardianAlert, eveningGate, nightlyEmail, main };
 if (require.main === module) main().catch((err) => {
   console.error("[jobs] fatal:", err);
   process.exit(1);

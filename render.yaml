@@ -2,12 +2,14 @@
 #
 #   Render dashboard → New → Blueprint → point at this repo.
 #
-# Three resources, all in Frankfurt so the resident data stays in the EU:
+# The resources, all in Frankfurt so the resident data stays in the EU:
 #
 #   hut-db          Postgres. The register.
 #   hut-check-in    Node web service. Serves public/ and /api.
 #   hut-nightly     Cron job. The four maintenance functions pg_cron used to
-#                   run inside Supabase.
+#                   run inside Supabase, and the one nightly email.
+#   hut-weekly      Cron job. The Sunday Weekly Register Update.
+#   hut-evening     Cron job. The 22:00 guardian alert.
 #
 # Nothing else is needed: there is no separate static site, because the web
 # service serves the two front ends itself. That is deliberate — same origin
@@ -171,8 +173,8 @@ services:
       - key: NODE_VERSION
         value: "22"
       # The nightly job has no request to build a link from (jobs.js
-      # reportLink()), so the Sunday weekly report link comes from here or
-      # not at all — unset, the email still sends with the link left out.
+      # reportLink()), so the nightly email's links come from here or not
+      # at all — unset, the email still sends with the links left out.
       # Same custom domain as hut-check-in above, and the same reason: a
       # report link should not read as phishing.
       - key: PUBLIC_URL
@@ -204,6 +206,36 @@ services:
       # Mail credentials are set by hand on hut-nightly today; sync: false
       # makes Render prompt for them here at blueprint sync instead of
       # relying on somebody remembering (see README §5).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
+  # The 22:00 guardian alert (migration 054): the households with children on
+  # site, every guardian signed out at the gate and no supervision
+  # arrangement recorded, named, to the staff ticked for the safeguarding
+  # alert. Two UTC hours again because Ireland is not UTC: jobs.js sends on
+  # the first run at or after 22:00 local and records "before 22:00" or
+  # "already sent today" on the other. Needs `feature_households` and
+  # `nightly_email` on under Settings, and somebody ticked, or it records
+  # why it sent nothing. Same env as hut-weekly, same reasons.
+  - type: cron
+    name: hut-evening
+    runtime: node
+    region: frankfurt
+    plan: starter
+    schedule: "0 21,22 * * *"
+    buildCommand: npm install
+    startCommand: node jobs.js evening
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hut-db
+          property: connectionString
+      - key: NODE_VERSION
+        value: "22"
+      - key: PUBLIC_URL
+        value: https://app.checksteady.com
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
