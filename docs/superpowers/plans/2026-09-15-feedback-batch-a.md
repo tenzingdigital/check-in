@@ -78,3 +78,18 @@ Today every page's `.wrap` is capped at 760px (`app-common.css:81,91,165`). On a
 ## Self-review
 
 Four owner asks → four tasks. Task 3 covers three of the owner's lines (max nights, the uneditable typo, "screen needs to be updated"). No placeholders: each step names the file, the field, the text. Interfaces are pinned (column, routes, warning text). Task 4 is deliberately modest — the owner can push it further after seeing it.
+
+---
+
+### Task 5: The House Rules reminder carries counts and a link, never a name
+
+Added 16 September after the owner saw the email: *"This should summarise and not have names for GDPR purposes; it should just link to the pre-filled report for this day."*
+
+**Files:** `jobs.js` `notifyThresholds()` (~134–199: the text/html composition and the per-recipient loop), `docs/GDPR.md:238-243` (the paragraph that documents the names), `test/api.test.js` (the House Rules test ~2620–2645, "the resident at the figure is listed" assertion), `lib/mail.js` footer sentence (already "counts only" — now true).
+
+**Interfaces:** the email becomes the same shape as the safeguarding alert (`lib/safeguardingAlert.js compose()`): `figure: { value: String(rows.length), label: 'residents at or over a House Rules figure', tone: 'attention' }`; `paragraphs: [ 'After last night's close-out. ' + figures ]`; `rows: [ { label: 'At the consecutive-nights figure', value: String(nConsecutive) }, { label: 'At the days-in-window figure', value: String(nWindow) } ]` where `nConsecutive = rows.filter(r => r.consecutive_missed >= s.nights).length` and `nWindow = rows.filter(r => r.absent_in_window >= s.win_limit).length`; `cta: reportLink({ tab: 'absences', from: night, to: night })` labelled `Open Absences for <d Mon>` (night = yesterday, site time — `to_char(site_today() - 1, 'YYYY-MM-DD')` as the safeguarding job does); `notes: [decision]` keeps the "the app records the facts; the judgement stays with the manager" sentence and adds "The names behind these counts are in the app under Admin → Absences." Text part: the same lines, no names. Subject unchanged. Keep the per-recipient unsubscribe link and headers (Task 4 of the unsubscribe plan).
+
+- [ ] **Step 1: Failing test.** Change the assertion at ~2637 from "the resident at the figure is listed" (`/Missing Nights/`) to its opposite: `assert.ok(sent.every((m) => !/Missing Nights/.test(m.text) && !/Missing Nights/.test(m.html || "")), "no resident is named in the House Rules email")`, and add `assert.ok(sent.every((m) => /1 resident|residents at or over/.test(m.text) && /admin\.html\?tab=absences/.test(m.text)), "counts and a link to Absences")`. Run → fails.
+- [ ] **Step 2: Implement** in `jobs.js`; delete the `person()` helper and the `lines` array; keep `figures` and `decision`. Update the comment above (it currently says "this one names residents by design").
+- [ ] **Step 3:** `docs/GDPR.md`: rewrite the House Rules paragraph — counts only, a link, names behind the login; remove "one carries resident data and one does not" framing (both/all three now carry counts only). `README.md` if it describes the email's contents (grep "House Rules reminder").
+- [ ] **Step 4:** `PGBIN=… ./check.sh` green. Commit: `House Rules reminder: counts and a link to Absences, never a name`.
