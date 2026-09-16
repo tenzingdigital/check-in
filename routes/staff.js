@@ -161,8 +161,8 @@ router.post('/:id/active', wrap(async (req, res) => {
 router.post('/:id/role', wrap(async (req, res) => {
   const id = uuidParam(req.params.id, 'staff id');
   const role = String(req.body?.role || '');
-  if (!['guard', 'supervisor', 'admin'].includes(role)) {
-    throw new HttpError(400, 'role must be guard, supervisor or admin');
+  if (!['guard', 'supervisor', 'admin', 'kiosk'].includes(role)) {
+    throw new HttpError(400, 'role must be guard, supervisor, admin or kiosk');
   }
   if (id === req.session.userId) {
     throw new HttpError(400, 'You cannot change your own role.');
@@ -205,8 +205,8 @@ router.post('/:id/weekly-report', wrap(async (req, res) => {
     // by the update matching no rows, the same as every other route here.
     if (on && req.session.role === 'admin') {
       const { rows: [target] } = await client.query('select role from profiles where id = $1', [id]);
-      if (target && target.role === 'guard') {
-        throw new HttpError(400, 'A guard cannot receive the weekly report. Promote them to supervisor or admin first.');
+      if (target && (target.role === 'guard' || target.role === 'kiosk')) {
+        throw new HttpError(400, 'A guard or a self check-in tablet cannot receive the weekly report. Promote them to supervisor or admin first.');
       }
     }
     const { rows } = await client.query(
@@ -239,8 +239,8 @@ router.post('/:id/safeguarding-alert', wrap(async (req, res) => {
     // constraint rather than a sentence written for a manager.
     if (on && req.session.role === 'admin') {
       const { rows: [target] } = await client.query('select role from profiles where id = $1', [id]);
-      if (target && target.role === 'guard') {
-        throw new HttpError(400, 'A guard cannot receive the safeguarding alert. Promote them to supervisor or admin first.');
+      if (target && (target.role === 'guard' || target.role === 'kiosk')) {
+        throw new HttpError(400, 'A guard or a self check-in tablet cannot receive the safeguarding alert. Promote them to supervisor or admin first.');
       }
     }
     const { rows } = await client.query(

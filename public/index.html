@@ -1019,6 +1019,10 @@ async function enterApp() {
   try {
     session = await apiGet("/api/session");
     Offline.rememberSession(session);
+    // A kiosk login has exactly one page — it belongs on the tablet's search
+    // screen, not the gate, whichever way it got here (a direct visit, or a
+    // stale tab left open from before the account was re-roled).
+    if (session?.profile?.role === "kiosk") { location.replace("/kiosk.html"); return; }
   } catch (err) {
     if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
     // The server is unreachable. A tab that was already signed in carries on

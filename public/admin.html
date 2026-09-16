@@ -468,11 +468,12 @@
         <h2>Add a staff account</h2>
         <div class="grid2">
           <div><label class="lbl" for="sfName">Full name</label><input id="sfName" class="field" type="text" required></div>
-          <div><label class="lbl" for="sfRole">Role <button class="tip" type="button" data-tip="Guard: records at the gate and on the register. Supervisor: also manages residents, buildings and reports. Admin: also manages staff and settings, exports and erases records, and reads the access log." aria-label="What each role can do">?</button></label>
+          <div><label class="lbl" for="sfRole">Role <button class="tip" type="button" data-tip="Guard: records at the gate and on the register. Supervisor: also manages residents, buildings and reports. Admin: also manages staff and settings, exports and erases records, and reads the access log. Self check-in tablet: an unattended kiosk that can only search for one resident and record its own check-in." aria-label="What each role can do">?</button></label>
             <select id="sfRole" class="field">
               <option value="guard">Guard</option>
               <option value="supervisor">Supervisor</option>
               <option value="admin">Admin</option>
+              <option value="kiosk">Self check-in tablet</option>
             </select></div>
         </div>
         <!-- What the chosen role can and cannot do, in words, before the
@@ -1369,18 +1370,25 @@ function staffCard(s) {
     esc(s.email),
     s.last_sign_in_at ? `last login ${ago(s.last_sign_in_at)}` : "never logged in",
   ].join(" · ");
-  const roleOptions = ["guard", "supervisor", "admin"]
-    .map((r) => `<option value="${r}" ${r === s.role ? "selected" : ""}>${r}</option>`)
+  // "kiosk" is not staff — a shared tablet login, migration 051 — but it is
+  // still a role this same select changes, so it gets its own label rather
+  // than showing the database value verbatim.
+  const ROLE_LABEL = { guard: "guard", supervisor: "supervisor", admin: "admin", kiosk: "Self check-in tablet" };
+  const roleOptions = ["guard", "supervisor", "admin", "kiosk"]
+    .map((r) => `<option value="${r}" ${r === s.role ? "selected" : ""}>${ROLE_LABEL[r]}</option>`)
     .join("");
   // Only a supervisor or an admin may run the report the Sunday email
   // summarises, so the tick is offered only for those roles (migration 037).
-  const weeklyReport = s.role === "guard" ? "" : `
+  // A kiosk is not staff at all and carries neither flag (the check
+  // constraint from migration 051/037 is the real guarantee; this just
+  // matches it in the UI so the tick is never offered to hide).
+  const weeklyReport = ["guard", "kiosk"].includes(s.role) ? "" : `
         <label class="check"><input type="checkbox" class="sWk" data-sid="${esc(s.id)}" ${s.weekly_report ? "checked" : ""}> <span>Gets the Sunday report</span></label>`;
   // A separate tick from the Sunday report, deliberately: a designated
   // safeguarding person may want the nightly alert and not the weekly return
   // to head office, or the reverse (migration 041). Same role rule — the
   // alert points at a report a guard cannot run.
-  const safeguarding = s.role === "guard" ? "" : `
+  const safeguarding = ["guard", "kiosk"].includes(s.role) ? "" : `
         <label class="check"><input type="checkbox" class="sSg" data-sid="${esc(s.id)}" ${s.safeguarding_alert ? "checked" : ""}> <span>Gets the nightly safeguarding alert</span></label>`;
   // Someone who used the Unsubscribe link in an email (049). Shown as its own
   // line rather than an unticked box, because an unticked box cannot say
@@ -1503,6 +1511,11 @@ const ROLE_HELP = {
     title: "An admin runs the site: people, settings and residents' rights.",
     can: ["Everything a supervisor can", "Invite, disable and re-role staff", "Site settings, retention and feature switches", "Export or erase a resident's whole record (Art. 15 and 17)", "The 'Who viewed which record' report"],
     cannot: ["Disable or demote their own account", "Log in from outside the home countries", "See another centre's residents"],
+  },
+  kiosk: {
+    title: "A self check-in tablet is not staff — it is a shared login left running on one device.",
+    can: ["Search for one resident by name, room or ID number", "Record that resident's own check-in for today"],
+    cannot: ["See a list of residents, or anyone's date of birth or ID number", "Sign anyone in or out at the gate", "Receive the Sunday report or the safeguarding alert", "Do anything a guard, supervisor or admin can do"],
   },
 };
 function renderRoleHelp() {
@@ -2108,6 +2121,10 @@ async function enterApp() {
   try {
     session = await apiGet("/api/session");
     Offline.rememberSession(session);
+    // A kiosk login has exactly one page — it belongs on the tablet's search
+    // screen, not admin, whichever way it got here (a direct visit, or a
+    // stale tab left open from before the account was re-roled).
+    if (session?.profile?.role === "kiosk") { location.replace("/kiosk.html"); return; }
   } catch (err) {
     if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
     Offline.noteFailure(err);

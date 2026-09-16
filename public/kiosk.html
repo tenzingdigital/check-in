@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231d4ed8'/%3E%3Cpath d='M18 33l10 10 18-20' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="CheckSteady">
+<meta name="theme-color" content="#1d4ed8">
+<title>CheckSteady — Self check-in</title>
+
+<!--
+  CheckSteady — the resident self check-in kiosk. Single-file front end, no
+  build step, same shared layer as index.html and checkin.html
+  (app-common.css / app-common.js) — see those files rather than duplicating
+  them here.
+
+  Unlike the other two pages this one carries no login form: a kiosk session
+  is created once, on index.html, and left running on a tablet inside Guided
+  Access. This page only ever does one of two things on load — show the
+  search, or send the browser away (no session, or a session that is not
+  the kiosk role) — see boot() in the inline script below.
+
+  The kiosk role reaches exactly two endpoints, POST /api/kiosk/search and
+  POST /api/kiosk/checkin (routes/kiosk.js, migration 051); GET /api/session
+  answers with settings: null for this role (app_settings is staff-only), so
+  this page never reads state.settings for anything, including the site
+  name — it shows "CheckSteady" and the tablet account's own name instead.
+-->
+
+<link rel="stylesheet" href="/app-common.css">
+<style>
+  /* One job, one column, no header nav, no counts. A tablet standing at the
+     door is read at arm's length, so everything here is larger than the
+     equivalent on the staff pages. */
+  body.app-kiosk { display: flex; min-height: 100vh; flex-direction: column; }
+
+  .kioskHead {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; padding: 18px 20px 6px; max-width: 640px; margin: 0 auto; width: 100%;
+  }
+  .kioskHead .brand { font-size: 15px; font-weight: 650; color: var(--muted); margin: 0; }
+  .kioskHead .who { font-size: 13px; color: var(--muted); text-align: right; }
+
+  main.kiosk {
+    flex: 1; display: flex; flex-direction: column;
+    max-width: 640px; width: 100%; margin: 0 auto; padding: 12px 20px 40px;
+  }
+
+  /* ---- search ---- */
+  .kioskInput {
+    font-size: 24px; padding: 22px 20px; min-height: 68px; border-radius: 16px;
+  }
+  .kioskResults {
+    display: flex; flex-direction: column; gap: 12px; margin-top: 18px;
+  }
+  .kioskHit {
+    width: 100%; text-align: left; min-height: 68px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    padding: 16px 20px; display: flex; flex-direction: column; gap: 4px;
+    box-shadow: var(--lift);
+  }
+  .kioskHit:not(:disabled):hover { border-color: var(--line-hover); }
+  .kioskHit:not(:disabled):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .kioskHit:disabled { opacity: .55; cursor: not-allowed; }
+  .kioskHitName { font-size: 21px; font-weight: 650; }
+  .kioskHitRoom { font-size: 14px; color: var(--muted); }
+  .kioskHitDone { font-size: 13px; font-weight: 650; color: var(--warn-text); }
+
+  /* ---- confirm / thank you ---- */
+  .confirmPanel {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; gap: 18px; padding: 20px 0;
+  }
+  .confirmName { font-size: 40px; font-weight: 700; line-height: 1.15; }
+  .confirmSub { font-size: 19px; color: var(--muted); margin: 0; }
+  .notMeBtn {
+    margin-top: 14px; min-height: 60px; padding: 16px 28px; font-size: 18px;
+    background: var(--surface-2); border: 1px solid var(--line-hover); color: var(--text);
+  }
+
+  .kioskStaffLink {
+    display: block; text-align: center; padding: 18px 12px calc(18px + env(safe-area-inset-bottom));
+    font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 2px;
+  }
+
+  @media (min-width: 480px) {
+    .confirmName { font-size: 48px; }
+  }
+</style>
+</head>
+<body class="app-kiosk">
+
+<div id="app" hidden>
+  <header class="kioskHead">
+    <p class="brand">CheckSteady</p>
+    <p class="who" id="kioskWho"></p>
+  </header>
+
+  <main class="kiosk">
+    <div id="kioskError" class="alert" hidden></div>
+
+    <section id="searchView">
+      <input id="q" class="field kioskInput" type="search"
+             placeholder="Your name, room or ID number"
+             autocomplete="off" autocorrect="off" autocapitalize="words"
+             spellcheck="false" enterkeyhint="search" autofocus>
+      <div id="results" class="kioskResults"></div>
+    </section>
+
+    <section id="confirmView" class="confirmPanel" hidden>
+      <div class="confirmName" id="confirmName"></div>
+      <p class="confirmSub">Checked in — goodnight.</p>
+      <button class="btn notMeBtn" id="notMeBtn" type="button">That's not me (<span id="notMeCount">10</span>)</button>
+    </section>
+
+    <section id="thanksView" class="confirmPanel" hidden>
+      <div class="confirmName">Thank you</div>
+    </section>
+  </main>
+
+  <a class="kioskStaffLink" id="staffLink" href="/index.html">Staff</a>
+</div>
+
+<div id="toast" role="status" aria-live="polite" title="Dismiss"></div>
+
+<script src="/app-common.js"></script>
+
+<script>
+"use strict";
+
+/* ========================================================================
+   State
+   ====================================================================== */
+const state = {
+  profile: null,
+  view: "search",      // search | confirm | thanks
+  pending: null,        // { id, full_name } awaiting the 10s window
+  posting: false,       // true once the countdown has fired and the POST is in flight
+};
+
+let searchTimer  = null;   // 250ms debounce
+let idleTimer    = null;   // 30s idle clears the search
+let confirmTimer = null;   // the "That's not me (n)" countdown
+let doneTimer    = null;   // "Thank you" for 3s
+let searchToken  = 0;      // ignores a stale response that lands after a newer search
+let searchAbort  = null;   // aborts a stale request outright, belt and braces with the token above
+
+/* ========================================================================
+   Small helpers
+   ====================================================================== */
+function showView(name) {
+  state.view = name;
+  $("searchView").hidden  = name !== "search";
+  $("confirmView").hidden = name !== "confirm";
+  $("thanksView").hidden  = name !== "thanks";
+}
+
+function resetSearch() {
+  $("q").value = "";
+  $("results").innerHTML = "";
+}
+
+function backToSearch() {
+  clearInterval(confirmTimer);
+  clearTimeout(doneTimer);
+  state.pending = null;
+  state.posting = false;
+  showView("search");
+  resetSearch();
+  $("q").focus();
+}
+
+/* ========================================================================
+   Search
+   ====================================================================== */
+function renderResults(rows) {
+  const box = $("results");
+  if (!rows.length) {
+    box.innerHTML = $("q").value.trim().length < 2 ? "" : '<p class="empty">No match. Ask a member of staff for help.</p>';
+    return;
+  }
+  box.innerHTML = rows.map((r) => `
+    <button class="kioskHit" type="button" data-id="${esc(r.id)}" data-name="${esc(r.full_name)}" ${r.checked_in_today ? "disabled" : ""}>
+      <span class="kioskHitName">${esc(r.full_name)}</span>
+      ${r.room_label ? `<span class="kioskHitRoom">${esc(r.room_label)}</span>` : ""}
+      ${r.checked_in_today ? '<span class="kioskHitDone">Already checked in today</span>' : ""}
+    </button>`).join("");
+}
+
+// Never fetches below two characters (the server would 400 on it anyway, but
+// there is no reason to ask); debounced 250ms; a slow response cannot land on
+// top of a newer query — aborted outright, and ignored again by the token if
+// it slips through before the abort takes effect.
+async function runSearch(q) {
+  q = (q || "").trim();
+  if (q.length < 2) {
+    if (searchAbort) { searchAbort.abort(); searchAbort = null; }
+    searchToken += 1;
+    renderResults([]);
+    return;
+  }
+
+  if (searchAbort) searchAbort.abort();
+  const controller = new AbortController();
+  searchAbort = controller;
+  const token = ++searchToken;
+
+  let out;
+  try {
+    out = await apiPost("/api/kiosk/search", { q }, controller.signal);
+  } catch (err) {
+    if (err.name === "AbortError") return;          // superseded by a newer search
+    if (token !== searchToken) return;
+    if (err.status === 401) return handleUnauthenticated();
+    toast(err.message, "err");
+    renderResults([]);
+    return;
+  }
+  if (token !== searchToken) return;                 // a newer query already won
+  renderResults((out && out.results) || []);
+}
+
+/* ========================================================================
+   Confirm → check in → thank you
+   ====================================================================== */
+function startConfirm(resident) {
+  state.pending = resident;
+  state.posting = false;
+  $("confirmName").textContent = resident.full_name;
+  $("notMeBtn").disabled = false;
+
+  let remaining = 10;
+  $("notMeCount").textContent = remaining;
+  showView("confirm");
+
+  clearInterval(confirmTimer);
+  confirmTimer = setInterval(() => {
+    remaining -= 1;
+    if (remaining <= 0) {
+      clearInterval(confirmTimer);
+      state.posting = true;
+      $("notMeBtn").disabled = true;
+      doCheckin(resident);
+      return;
+    }
+    $("notMeCount").textContent = remaining;
+  }, 1000);
+}
+
+async function doCheckin(resident) {
+  try {
+    await apiPost("/api/kiosk/checkin", { id: resident.id });
+  } catch (err) {
+    if (err.status === 401) return handleUnauthenticated();
+    toast(err.message, "err");
+    backToSearch();
+    return;
+  }
+  showView("thanks");
+  clearTimeout(doneTimer);
+  doneTimer = setTimeout(backToSearch, 3000);
+}
+
+/* ========================================================================
+   Idle: clears the search 30s after the last touch, so the next resident in
+   the queue never sees the previous one's query on screen. There is no idle
+   LOCK here (unlike the register) — the device itself is locked with Guided
+   Access, not this session.
+   ====================================================================== */
+function noteActivity() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (state.view === "search") resetSearch();
+  }, 30000);
+}
+
+/* ========================================================================
+   Boot
+   ====================================================================== */
+// Named handleUnauthenticated, not onUnauthenticated: app-common.js already
+// declares a module-scope `let onUnauthenticated` (the callback registered by
+// setUnauthenticatedHandler below), and this page's inline script shares that
+// same top-level scope with it — a second top-level binding of the same name
+// is a SyntaxError that would abort this whole script before boot() ever ran.
+function handleUnauthenticated() {
+  location.replace("/index.html");
+}
+setUnauthenticatedHandler(handleUnauthenticated);
+
+async function boot() {
+  let session;
+  try {
+    session = await apiGet("/api/session");
+  } catch (_err) {
+    // No session, or the server could not be reached — either way this
+    // tablet has nothing to show; the login lives on index.html.
+    return handleUnauthenticated();
+  }
+  const profile = session && session.profile;
+  if (!profile || profile.role !== "kiosk") {
+    // Not this login's page — either nobody is signed in, or a staff member
+    // opened it by mistake and belongs on the register/gate instead.
+    return handleUnauthenticated();
+  }
+
+  state.profile = profile;
+  // settings is always null for this role (app_settings is staff-only) —
+  // deliberately never read here. The site name a resident sees is instead
+  // whatever the admin named this tablet's account, e.g. "Slaney gate tablet".
+  $("kioskWho").textContent = profile.full_name || "";
+
+  $("app").hidden = false;
+  showView("search");
+  noteActivity();
+  $("q").focus();
+}
+
+/* ========================================================================
+   Wiring
+   ====================================================================== */
+$("q").addEventListener("input", (e) => {
+  noteActivity();
+  clearTimeout(searchTimer);
+  const v = e.target.value;
+  searchTimer = setTimeout(() => runSearch(v), 250);
+});
+
+$("q").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const first = $("results").querySelector("button.kioskHit:not(:disabled)");
+  if (first) first.click();
+});
+
+$("results").addEventListener("click", (e) => {
+  const hit = e.target.closest(".kioskHit");
+  if (!hit || hit.disabled) return;
+  startConfirm({ id: hit.dataset.id, full_name: hit.dataset.name });
+});
+
+$("notMeBtn").addEventListener("click", () => {
+  if (state.posting) return;
+  backToSearch();
+});
+
+$("staffLink").addEventListener("click", async (e) => {
+  e.preventDefault();
+  try { await apiDelete("/api/session"); } catch (_err) { /* the cookie is gone either way */ }
+  location.replace("/index.html");
+});
+
+document.addEventListener("pointerdown", noteActivity);
+document.addEventListener("keydown", noteActivity);
+
+boot();
+</script>
+</body>
+</html>

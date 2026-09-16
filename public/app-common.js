@@ -158,7 +158,13 @@ class ApiError extends Error {
   }
 }
 
-async function api(path, { method = "GET", body } = {}) {
+// signal is optional and used by exactly one caller today (kiosk.html's
+// search, which aborts a stale request outright rather than merely ignoring
+// its answer). An aborted fetch rejects with a DOMException named
+// "AbortError" \u2014 passed straight through rather than folded into the generic
+// "cannot reach the server" ApiError below, so a caller that started the
+// abort itself can tell the two apart and stay quiet about the one it caused.
+async function api(path, { method = "GET", body, signal } = {}) {
   let res;
   try {
     res = await fetch(path, {
@@ -169,8 +175,10 @@ async function api(path, { method = "GET", body } = {}) {
       // Stated explicitly because it is the whole authentication mechanism.
       credentials: "same-origin",
       cache: "no-store",
+      signal,
     });
-  } catch {
+  } catch (err) {
+    if (err && err.name === "AbortError") throw err;
     // fetch only rejects on a transport failure: the hut's link is down, or
     // the service is restarting mid-deploy.
     throw new ApiError(0, "Cannot reach the server. Check the hut\u2019s internet connection.");
@@ -188,7 +196,7 @@ async function api(path, { method = "GET", body } = {}) {
 }
 
 const apiGet  = (path)        => api(path);
-const apiPost = (path, body)  => api(path, { method: "POST", body });
+const apiPost = (path, body, signal) => api(path, { method: "POST", body, signal });
 const apiDelete = (path)      => api(path, { method: "DELETE" });
 const apiPatch  = (path, body)  => api(path, { method: "PATCH", body });
 

@@ -414,7 +414,8 @@ function todayFact(r) {
   const t = siteTime(r.first_seen_at, state.settings && state.settings.local_timezone);
   const evs = r.checkins_today_events || [];
   const first = evs.length ? evs[evs.length - 1] : null;   // newest first, so the earliest is last
-  const where = first && first.source === "door" ? " at In & out" : "";
+  const where = first && first.source === "door" ? " at In & out"
+    : first && first.source === "kiosk" ? " at the tablet (self)" : "";
   return `Seen${where}${t ? " " + esc(t) : ""} (${r.checkins_today || 1}×)`;
 }
 
@@ -426,7 +427,7 @@ function eventsToday(r) {
   if (!evs.length) return "";
   const tz = state.settings && state.settings.local_timezone;
   return `<div class="events"><span class="stripTitle">Today's check-ins</span>${evs.map((e) =>
-    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b>${e.source === "door" ? " · at In & out" : ""} · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
+    `<div><b>${esc(siteTime(e.occurred_at, tz))}</b>${e.source === "door" ? " · at In & out" : e.source === "kiosk" ? " · at the tablet (self)" : ""} · recorded by ${esc(e.recorded_by || "—")}</div>`).join("")}</div>`;
 }
 
 function renderDetail(r) {
@@ -827,6 +828,10 @@ async function enterApp() {
   try {
     session = await apiGet("/api/session");
     Offline.rememberSession(session);
+    // A kiosk login has exactly one page — it belongs on the tablet's search
+    // screen, not the register, whichever way it got here (a direct visit, or
+    // a stale tab left open from before the account was re-roled).
+    if (session?.profile?.role === "kiosk") { location.replace("/kiosk.html"); return; }
   } catch (err) {
     if (err.status !== 0) return showLogin(err.status === 401 ? "" : err.message);
     // The server is unreachable. A tab that was already signed in carries on
