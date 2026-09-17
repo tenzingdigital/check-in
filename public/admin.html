@@ -231,6 +231,8 @@
   }
   .card.staff .who .check { margin-top: 6px; font-size: 13px; }
   .card.staff .meta.unsub { display: block; color: var(--warn); }
+  .card.staff .name .linkish { font-size: 13px; font-weight: 400; margin-left: 6px; }
+  .card.staff .name .field.compact { width: min(100%, 22ch); }
   /* Staff cards on a phone: the actions get a row of their own. */
   @media (max-width: 600px) {
     .card.staff { flex-wrap: wrap; }
@@ -1771,7 +1773,7 @@ function staffCard(s) {
   return `
     <div class="card staff">
       <span class="who">
-        <span class="name">${esc(s.full_name)}</span>
+        <span class="name">${esc(s.full_name)} <button class="linkish sRename" data-sid="${esc(s.id)}" type="button" aria-label="Rename ${esc(s.full_name)}">Rename</button></span>
         <span class="meta">${meta}</span>${weeklyReport}${safeguarding}${optOuts}
       </span>
       <span class="pill ${s.active ? "in" : "out"}">${s.active ? "Active" : "Disabled"}</span>
@@ -1940,6 +1942,32 @@ $("staffList").addEventListener("click", async (e) => {
       toast(`${s.full_name} ${out.active ? "enabled" : "disabled"}`, "ok");
       loadStaff();
     }
+  } else if (btn.classList.contains("sRename")) {
+    // Inline: the name becomes a field with Save and Cancel, in place, so
+    // a typo at invitation is fixed where it is seen. Enter saves, Escape
+    // cancels; the list re-renders either way.
+    const holder = btn.parentElement;
+    holder.innerHTML = `<input class="field compact sName" type="text" maxlength="80" value="${esc(s.full_name)}" aria-label="Name"> <button class="btn sm sSave" data-sid="${esc(s.id)}" type="button">Save</button> <button class="btn ghost sm sCancel" data-sid="${esc(s.id)}" type="button">Cancel</button>`;
+    const input = holder.querySelector("input");
+    input.focus(); input.select();
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); holder.querySelector(".sSave").click(); }
+      if (ev.key === "Escape") { ev.preventDefault(); holder.querySelector(".sCancel").click(); }
+    });
+  } else if (btn.classList.contains("sSave")) {
+    const full_name = btn.parentElement.querySelector("input.sName").value.trim();
+    if (!full_name) { toast("A name is needed.", "err"); return; }
+    if (full_name === s.full_name) { loadStaff(); return; }
+    const out = await guarded(
+      () => apiPost(`/api/staff/${s.id}/name`, { full_name }),
+      (err) => toast(err.message, "err"),
+    );
+    if (out) {
+      toast(`${s.full_name} is now ${out.full_name}`, "ok");
+      loadStaff();
+    }
+  } else if (btn.classList.contains("sCancel")) {
+    loadStaff();
   } else if (btn.classList.contains("sPw")) {
     btn.disabled = true;
     const out = await guarded(

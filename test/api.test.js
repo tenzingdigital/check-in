@@ -4003,6 +4003,21 @@ async function main() {
     assert.equal(own.status, 400);
     assert.match(own.json.error, /own role/);
 
+    // A name can be corrected in place (a typo at invitation), by an admin
+    // only; it is trimmed, never empty, and the audit trail keeps the old one.
+    const was = target.full_name;
+    const renamed = await adminC.fetch(`/api/staff/${target.id}/name`, { method: "POST", body: { full_name: "  Mick Renamed  " } });
+    assert.equal(renamed.status, 200, renamed.text);
+    assert.equal(renamed.json.full_name, "Mick Renamed");
+    assert.equal((await adminC.fetch("/api/staff")).json.find((s) => s.id === target.id).full_name, "Mick Renamed");
+    assert.equal((await adminC.fetch(`/api/staff/${target.id}/name`, { method: "POST", body: { full_name: "   " } })).status, 400);
+    assert.equal((await adminC.fetch(`/api/staff/${target.id}/name`, { method: "POST", body: { full_name: "x".repeat(81) } })).status, 400);
+    const audited = await withOwner((c) => c.query(
+      `select old_row->>'full_name' as was, new_row->>'full_name' as now from public.admin_audit
+        where table_name = 'profiles' and row_id = $1 and new_row->>'full_name' = 'Mick Renamed' order by at desc limit 1`, [target.id]));
+    assert.deepEqual(audited.rows[0], { was, now: "Mick Renamed" }, "the rename is on the audit trail");
+    assert.equal((await adminC.fetch(`/api/staff/${target.id}/name`, { method: "POST", body: { full_name: was } })).status, 200);
+
     const lockout = await adminC.fetch(`/api/staff/${self.id}/active`, { method: "POST", body: { active: false } });
     assert.equal(lockout.status, 400);
     assert.match(lockout.json.error, /own account/);

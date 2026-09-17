@@ -181,6 +181,31 @@ router.post('/:id/role', wrap(async (req, res) => {
   res.json(row);
 }));
 
+// POST /api/staff/:id/name — correct the name on an account. Names are
+// typed at invitation and typos stick ("Mock" for Mick, 17 Sep 2026), and
+// the name is what every audit row, toast and email footer calls the
+// person. Same shape as /:id/role: the update itself is the authorisation
+// check (profiles_admin_all), so a non-admin matches no rows and gets the
+// same 403 the role change gives. An admin may rename themselves — there is
+// no lockout in a name. Trimmed, 1–80 characters, as admin_invite_staff
+// accepts. profiles_audit (012) records the old and new name.
+router.post('/:id/name', wrap(async (req, res) => {
+  const id = uuidParam(req.params.id, 'staff id');
+  const fullName = String(req.body?.full_name ?? '').trim();
+  if (!fullName || fullName.length > 80) {
+    throw new HttpError(400, 'A name is 1 to 80 characters.');
+  }
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(
+      'update profiles set full_name = $2 where id = $1 returning id, full_name',
+      [id, fullName],
+    );
+    return rows[0];
+  });
+  if (!row) throw req.session.role === 'admin' ? new HttpError(404, 'No such account.') : new HttpError(403, 'Only an administrator can change a name.');
+  res.json(row);
+}));
+
 // POST /api/staff/:id/weekly-report — tick or untick whether this account
 // receives the Sunday Weekly register update. Only a supervisor or admin may
 // run the report it summarises, so a guard must never carry the flag: the
