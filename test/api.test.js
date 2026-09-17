@@ -604,7 +604,10 @@ async function main() {
       method: "POST",
       body: { resident_id: "00000000-0000-4000-8000-000000000000" },
     });
-    assert.equal(res.status, 400);
+    // P0002 (no_data_found) is a 404 (lib/api.js, migration 056's
+    // translateDbError update): a resident that does not exist is not found,
+    // not a bad request.
+    assert.equal(res.status, 404);
     assert.match(res.json.error, /Resident not found/);
   });
 
@@ -1655,10 +1658,92 @@ async function main() {
     assert.equal(csvRes.status, 200, csvRes.text);
     assert.match(csvRes.headers.get("content-type"), /text\/csv/);
     assert.match(csvRes.headers.get("content-disposition"), /history-.*check-ins.*\.csv/);
-    assert.match(csvRes.text, /^\ufeff?resident,register,event,occurred_at,recorded_at,recorded_offline,recorded_by\r\n/);
+    assert.match(csvRes.text, /^\ufeff?resident,register,event,occurred_at,recorded_at,recorded_offline,entered_by_hand,recorded_by\r\n/);
     assert.ok(csvRes.text.split("\r\n").slice(1).filter(Boolean).every((l) => /Daily register,Check-in,/.test(l)), "a movement row is in a check-ins export");
     const logged = await withOwner((c) => c.query(`select 1 from public.admin_audit where table_name = 'reports' and row_id = $1 and note like 'Solicitor request%'`, ["resident_history:" + rid]));
     assert.equal(logged.rows.length, 1, "the export is not on the audit record");
+  });
+
+  await test("a wrong register entry can be removed and a missed one added over HTTP, and both show on the history and the log (migration 056)", async () => {
+    const made = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Register", last_name: `Fix${Math.floor(Math.random() * 1e6)}`, date_of_birth: "1990-01-01" } });
+    assert.equal(made.status, 201, made.text);
+    const rid = made.json.id;
+
+    const who = await api.fetch("/api/session");
+    const guardId = who.json.profile.id;
+
+    const signIn = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: rid, direction: "in" } });
+    assert.equal(signIn.status, 200, signIn.text);
+
+    let hist = await api.fetch(`/api/residents/${rid}/history`);
+    const row = hist.json.find((e) => e.register === "gate");
+    assert.ok(row, "the sign-in did not show up in the history");
+    assert.equal(row.by_hand, false);
+    assert.equal(String(row.guard_id), String(guardId));
+    assert.ok(row.id);
+
+    // The guard's own entry, from the last few seconds: no reason needed.
+    const removed = await api.fetch(`/api/register-entries/gate/${row.id}`, { method: "DELETE", body: {} });
+    assert.equal(removed.status, 204, removed.text);
+    hist = await api.fetch(`/api/residents/${rid}/history`);
+    assert.ok(!hist.json.some((e) => String(e.id) === String(row.id)), "the removed entry is still in the history");
+    const audited = await withOwner((c) => c.query(
+      `select 1 from public.admin_audit where table_name = 'gate_events' and row_id = $1 and action = 'delete'`, [String(row.id)]));
+    assert.equal(audited.rows.length, 1, "the removal is not on the audit record");
+
+    // A second entry, same day but not the supervisor's own: a reason is required.
+    const signIn2 = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: rid, direction: "out" } });
+    assert.equal(signIn2.status, 200, signIn2.text);
+    hist = await api.fetch(`/api/residents/${rid}/history`);
+    const row2 = hist.json.find((e) => e.register === "gate");
+    assert.ok(row2, "the second sign-in did not show up in the history");
+
+    const noReason = await supC.fetch(`/api/register-entries/gate/${row2.id}`, { method: "DELETE", body: {} });
+    assert.equal(noReason.status, 400);
+    assert.match(noReason.json.error, /reason is required/);
+    const withReason = await supC.fetch(`/api/register-entries/gate/${row2.id}`, { method: "DELETE", body: { reason: "wrong person" } });
+    assert.equal(withReason.status, 204, withReason.text);
+
+    // A missed check-in, added two hours after the fact with a reason.
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600e3).toISOString();
+    const added = await api.fetch("/api/register-entries", { method: "POST", body: { register: "checkin", resident_id: rid, occurred_at: twoHoursAgo, reason: "missed at the gate" } });
+    assert.equal(added.status, 201, added.text);
+    assert.ok(added.json.id);
+
+    hist = await api.fetch(`/api/residents/${rid}/history`);
+    const addedRow = hist.json.find((e) => e.register === "checkin");
+    assert.ok(addedRow, "the added check-in did not show up in the history");
+    assert.equal(addedRow.by_hand, true);
+
+    const csvOut = await supC.fetch(`/api/residents/${rid}/history?format=csv&reason=matrix`);
+    assert.equal(csvOut.status, 200, csvOut.text);
+    const csvLines = csvOut.text.split("\r\n").filter(Boolean);
+    assert.ok(csvLines.some((l) => /Check-in/.test(l) && /,yes,/.test(l)), "the by-hand check-in is not marked entered_by_hand=yes in the export");
+
+    // Older than the late-entry window: a guard is refused, a supervisor is not.
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400e3).toISOString();
+    const tooOldAsGuard = await api.fetch("/api/register-entries", { method: "POST", body: { register: "checkin", resident_id: rid, occurred_at: threeDaysAgo, reason: "late" } });
+    assert.equal(tooOldAsGuard.status, 403, tooOldAsGuard.text);
+    const tooOldAsSup = await supC.fetch("/api/register-entries", { method: "POST", body: { register: "checkin", resident_id: rid, occurred_at: threeDaysAgo, reason: "late" } });
+    assert.equal(tooOldAsSup.status, 201, tooOldAsSup.text);
+
+    const badDirection = await api.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "sideways", occurred_at: twoHoursAgo, reason: "x" } });
+    assert.equal(badDirection.status, 400, badDirection.text);
+    const missingReason = await api.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "in", occurred_at: twoHoursAgo } });
+    assert.equal(missingReason.status, 400, missingReason.text);
+    const unknownId = await api.fetch("/api/register-entries/gate/999999999", { method: "DELETE", body: {} });
+    assert.equal(unknownId.status, 404, unknownId.text);
+
+    // A kiosk session: the gate in lib/auth.js refuses it everything but its
+    // own two routes, same as every other route it cannot reach.
+    const kioskCl = client(base);
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["regfixkiosk@hut.example", PASSWORD, "Register Fix Kiosk", "kiosk"]));
+    const kioskLogin = await kioskCl.fetch("/api/session", { method: "POST", body: { email: "regfixkiosk@hut.example", password: PASSWORD } });
+    assert.equal(kioskLogin.status, 200, kioskLogin.text);
+    const kioskDelete = await kioskCl.fetch(`/api/register-entries/gate/${row.id}`, { method: "DELETE", body: {} });
+    assert.equal(kioskDelete.status, 403, kioskDelete.text);
+    const kioskAdd = await kioskCl.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "in", occurred_at: twoHoursAgo, reason: "x" } });
+    assert.equal(kioskAdd.status, 403, kioskAdd.text);
   });
 
   await test("the register and attendance reports come as CSV and JSON, and the export is logged", async () => {
@@ -4123,6 +4208,15 @@ async function main() {
         assert.equal(r.status, 201, r.text);
         fx.rollCallId = id;
       },
+      // A fresh gate movement to remove. record_check() returns a
+      // v_resident_status row, not the gate_events row it just inserted, so
+      // the id is read back directly — the newest row for this resident.
+      gateEntry: async () => {
+        const g = await guardC.fetch("/api/gate-events", { method: "POST", body: { resident_id: fx.residentId, direction: "in" } });
+        assert.equal(g.status, 200, g.text);
+        const { rows } = await withOwner((c) => c.query(`select max(id) as id from gate_events where resident_id = $1`, [fx.residentId]));
+        fx.gateEntryId = rows[0].id;
+      },
       staff: async () => {
         const { rows } = await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4) as id`, [`target${Math.floor(Math.random() * 1e9)}@hut.example`, PASSWORD, "Target Staff", "guard"]));
         fx.staffId = rows[0].id;
@@ -4207,7 +4301,7 @@ async function main() {
         fx.absenceWindowId = w.json.id;
       },
     };
-    for (const m of ["resident", "building", "room", "rollcall", "staff", "weeklyReportStaff", "safeguardingStaff", "visit", "absence", "roster", "household", "carer", "arrangement", "tenant", "absenceWindow"]) {
+    for (const m of ["resident", "building", "room", "rollcall", "gateEntry", "staff", "weeklyReportStaff", "safeguardingStaff", "visit", "absence", "roster", "household", "carer", "arrangement", "tenant", "absenceWindow"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
     }
 

@@ -76,6 +76,10 @@ module.exports = [
   { area: 'Gate and register', name: 'The permitted absence periods (Christmas, Ramadan, Easter, the summer school holiday)', method: 'GET', path: () => '/api/settings/absence-windows', expect: STAFF },
   { area: 'Gate and register', name: 'Buildings, rooms and who is in them', method: 'GET', path: () => '/api/buildings', expect: STAFF },
 
+  // ---- fixing the register (migration 056): any staff member ---------------
+  { area: 'Register', name: 'Remove an entry from the register', method: 'DELETE', path: (fx) => `/api/register-entries/gate/${fx.gateEntryId}`, body: () => ({ reason: 'matrix' }), expect: STAFF, fresh: 'gateEntry' },
+  { area: 'Register', name: 'Add a missed entry to the register', method: 'POST', path: () => '/api/register-entries', body: (fx) => ({ register: 'gate', resident_id: fx.residentId, direction: 'in', occurred_at: new Date(Date.now() - 30 * 60000).toISOString(), reason: 'matrix' }), expect: STAFF },
+
   // ---- evacuation and roll call (every staff member) -----------------------
   { area: 'Evacuation and roll call', name: 'The evacuation list (needs-assistance first)', method: 'GET', path: () => '/api/evacuation', expect: STAFF },
   { area: 'Evacuation and roll call', name: 'The roll call in progress, if any', method: 'GET', path: () => '/api/roll-calls/active', expect: STAFF },

@@ -339,12 +339,12 @@ router.get('/:id/history', wrap(async (req, res) => {
     const { rows } = await client.query(
       `with s as (select local_timezone as tz from app_settings where id),
             b as (select coalesce($2::date, site_today() - 29) as d0, coalesce($3::date, site_today()) as d1)
-       select x.kind, x.occurred_at, x.recorded_at, x.late_entry, x.guard_name
+       select x.id, x.register, x.kind, x.occurred_at, x.recorded_at, x.late_entry, x.by_hand, x.guard_id, x.guard_name
          from (
-           select e.kind, e.occurred_at, e.recorded_at, e.late_entry, g.full_name as guard_name
+           select e.id, 'gate' as register, e.kind, e.occurred_at, e.recorded_at, e.late_entry, e.by_hand, e.guard_id, g.full_name as guard_name
              from gate_events e join profiles g on g.id = e.guard_id where e.resident_id = $1
            union all
-           select 'checkin', c.occurred_at, c.recorded_at, c.late_entry, g.full_name
+           select c.id, 'checkin' as register, 'checkin' as kind, c.occurred_at, c.recorded_at, c.late_entry, c.by_hand, c.guard_id, g.full_name
              from checkin_events c join profiles g on g.id = c.guard_id where c.resident_id = $1
          ) x, s, b
         where x.occurred_at >= (b.d0::timestamp) at time zone s.tz
@@ -374,14 +374,15 @@ router.get('/:id/history', wrap(async (req, res) => {
   const label = { in: 'IN', out: 'OUT', checkin: 'Check-in' };
   const out = rows.map((e) => ({
     resident: resident || '', register: e.kind === 'checkin' ? 'Daily register' : 'In & out', event: label[e.kind] || e.kind,
-    occurred_at: e.occurred_at, recorded_at: e.recorded_at, recorded_offline: e.late_entry ? 'yes' : '', recorded_by: e.guard_name,
+    occurred_at: e.occurred_at, recorded_at: e.recorded_at, recorded_offline: e.late_entry ? 'yes' : '',
+    entered_by_hand: e.by_hand ? 'yes' : '', recorded_by: e.guard_name,
   }));
   // A file that silently stops at 2,000 is worse than one that says so: an
   // inspector cannot tell a complete history from a clipped one.
   if (truncated) {
     out.push({
       resident: resident || '', register: '', event: 'PARTIAL EXPORT — the oldest events are not included. Narrow the dates and export again.',
-      occurred_at: '', recorded_at: '', recorded_offline: '', recorded_by: '',
+      occurred_at: '', recorded_at: '', recorded_offline: '', entered_by_hand: '', recorded_by: '',
     });
   }
   const slug = String(resident || 'resident').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'resident';

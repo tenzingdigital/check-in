@@ -198,6 +198,7 @@ app.use('/api', require('./routes/tenants'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api', require('./routes/gate'));
+app.use('/api', require('./routes/registerFix'));
 app.use('/api', require('./routes/checkins'));
 app.use('/api', require('./routes/sync'));
 

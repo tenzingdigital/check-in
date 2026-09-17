@@ -64,7 +64,7 @@ router.get('/gate-events', wrap(async (req, res) => {
       `with s as (select local_timezone as tz from app_settings limit 1)
        select l.id, l.resident_id, l.kind, l.occurred_at,
               l.resident_name, l.guard_id, l.guard_name,
-              l.late_entry, l.recorded_at, rm.room_label
+              l.late_entry, l.recorded_at, l.by_hand, rm.room_label
          from v_check_log l
          cross join s
          left join v_resident_room rm on rm.id = l.resident_id

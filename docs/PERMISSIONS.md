@@ -58,6 +58,13 @@ validation.
 | The permitted absence periods (Christmas, Ramadan, Easter, the summer school holiday)<br><code>GET /api/settings/absence-windows</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
 | Buildings, rooms and who is in them<br><code>GET /api/buildings</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
 
+## Register
+
+| What | Logged out | Guard | Kiosk | Supervisor | Admin | Platform admin |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Remove an entry from the register<br><code>DELETE /api/register-entries/gate/:id</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
+| Add a missed entry to the register<br><code>POST /api/register-entries</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
+
 ## Evacuation and roll call
 
 | What | Logged out | Guard | Kiosk | Supervisor | Admin | Platform admin |
