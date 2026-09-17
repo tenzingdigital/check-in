@@ -8,7 +8,7 @@
 const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
-const { HttpError, dateParam } = require('../lib/api');
+const { HttpError, dateParam, translateDbError } = require('../lib/api');
 const tenancy = require('../lib/tenancy');
 const { clearDemoCentre } = require('../lib/demoSeed');
 
@@ -106,6 +106,68 @@ router.patch('/', wrap(async (req, res) => {
   });
   if (!row) throw new HttpError(403, 'Only an administrator can change settings');
   res.json(row);
+}));
+
+// ---------------------------------------------------------------------------
+// The self check-in tablet's photograph (migration 057)
+// ---------------------------------------------------------------------------
+//   PUT    /api/settings/kiosk-photo   administrators — raw image bytes
+//   DELETE /api/settings/kiosk-photo   administrators
+//   GET    /api/settings/kiosk-photo   any staff member — the Settings preview
+//
+// The PUT body is not JSON: server.js mounts a raw parser on this exact path,
+// ahead of the blanket express.json() for the rest of /api, so req.body here
+// is a Buffer of the image itself and its declared type is the request's own
+// Content-Type header. set_site_photo() (057) checks size and declared type
+// again — the real security boundary — but sniffing the file's own magic
+// bytes here catches the much more common mistake of a wrong extension or a
+// renamed file, with a sentence written for whoever is uploading rather than
+// a database error.
+const KIOSK_PHOTO_TYPES = {
+  // JPEG: FF D8 FF, the Start Of Image marker plus the byte every JPEG
+  // variant (JFIF, EXIF, ...) begins its next marker with.
+  'image/jpeg': (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  // PNG: the fixed 8-byte signature every PNG file opens with.
+  'image/png': (b) => b.length >= 8 && b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  // WebP: a RIFF container carrying a WEBP payload — bytes 0-3 'RIFF', a
+  // 4-byte little-endian chunk size, then bytes 8-11 'WEBP'.
+  'image/webp': (b) => b.length >= 12 && b.slice(0, 4).toString('latin1') === 'RIFF' && b.slice(8, 12).toString('latin1') === 'WEBP',
+};
+
+router.put('/kiosk-photo', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') throw new HttpError(403, "Only an administrator can set the tablet's photograph");
+
+  const bytes = req.body;
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+    throw new HttpError(400, 'No photograph was uploaded');
+  }
+  const contentType = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const sniff = KIOSK_PHOTO_TYPES[contentType];
+  if (!sniff || !sniff(bytes)) {
+    throw new HttpError(400, 'That file is not a JPEG, PNG or WebP image');
+  }
+
+  await db.withIdentity(req.session.userId, (client) =>
+    client.query('select public.set_site_photo($1, $2, $3)', ['kiosk', contentType, bytes]))
+    .catch((err) => { throw translateDbError(err); });
+
+  res.json({ ok: true, content_type: contentType, bytes: bytes.length });
+}));
+
+router.delete('/kiosk-photo', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') throw new HttpError(403, "Only an administrator can remove the tablet's photograph");
+  await db.withIdentity(req.session.userId, (client) => client.query('select public.clear_site_photo($1)', ['kiosk']));
+  res.status(204).end();
+}));
+
+router.get('/kiosk-photo', wrap(async (req, res) => {
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(`select * from site_photo('kiosk')`);
+    return rows[0];
+  });
+  if (!row) throw new HttpError(404, 'No photograph has been set');
+  res.setHeader('Content-Type', row.content_type);
+  res.send(row.bytes);
 }));
 
 // ---------------------------------------------------------------------------

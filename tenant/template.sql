@@ -674,6 +674,30 @@ $$;
 
 --
 
+-- Name: clear_site_photo(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.clear_site_photo(p_kind text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_role text := __TENANT__.my_role();
+begin
+  if v_role <> 'admin' then
+    raise exception 'Only an administrator can remove the tablet''s photograph' using errcode = '42501';
+  end if;
+
+  delete from __TENANT__.site_photos where kind = p_kind;
+
+  insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action)
+  values (auth.uid(), 'site_photos', p_kind, 'delete');
+end;
+$$;
+
+
+--
+
 -- Name: close_out_compliance_days(date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1365,6 +1389,30 @@ $$;
 
 --
 
+-- Name: kiosk_branding(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.kiosk_branding() RETURNS TABLE(site_name text, has_photo boolean)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_role text := __TENANT__.my_role();
+begin
+  if v_role not in ('kiosk', 'guard', 'supervisor', 'admin') then
+    raise exception 'Not authorised to read the site''s branding' using errcode = '42501';
+  end if;
+
+  return query
+    select s.site_name, exists (select 1 from __TENANT__.site_photos p where p.kind = 'kiosk') as has_photo
+    from __TENANT__.app_settings s
+    where s.id;
+end;
+$$;
+
+
+--
+
 -- Name: kiosk_checkin(uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1508,6 +1556,12 @@ begin
           or (rm.id is not null and lower(
                 b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number
               ) = v_nq)
+          -- 057: the room code alone, exact match — what the door knows.
+          -- Slaney's own incumbent tablet is found this way ("C09"), not by
+          -- the full building/floor label above, which nobody at the door
+          -- reads out. Still exact-only, for the same reason as the label
+          -- match just above: a room holds several people.
+          or (rm.id is not null and lower(rm.number) = v_nq)
           -- Identity number: EXACT match only, never a prefix or substring.
           -- id_number is upper-cased on write (routes/residents.js), so both
           -- sides are upper-cased here to match regardless of how it was
@@ -2777,6 +2831,73 @@ $$;
 
 --
 
+-- Name: set_site_photo(text, text, bytea); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.set_site_photo(p_kind text, p_content_type text, p_bytes bytea) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_role text := __TENANT__.my_role();
+begin
+  if v_role <> 'admin' then
+    raise exception 'Only an administrator can set the tablet''s photograph' using errcode = '42501';
+  end if;
+  if p_kind not in ('kiosk') then
+    raise exception 'Unknown photograph' using errcode = '22023';
+  end if;
+  if p_content_type not in ('image/jpeg', 'image/png', 'image/webp') then
+    raise exception 'Photograph must be a JPEG, PNG or WebP image' using errcode = '22023';
+  end if;
+  if length(p_bytes) < 1 or length(p_bytes) > 4194304 then
+    raise exception 'Photograph must be no more than 4 MB' using errcode = '22023';
+  end if;
+
+  insert into __TENANT__.site_photos (kind, content_type, bytes, uploaded_by, uploaded_at)
+  values (p_kind, p_content_type, p_bytes, auth.uid(), now())
+  on conflict (kind) do update
+    set content_type = excluded.content_type,
+        bytes         = excluded.bytes,
+        uploaded_by   = excluded.uploaded_by,
+        uploaded_at   = excluded.uploaded_at;
+
+  -- The photograph itself never goes on the audit record — only its size,
+  -- the same discipline note_disclosure (012) and the 056 correction rows
+  -- already keep for every other sensitive write in this schema.
+  insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, new_row)
+  values (auth.uid(), 'site_photos', p_kind, 'insert',
+          jsonb_build_object('kind', p_kind, 'content_type', p_content_type, 'bytes', length(p_bytes)));
+end;
+$$;
+
+
+--
+
+-- Name: site_photo(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.site_photo(p_kind text) RETURNS TABLE(content_type text, bytes bytea, uploaded_at timestamp with time zone)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_role text := __TENANT__.my_role();
+begin
+  if v_role not in ('kiosk', 'guard', 'supervisor', 'admin') then
+    raise exception 'Not authorised to read the tablet''s photograph' using errcode = '42501';
+  end if;
+
+  return query
+    select sp.content_type, sp.bytes, sp.uploaded_at
+    from __TENANT__.site_photos sp
+    where sp.kind = p_kind;
+end;
+$$;
+
+
+--
+
 -- Name: snapshot_guardian_gaps(date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -3533,6 +3654,21 @@ CREATE TABLE __TENANT__.rooms (
 
 --
 
+-- Name: site_photos; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE __TENANT__.site_photos (
+    kind text NOT NULL,
+    content_type text NOT NULL,
+    bytes bytea NOT NULL,
+    uploaded_by uuid,
+    uploaded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT site_photos_kind_check CHECK ((kind = 'kiosk'::text))
+);
+
+
+--
+
 -- Name: staff_roster; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4105,6 +4241,15 @@ ALTER TABLE ONLY __TENANT__.rooms
 
 ALTER TABLE ONLY __TENANT__.rooms
     ADD CONSTRAINT rooms_pkey PRIMARY KEY (id);
+
+
+--
+
+-- Name: site_photos site_photos_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.site_photos
+    ADD CONSTRAINT site_photos_pkey PRIMARY KEY (kind);
 
 
 --
@@ -4858,6 +5003,15 @@ ALTER TABLE ONLY __TENANT__.rooms
 
 --
 
+-- Name: site_photos site_photos_uploaded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY __TENANT__.site_photos
+    ADD CONSTRAINT site_photos_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES __TENANT__.profiles(id);
+
+
+--
+
 -- Name: staff_roster staff_roster_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5354,6 +5508,13 @@ CREATE POLICY rooms_supervisor ON __TENANT__.rooms USING (__TENANT__.is_supervis
 
 --
 
+-- Name: site_photos; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE __TENANT__.site_photos ENABLE ROW LEVEL SECURITY;
+
+--
+
 -- Name: staff_roster; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -5600,6 +5761,16 @@ GRANT ALL ON FUNCTION __TENANT__.checkin_conflict_count(p_day date) TO service_r
 
 --
 
+-- Name: FUNCTION clear_site_photo(p_kind text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.clear_site_photo(p_kind text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.clear_site_photo(p_kind text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.clear_site_photo(p_kind text) TO service_role;
+
+
+--
+
 -- Name: FUNCTION close_out_compliance_days(p_through date); Type: ACL; Schema: public; Owner: -
 --
 
@@ -5797,6 +5968,16 @@ GRANT ALL ON FUNCTION __TENANT__.issue_breach(p_resident_id uuid, p_kind text, p
 REVOKE ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) TO authenticated;
 GRANT ALL ON FUNCTION __TENANT__.join_household(p_resident_id uuid, p_with_resident_id uuid) TO service_role;
+
+
+--
+
+-- Name: FUNCTION kiosk_branding(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.kiosk_branding() FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.kiosk_branding() TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.kiosk_branding() TO service_role;
 
 
 --
@@ -6241,6 +6422,26 @@ GRANT ALL ON FUNCTION __TENANT__.search_residents(q text, include_departed boole
 
 --
 
+-- Name: FUNCTION set_site_photo(p_kind text, p_content_type text, p_bytes bytea); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.set_site_photo(p_kind text, p_content_type text, p_bytes bytea) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.set_site_photo(p_kind text, p_content_type text, p_bytes bytea) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.set_site_photo(p_kind text, p_content_type text, p_bytes bytea) TO service_role;
+
+
+--
+
+-- Name: FUNCTION site_photo(p_kind text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.site_photo(p_kind text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.site_photo(p_kind text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.site_photo(p_kind text) TO service_role;
+
+
+--
+
 -- Name: FUNCTION snapshot_guardian_gaps(p_night date); Type: ACL; Schema: public; Owner: -
 --
 
@@ -6539,6 +6740,14 @@ GRANT ALL ON SEQUENCE __TENANT__.room_assignments_id_seq TO service_role;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.rooms TO authenticated;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.rooms TO service_role;
+
+
+--
+
+-- Name: TABLE site_photos; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE __TENANT__.site_photos TO service_role;
 
 
 --

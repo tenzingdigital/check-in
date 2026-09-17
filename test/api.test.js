@@ -60,7 +60,15 @@ function client(base) {
   return {
     get cookie() { return header(); },
     set cookie(v) { jar.clear(); if (v) for (const part of String(v).split(";")) { const [k, ...rest] = part.trim().split("="); if (k) jar.set(k, rest.join("=")); } },
-    async fetch(path, { method = "GET", body, headers = {} } = {}) {
+    // `raw` (a Buffer) and `binary` are the one exception to "this is JSON":
+    // the kiosk-photo tests (migration 057) put actual image bytes on the
+    // wire in both directions, and comparing those through res.text() would
+    // corrupt them (text() decodes as UTF-8; a real JPEG/PNG is not valid
+    // UTF-8). `raw` is sent verbatim as the body — the caller supplies its
+    // own Content-Type via `headers`, same as a browser setting it from the
+    // File's own `type`. `binary: true` reads the response as a Buffer
+    // instead of text/json.
+    async fetch(path, { method = "GET", body, headers = {}, raw, binary } = {}) {
       const cookie = header();
       const res = await fetch(base + path, {
         method,
@@ -69,7 +77,7 @@ function client(base) {
           ...(cookie ? { Cookie: cookie } : {}),
           ...headers,
         },
-        body: body ? JSON.stringify(body) : undefined,
+        body: raw !== undefined ? raw : (body ? JSON.stringify(body) : undefined),
         redirect: "manual",
       });
       const setCookies = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [res.headers.get("set-cookie")].filter(Boolean);
@@ -79,6 +87,10 @@ function client(base) {
         const value = rest.join("=");
         const cleared = !value || attrs.some((a) => /^max-age=0$/i.test(a));
         if (cleared) jar.delete(name); else jar.set(name, value);
+      }
+      if (binary) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        return { status: res.status, headers: res.headers, buffer };
       }
       const text = await res.text();
       let json = null;
@@ -4362,6 +4374,14 @@ async function main() {
         assert.equal(w.status, 201, w.text);
         fx.absenceWindowId = w.json.id;
       },
+      // migration 057: GET /api/kiosk/photo 404s with nothing uploaded, which
+      // this matrix cannot tell apart from "hidden" — so a tiny PNG is
+      // (re-)uploaded as the admin before every allowed attempt at that row.
+      kioskPhoto: async () => {
+        const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("matrix fixture")]);
+        const r = await clients.admin.fetch("/api/settings/kiosk-photo", { method: "PUT", raw: png, headers: { "Content-Type": "image/png" } });
+        assert.equal(r.status, 200, r.text);
+      },
     };
     for (const m of ["resident", "building", "room", "rollcall", "gateEntry", "staff", "weeklyReportStaff", "safeguardingStaff", "visit", "absence", "roster", "household", "carer", "arrangement", "tenant", "absenceWindow"]) {
       try { await makers[m](); } catch (err) { throw new Error(`fixture ${m}: ${err.message}`); }
@@ -5228,6 +5248,105 @@ async function main() {
     // Its own search budget is untouched by the checkins above.
     const search = await limitC.fetch("/api/kiosk/search", { method: "POST", body: { q: "ailb" } });
     assert.equal(search.status, 200, search.text);
+  });
+
+  console.log("\n== the tablet's photograph and branding (migration 057) ==");
+
+  await test("an administrator uploads a photograph; the kiosk and staff read it back, with an ETag; a wrong declared type and a supervisor are both refused", async () => {
+    // A tiny but real PNG: the fixed 8-byte signature every PNG opens with,
+    // plus a few bytes that are not a decodable image — set_site_photo() and
+    // the route's own sniff only care about the signature and the size.
+    const pngBytes = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("not a decodable image, just past the signature"),
+    ]);
+    const jpegBytes = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from("also not decodable")]);
+
+    await withOwner((c) => c.query(`select auth.create_user($1, $2, $3, $4)`, ["kioskphotoadmin@hut.example", PASSWORD, "Kiosk Photo Admin", "admin"]));
+    const photoAdmin = await loginAs("kioskphotoadmin@hut.example");
+    const photoSup = await loginAs("sup2@hut.example");
+
+    const put = await photoAdmin.fetch("/api/settings/kiosk-photo", {
+      method: "PUT", raw: pngBytes, headers: { "Content-Type": "image/png" },
+    });
+    assert.equal(put.status, 200, put.text);
+    assert.deepEqual(put.json, { ok: true, content_type: "image/png", bytes: pngBytes.length });
+
+    const viaKiosk = await kioskC.fetch("/api/kiosk/photo", { binary: true });
+    assert.equal(viaKiosk.status, 200, "kiosk could not read the tablet's own photograph");
+    assert.equal(viaKiosk.headers.get("content-type"), "image/png");
+    assert.ok(viaKiosk.buffer.equals(pngBytes), "the bytes the kiosk received do not match the upload");
+    const etag = viaKiosk.headers.get("etag");
+    assert.ok(etag, "no ETag on GET /api/kiosk/photo");
+
+    const revalidated = await kioskC.fetch("/api/kiosk/photo", { headers: { "If-None-Match": etag } });
+    assert.equal(revalidated.status, 304, revalidated.text);
+
+    const branding = await kioskC.fetch("/api/kiosk/branding");
+    assert.equal(branding.status, 200, branding.text);
+    assert.deepEqual(Object.keys(branding.json).sort(), ["has_photo", "site_name"],
+      "kiosk_branding must carry nothing but these two fields");
+    assert.equal(branding.json.has_photo, true);
+    assert.ok(branding.json.site_name, "no site_name on kiosk_branding");
+
+    // Staff may see it too — the Settings preview reads the same bytes.
+    const guardPhoto = await guardHttp.fetch("/api/kiosk/photo", { binary: true });
+    assert.equal(guardPhoto.status, 200, "a guard must be able to see the tablet's own photograph");
+    const previewPhoto = await guardHttp.fetch("/api/settings/kiosk-photo", { binary: true });
+    assert.equal(previewPhoto.status, 200, previewPhoto.status);
+    assert.ok(previewPhoto.buffer.equals(pngBytes), "the Settings preview must show the same bytes");
+
+    const supPut = await photoSup.fetch("/api/settings/kiosk-photo", {
+      method: "PUT", raw: pngBytes, headers: { "Content-Type": "image/png" },
+    });
+    assert.equal(supPut.status, 403, supPut.text);
+
+    const mismatched = await photoAdmin.fetch("/api/settings/kiosk-photo", {
+      method: "PUT", raw: jpegBytes, headers: { "Content-Type": "image/png" },
+    });
+    assert.equal(mismatched.status, 400, mismatched.text);
+    assert.match(mismatched.json.error, /not a JPEG, PNG or WebP/);
+
+    // Over 4 MB: the raw parser's own 413 is turned into a 400 with a
+    // sentence (server.js), not Express's default HTML error page.
+    const tooBig = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(4 * 1024 * 1024 + 1),
+    ]);
+    const oversized = await photoAdmin.fetch("/api/settings/kiosk-photo", {
+      method: "PUT", raw: tooBig, headers: { "Content-Type": "image/png" },
+    });
+    assert.equal(oversized.status, 400, oversized.text);
+    assert.match(oversized.json.error, /larger than 4/);
+
+    const del = await photoAdmin.fetch("/api/settings/kiosk-photo", { method: "DELETE" });
+    assert.equal(del.status, 204, del.text);
+    const gone = await kioskC.fetch("/api/kiosk/photo");
+    assert.equal(gone.status, 404, gone.text);
+    const brandingAfter = await kioskC.fetch("/api/kiosk/branding");
+    assert.equal(brandingAfter.json.has_photo, false, "has_photo must go false once the photograph is removed");
+  });
+
+  await test("a room code alone finds the resident over HTTP, exact match only", async () => {
+    const number = `C${Math.floor(100 + Math.random() * 800)}`;
+    const supHttp = await loginAs("sup2@hut.example");
+    const bld = await supHttp.fetch("/api/buildings", { method: "POST", body: { name: `Codehouse ${Math.floor(Math.random() * 1e6)}` } });
+    assert.equal(bld.status, 201, bld.text);
+    const room = await supHttp.fetch(`/api/buildings/${bld.json.id}/rooms`, { method: "POST", body: { rooms: [{ number, capacity: 2 }] } });
+    assert.equal(room.status, 201, room.text);
+    const resident = await supHttp.fetch("/api/residents", {
+      method: "POST",
+      body: { first_name: "Codey", last_name: "Doorknock", date_of_birth: "1985-05-05", room_id: room.json[0].id },
+    });
+    assert.equal(resident.status, 201, resident.text);
+
+    const found = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: number.toLowerCase() } });
+    assert.equal(found.status, 200, found.text);
+    assert.ok(found.json.results.some((r) => r.id === resident.json.id), "the room code alone did not find the resident");
+
+    const partial = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: number.toLowerCase().slice(0, -1) } });
+    assert.equal(partial.status, 200, partial.text);
+    assert.ok(!partial.json.results.some((r) => r.id === resident.json.id), "a prefix of the room code must not find the resident");
   });
 
   await test("DELETE /api/session as kiosk ends the session, unaffected by the gate", async () => {

@@ -32,6 +32,8 @@ validation.
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | Search for one adult resident by name, room or exact ID<br><code>POST /api/kiosk/search</code> | — | ✗ | ✓ | ✓ | ✓ | ✓ |
 | Record my own daily check-in<br><code>POST /api/kiosk/checkin</code> | — | ✗ | ✓ | ✓ | ✓ | ✓ |
+| Read the self check-in tablet's branding<br><code>GET /api/kiosk/branding</code> | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Read the self check-in tablet's photograph<br><code>GET /api/kiosk/photo</code> | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ## Gate and register
 
@@ -141,6 +143,8 @@ validation.
 | Add a permitted absence period<br><code>POST /api/settings/absence-windows</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Edit a permitted absence period<br><code>PATCH /api/settings/absence-windows/:id</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Remove a permitted absence period<br><code>DELETE /api/settings/absence-windows/:id</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Upload the self check-in tablet's photograph<br><code>PUT /api/settings/kiosk-photo</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Remove the self check-in tablet's photograph<br><code>DELETE /api/settings/kiosk-photo</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 | List staff accounts<br><small>Names, roles and last sign-in; no more than the header of the app already shows</small><br><code>GET /api/staff</code> | — | ✓ | ✗ | ✓ | ✓ | ✓ |
 | Invite a staff member<br><code>POST /api/staff</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Send a staff member a login link<br><code>POST /api/staff/:id/link</code> | — | ✗ | ✗ | ✗ | ✓ | ✓ |

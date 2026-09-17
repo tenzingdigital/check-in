@@ -127,4 +127,41 @@ router.post('/checkin', wrap(async (req, res) => {
   res.json({ ok: true, checked_in_at: row.first_seen_at });
 }));
 
+// GET /api/kiosk/branding → { site_name, has_photo }. kiosk_branding() (057)
+// is the only door, and hands back exactly these two fields — nothing else
+// the kiosk role could learn from app_settings, which its own session
+// (GET /api/session) already shows as settings: null. No rate limit: this is
+// what draws the attract screen before anyone has tapped anything, so a
+// tablet may call it far more often than it ever calls /search.
+router.get('/branding', wrap(async (req, res) => {
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query('select * from kiosk_branding()');
+    return rows[0];
+  });
+  res.json({ site_name: row.site_name, has_photo: row.has_photo });
+}));
+
+// GET /api/kiosk/photo → the uploaded photograph's bytes, or 404 when none
+// has been set yet. site_photo() (057) is the only door, shared with the
+// Settings preview at GET /api/settings/kiosk-photo. Cached privately for
+// five minutes and revalidated by ETag (the upload's own timestamp), which
+// is what lets the attract screen re-fetch on every idle-return without
+// re-downloading a photograph that has not changed. No rate limit, same
+// reasoning as /branding above.
+router.get('/photo', wrap(async (req, res) => {
+  const row = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows } = await client.query(`select * from site_photo('kiosk')`);
+    return rows[0];
+  });
+  if (!row) throw new HttpError(404, 'No photograph has been set');
+
+  const etag = `"${Math.floor(new Date(row.uploaded_at).getTime() / 1000)}"`;
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.setHeader('ETag', etag);
+  if (req.get('if-none-match') === etag) return res.status(304).end();
+
+  res.setHeader('Content-Type', row.content_type);
+  res.send(row.bytes);
+}));
+
 module.exports = router;

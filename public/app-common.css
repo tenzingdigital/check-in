@@ -670,6 +670,10 @@
   .mt6  { margin-top: 6px; }
   .mt8  { margin-top: 8px; }
   .mt14 { margin-top: 14px; }
+  /* The self check-in tablet's photograph preview (Settings, migration 057):
+     a fixed-width thumbnail so a full-resolution upload does not blow out
+     the settings column. */
+  .kioskPhoto { display: block; max-width: 320px; width: 100%; border-radius: 8px; border: 1px solid var(--line); }
   .field.compact { width: auto; padding: 8px 10px; }
 
   /* ---- login ---- */

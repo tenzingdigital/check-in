@@ -53,6 +53,14 @@ module.exports = [
   // ---- the self check-in kiosk (a shared tablet, not staff) ---------------
   { area: 'Self check-in tablet', name: 'Search for one adult resident by name, room or exact ID', method: 'POST', path: () => '/api/kiosk/search', body: () => ({ q: 'an' }), expect: KIOSK },
   { area: 'Self check-in tablet', name: 'Record my own daily check-in', method: 'POST', path: (fx) => '/api/kiosk/checkin', body: (fx) => ({ id: fx.residentId }), expect: KIOSK },
+  // migration 057: the site's name and its photograph, if any — read by the
+  // kiosk (the attract screen) and by every staff member alike, unlike the
+  // two rows above which a guard is refused.
+  { area: 'Self check-in tablet', name: "Read the self check-in tablet's branding", method: 'GET', path: () => '/api/kiosk/branding', expect: { ...STAFF, kiosk: 'allow' } },
+  // fresh: without a photograph uploaded first, this 404s for every role —
+  // a true "not found", but indistinguishable from "hidden" to this matrix,
+  // so a photo is (re-)uploaded before every allowed attempt.
+  { area: 'Self check-in tablet', name: "Read the self check-in tablet's photograph", method: 'GET', path: () => '/api/kiosk/photo', expect: { ...STAFF, kiosk: 'allow' }, fresh: 'kioskPhoto' },
 
   // ---- the gate and the register (every staff member) ---------------------
   { area: 'Gate and register', name: 'Search residents (name, age, state; never the ID number)', method: 'GET', path: () => '/api/residents?q=a&compliance=1', expect: STAFF },
@@ -142,6 +150,13 @@ module.exports = [
   { area: 'Administration', name: 'Add a permitted absence period', method: 'POST', path: () => '/api/settings/absence-windows', body: () => ({ name: `Matrix ${crypto.randomInt(1e6)}`, from_date: '2030-01-01', to_date: '2030-01-02' }), expect: ADMIN },
   { area: 'Administration', name: 'Edit a permitted absence period', method: 'PATCH', path: (fx) => `/api/settings/absence-windows/${fx.absenceWindowId}`, body: () => ({ name: 'Edited' }), expect: ADMIN, fresh: 'absenceWindow' },
   { area: 'Administration', name: 'Remove a permitted absence period', method: 'DELETE', path: (fx) => `/api/settings/absence-windows/${fx.absenceWindowId}`, expect: ADMIN, fresh: 'absenceWindow' },
+  // migration 057: a raw image body, not JSON — the matrix sends no body at
+  // all for these two, which reaches set_site_photo()'s own checks as an
+  // empty upload (400, still "allow") for an admin, and is refused before
+  // that for everyone else on req.session.role alone. The HTTP suite's own
+  // kiosk-photo tests below exercise the real upload.
+  { area: 'Administration', name: "Upload the self check-in tablet's photograph", method: 'PUT', path: () => '/api/settings/kiosk-photo', expect: ADMIN },
+  { area: 'Administration', name: "Remove the self check-in tablet's photograph", method: 'DELETE', path: () => '/api/settings/kiosk-photo', expect: ADMIN },
   { area: 'Administration', name: 'List staff accounts', method: 'GET', path: () => '/api/staff', expect: STAFF, note: 'Names, roles and last sign-in; no more than the header of the app already shows' },
   { area: 'Administration', name: 'Invite a staff member', method: 'POST', path: () => '/api/staff', body: () => ({ email: `m${crypto.randomInt(1e9)}@hut.example`, full_name: 'Matrix Staff', role: 'guard' }), expect: ADMIN },
   { area: 'Administration', name: 'Send a staff member a login link', method: 'POST', path: (fx) => `/api/staff/${fx.staffId}/link`, body: () => ({}), expect: ADMIN },

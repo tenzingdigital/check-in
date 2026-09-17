@@ -1658,3 +1658,87 @@ select pg_temp.expect('056.10: daily_compliance follows what remains once the tw
   (:'after10_checkin_count')::integer, (:'before10_checkin_count')::integer - 1);
 
 update public.app_settings set feature_door_checkin = false;
+
+\echo ''
+\echo '=========== 057: THE TABLET''S PHOTOGRAPH AND BRANDING; A ROOM CODE ALONE ==========='
+
+\echo '--- an administrator sets a tiny photograph; site_photo(''kiosk'') returns it'
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.set_site_photo('kiosk', 'image/png', '\x010203'::bytea);
+select content_type, bytes, uploaded_at is not null as has_ts from public.site_photo('kiosk') \gset photo_
+reset role;
+select pg_temp.expect('057: content_type round-trips', :'photo_content_type'::text, 'image/png'::text);
+select pg_temp.expect('057: bytes round-trip', :'photo_bytes'::bytea, '\x010203'::bytea);
+select pg_temp.expect('057: uploaded_at is set', (:'photo_has_ts')::boolean, true);
+
+\echo '--- the kiosk reads its own branding and the photograph, but may not set or clear either'
+set role authenticated;
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+select site_name, has_photo from public.kiosk_branding() \gset kb_
+select content_type from public.site_photo('kiosk') \gset kp_
+reset role;
+select site_name from public.app_settings where id \gset real_
+select pg_temp.expect('057: kiosk_branding site_name matches app_settings', :'kb_site_name'::text, :'real_site_name'::text);
+select pg_temp.expect('057: kiosk_branding has_photo true', (:'kb_has_photo')::boolean, true);
+select pg_temp.expect('057: kiosk reads the photograph too', :'kp_content_type'::text, 'image/png'::text);
+
+set role authenticated;
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+select pg_temp.expect('057: kiosk cannot set the photograph (42501)',
+  pg_temp.try('x', 'select public.set_site_photo(''kiosk'', ''image/png'', ''\x010203''::bytea)') like '%blocked%', true);
+select pg_temp.expect('057: kiosk cannot clear the photograph (42501)',
+  pg_temp.try('x', 'select public.clear_site_photo(''kiosk'')') like '%blocked%', true);
+reset role;
+
+\echo '--- a guard reads branding too (staff, not just kiosk); a supervisor may not set the photograph'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select has_photo from public.kiosk_branding() \gset guard_
+reset role;
+select pg_temp.expect('057: guard reads kiosk_branding', (:'guard_has_photo')::boolean, true);
+
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.expect('057: supervisor cannot set the photograph (42501)',
+  pg_temp.try('x', 'select public.set_site_photo(''kiosk'', ''image/png'', ''\x010203''::bytea)') like '%blocked%', true);
+reset role;
+
+\echo '--- a bad content type is refused (22023)'
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select pg_temp.expect('057: a GIF is refused as a type (22023)',
+  pg_temp.try('x', 'select public.set_site_photo(''kiosk'', ''image/gif'', ''\x010203''::bytea)') like '%blocked%', true);
+reset role;
+
+\echo '--- clearing the photograph: has_photo goes false, and the two writes are each audited without the bytes'
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.clear_site_photo('kiosk');
+select has_photo from public.kiosk_branding() \gset cleared_
+reset role;
+select pg_temp.expect('057: has_photo false once cleared', (:'cleared_has_photo')::boolean, false);
+select count(*)::int as n from public.admin_audit where table_name = 'site_photos' and action = 'insert' \gset ai_
+select count(*)::int as n from public.admin_audit where table_name = 'site_photos' and action = 'delete' \gset ad_
+select pg_temp.expect('057: one insert audit row', (:'ai_n')::integer, 1);
+select pg_temp.expect('057: one delete audit row', (:'ad_n')::integer, 1);
+select (new_row->>'bytes') as bytes_field
+  from public.admin_audit where table_name = 'site_photos' and action = 'insert' \gset an_
+select pg_temp.expect('057: the audited new_row carries a bytes count, not bytes', :'an_bytes_field'::text, '3'::text);
+
+\echo '--- a room code alone finds the room: exact match, never a prefix'
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+insert into public.buildings (name) values ('Slaney') returning id as slaney_id \gset
+insert into public.rooms (building_id, floor, number, capacity) values (:'slaney_id', '', 'C09', 2) returning id as c09_id \gset
+insert into public.residents (first_name, last_name, date_of_birth, room_id)
+  values ('Codey', 'Doorknock', '1985-05-05', :'c09_id') returning id as codey_id \gset
+reset role;
+
+set role authenticated;
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+select full_name from public.kiosk_search('c09') \gset code_
+select count(*)::int as n from public.kiosk_search('c0') \gset partial_
+reset role;
+select pg_temp.expect('057: the room code alone finds the resident', :'code_full_name'::text, 'Codey Doorknock'::text);
+select pg_temp.expect('057: a prefix of the code finds nobody', (:'partial_n')::integer, 0);

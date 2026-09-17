@@ -200,6 +200,29 @@ const apiPost = (path, body, signal) => api(path, { method: "POST", body, signal
 const apiDelete = (path, body) => api(path, { method: "DELETE", ...(body ? { body } : {}) });
 const apiPatch  = (path, body)  => api(path, { method: "PATCH", body });
 
+// The one caller that is not JSON: uploading the self check-in tablet's
+// photograph (migration 057). api() above always sends a JSON body, so this
+// is its own small wrapper — the file itself as the body, its own type as
+// Content-Type, same credentials and error handling as every other call.
+async function apiPutRaw(path, file) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method: "PUT",
+      headers: { "Content-Type": file.type },
+      body: file,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+  } catch (err) {
+    throw new ApiError(0, "Cannot reach the server. Check the hut’s internet connection.");
+  }
+  let payload = null;
+  try { payload = await res.json(); } catch { /* fall through to status text */ }
+  if (!res.ok) throw new ApiError(res.status, payload?.error || `Request failed (${res.status})`);
+  return payload;
+}
+
 // A 401 means the session expired or was revoked (a supervisor disabling the
 // account ends it on the next request). Both pages hand this the function that
 // returns them to the login screen, so an expired session shows the login form

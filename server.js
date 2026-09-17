@@ -14,7 +14,7 @@ const db = require('./database');            // pool + migrate() + the RLS helpe
 const auth = require('./lib/auth');
 const mail = require('./lib/mail');
 const { securityHeaders } = require('./lib/security');
-const { translateDbError } = require('./lib/api');
+const { HttpError, translateDbError } = require('./lib/api');
 
 // One Render web service serves both things: the static front ends out of
 // public/, and the API out of /api. That is deliberate over the more obvious
@@ -143,6 +143,26 @@ app.use(require('./routes/unsubscribe'));
 /* --------------------------------------------------------------------------
    API
    ------------------------------------------------------------------------ */
+
+// The self check-in tablet's photograph (migration 057) is uploaded as a raw
+// image body, not JSON. Mounted on this exact path and method, ahead of the
+// blanket express.json() below: body-parser only reads a body whose
+// Content-Type matches its own `type` filter (application/json here) and
+// simply skips anything else, so express.json() would never touch an
+// image/* body regardless of order — but the raw parser still needs
+// somewhere to run, and here, first in line for this one path, is where its
+// own errors (an oversized upload, a stream it cannot read) can be turned
+// into the same `{ error: "..." }` shape every other /api failure takes,
+// instead of Express's own default HTML error page. routes/settings.js does
+// the rest: who may call it, and what counts as a real JPEG/PNG/WebP.
+const kioskPhotoRaw = express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '4mb' });
+app.put('/api/settings/kiosk-photo', (req, res, next) => {
+  kioskPhotoRaw(req, res, (err) => {
+    if (!err) return next();
+    if (err.type === 'entity.too.large') return next(new HttpError(400, 'That photograph is larger than 4 MB.'));
+    return next(new HttpError(400, 'Could not read the uploaded photograph.'));
+  });
+});
 
 // 64 kB is far more than any request here sends; the point is that an
 // unbounded body is a memory-exhaustion path on a service with no WAF.
