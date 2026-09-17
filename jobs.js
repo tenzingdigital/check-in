@@ -446,12 +446,19 @@ async function nightlyEmail(schema, label) {
 
       // 2. Children away overnight without authorisation: the predicate of
       // overnight_safeguarding_count() (041), spelled out so the child can
-      // be named and roomed alongside it.
+      // be named and roomed alongside it. `with_adults` is the household's
+      // adults who were also off site that night (17 Sep 2026, the owner: a
+      // child out with a parent and a child out alone are different things,
+      // and the email must say which).
       const { rows: awayRows } = await client.query(
         `with s as (select local_timezone as tz, adult_age_years as adult from app_settings where id)
          select btrim(r.first_name) || ' ' || btrim(r.last_name) as name,
                 date_part('year', age(o.night, r.date_of_birth))::int as age,
-                ${ROOM} as room
+                ${ROOM} as room,
+                (select string_agg(btrim(a.first_name) || ' ' || btrim(a.last_name), ', ' order by a.last_name, a.first_name)
+                   from overnight_absences o2 join residents a on a.id = o2.resident_id
+                  where o2.night = o.night and r.household_id is not null and a.household_id = r.household_id
+                    and a.date_of_birth <= (o.night - make_interval(years => s.adult))::date) as with_adults
            from overnight_absences o
            join residents r on r.id = o.resident_id
            cross join s
@@ -509,7 +516,7 @@ async function nightlyEmail(schema, label) {
         guardian_gaps: gapRows.map((r) =>
           `${r.household}${r.room ? ' · ' + r.room : ''} — ${r.children || 'children on site'}; ${r.guardians_out} adult${r.guardians_out === 1 ? '' : 's'} signed out${r.first_out ? ', first at ' + r.first_out : ''}`),
         children_away: awayRows.map((r) =>
-          `${r.name} (${r.age})${r.room ? ' · ' + r.room : ''} — off site at midnight, no authorised absence`),
+          `${r.name} (${r.age})${r.room ? ' · ' + r.room : ''} — off site at midnight, no authorised absence; ${r.with_adults ? 'out with ' + r.with_adults : 'NO ADULT from the household out with them'}`),
         conflicts: conflictRows.map((r) =>
           `${r.name}${r.room ? ' · ' + r.room : ''} — checked in ${r.at}, ${r.kind ? 'the In & out register had them out since ' + r.gate_at : 'no sign-in on record'}`),
         at_figures: figureRows.map((r) => {

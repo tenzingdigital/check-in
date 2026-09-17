@@ -45,7 +45,8 @@ September 2026 (Slaney Manor — the manager reads these on her phone) reaches
 the copy as well as the code. The nightly email itself now names residents
 in its body instead of linking to a login: the household, room, children
 and ages for a guardian gap; the resident, age and room for an overnight
-absence; the resident, room, check-in time and last gate movement for a
+absence, and which adults of the household were also out (or that none
+was); the resident, room, check-in time and last gate movement for a
 check-in conflict; the resident, room and figure for a House
 Rules count. The Sunday email's own body is unchanged — counts and a link —
 but its Word attachment (052) is now on by default rather than a switch a
@@ -301,7 +302,8 @@ households with children on site and no guardian at midnight, named with
 their room, children and ages, adults signed out and when the first of
 them left (the "Children on site without a guardian" report for that
 night); children away overnight with no authorised absence, named with
-age and room (the "Absent overnight" report); check-ins recorded while the
+age and room and whether an adult of the household was out with them
+(the "Absent overnight" report); check-ins recorded while the
 In & out register had the person out, named with room, the check-in time
 and the last gate movement (the "Check-ins recorded while signed out"
 report); and residents at the House Rules figures, named with room and

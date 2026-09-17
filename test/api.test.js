@@ -1972,6 +1972,9 @@ async function main() {
     assert.equal(later.subject, "Slaney: tonight — 3 to look at");
     assert.match(later.html, /Open Check-ins recorded while signed out/, "the button follows the first non-zero section");
 
+    // The two children sections are painted in the attention tone (the
+    // figure's amber), the other two are not: three amber blocks in all.
+    assert.equal((out.html.match(/background:#fffbeb;/g) || []).length, 3, "figure + two highlighted children sections");
     // The old contract was counts; a caller still passing them gets the nil
     // email, not a silent count-only message.
     assert.equal(compose({ siteName: "Slaney", night: "2026-09-20", counts: { conflicts: 3 }, links }).subject, "Slaney: tonight — nothing to report");
