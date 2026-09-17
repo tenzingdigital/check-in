@@ -494,7 +494,7 @@ function renderDetail(r) {
     <div id="detailHistory"></div>`;
   el.hidden = false;
   if (opening) el.scrollTop = 0;
-  if (renderDetail.historyFor !== r.id || !$("detailHistory").querySelector(".hlist")) mountHistory($("detailHistory"), r.id, { canExport: canEditId() });
+  if (renderDetail.historyFor !== r.id || !$("detailHistory").querySelector(".hlist")) mountHistory($("detailHistory"), r.id, { canExport: canEditId(), onChange: () => { refreshSummary(); runSearch($("q").value); } });
   renderDetail.historyFor = r.id;
 
   $("doCheckin").onclick = () => checkin(r.id);

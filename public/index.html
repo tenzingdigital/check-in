@@ -429,7 +429,7 @@ function renderDetail(r) {
   $("doOut").onclick = () => record(r.id, "out");
   $("closeDetail").onclick = () => { renderDetail(null); $("q").focus(); };
   const canExport = !!(state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin"));
-  if (!renderDetail.historyFor || renderDetail.historyFor !== r.id || !el.querySelector(".hlist")) mountHistory($("detailHistory"), r.id, { canExport });
+  if (!renderDetail.historyFor || renderDetail.historyFor !== r.id || !el.querySelector(".hlist")) mountHistory($("detailHistory"), r.id, { canExport, onChange: () => { refreshSummary(); runSearch($("q").value); } });
   renderDetail.historyFor = r.id;
 }
 
@@ -459,7 +459,7 @@ function renderLog(rows) {
       <span class="dir ${e.kind === "in" ? "in" : "out"}">${e.kind === "in" ? "IN" : "OUT"}</span>
       <span class="body">
         ${esc(e.resident_name)}${e.room_label && state.settings?.feature_buildings ? ` <span class="by">· ${esc(e.room_label)}</span>` : ""}
-        <span class="by">by ${esc(e.guard_name)}${e.late_entry ? " · recorded offline, synced later" : ""}</span>
+        <span class="by">by ${esc(e.guard_name)}${e.late_entry ? " · recorded offline, synced later" : ""}${e.by_hand ? " · entered by hand" : ""}</span>
       </span>
     </div>`).join("");
 }

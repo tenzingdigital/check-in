@@ -617,6 +617,15 @@ out of the two working apps:
   week and This month one tap away, and filters by name or room;
   and *Select several* signs a group in or out in one go, one movement per
   person.
+- **Fix a wrong entry, or add one you missed** (migration 056): on one
+  person's History, every row has *Remove* — off the register with a
+  reason, copied to `admin_audit` before it goes, so the audit trail still
+  says what was recorded and why it left; your own entry from the last 15
+  minutes needs no reason, an earlier day needs a supervisor or admin.
+  *Add a missed entry*, above the list, puts a check-in or a movement on at
+  the time it happened, always with a reason, marked `by_hand`; any staff
+  member within the late-entry window (48 hours by default), a supervisor
+  or admin further back, up to 28 nights. Nothing is edited in place.
 - **Visitors, staff and contractors** (behind `feature_visitors`): a
   Visitors tab on the gate signs anyone who is not a resident in on arrival
   and out when they leave, with a kind from a fixed list, a name and an

@@ -137,8 +137,24 @@
   .history .hkind button.hexport { margin-left: auto; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: transparent; }
   .history .hkind button.hexport[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
   .history .hkind button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Add a missed entry reads as a link, not a segment or the export pill,
+     so it does not compete with the filter it sits beside. */
+  .history .hkind button.linkish {
+    background: none; border: 0; padding: 0 0 0 8px; border-radius: 0;
+    color: var(--accent); font-weight: 600; text-decoration: underline;
+  }
   .history .hexportform { margin-top: 8px; }
   .history .hexportform .btn.sm { padding: 10px 14px; flex: none; }
+  .history .haddform { margin-top: 8px; flex-wrap: wrap; row-gap: 8px; }
+  .history .haddform .field { padding: 10px 10px; font-size: 14px; }
+  .history .haddform select.field { flex: none; }
+  .history .haddform input[type="datetime-local"] { flex: none; min-width: 0; }
+  .history .haddform .btn.sm { padding: 10px 14px; flex: none; }
+  /* Remove sits at the row's end; clicking it swaps the row's body for a
+     reason form in place, so the row being fixed never leaves view. */
+  .logrow .hremove { flex: none; }
+  .history .hremoveform { flex-wrap: wrap; row-gap: 8px; }
+  .history .hremoveform .btn.sm { padding: 8px 12px; flex: none; }
   /* Date inputs refuse to shrink below their intrinsic width on a phone, which
      pushes the third control off the edge. Let them give way. */
   .row input[type="date"].grow { flex: 1 1 0; min-width: 0; width: 0; padding: 10px 8px; font-size: 14px; }

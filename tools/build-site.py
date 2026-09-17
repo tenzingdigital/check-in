@@ -332,6 +332,7 @@ body = (
       <div><h3>Attributed, always</h3><p>Every entry carries who recorded it and when. Nobody can act as somebody else, and the detail sheet lists each of the day's check-ins with the staff member's name against it.</p></div>
       <div><h3>Works with no connection</h3><p>If the wifi drops, the card says Queued and the register keeps working. Entries send themselves when the connection returns; nothing is silently lost.</p></div>
       <div><h3>Thirty days at a glance</h3><p>Each resident's last thirty days as a strip: seen, missed, or not required. A pattern is visible before it becomes a problem.</p></div>
+      <div><h3>Human error, put right</h3><p>Wrong entry? Any staff member can take it off the register with a reason — it stays on the audit trail — and add a missed one at the time it happened.</p></div>
     </div>""") +
   sec("""    <h2>The morning list</h2>
     <p>Managers do not go looking. Consecutive missed nights and days absent in the window are counted for every resident and listed worst-first, each figure shown beside the threshold in your settings. Authorised absences are excluded, because an approved absence is not a missed night.</p>

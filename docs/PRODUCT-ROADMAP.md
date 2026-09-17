@@ -403,8 +403,14 @@ check-ins from the old app; the hut unchanged); go-live Thursday 1 October
 - *A gender field on the resident record* (some rooms are gender-specific)
   — open.
 - *Room number as a visible column in the resident list* — open.
-- *An administrator's override to correct an absence record* — open; the
-  register is append-only by design, so this needs a design.
+- *An administrator's override to correct an absence record* — **built 17
+  September** (migration 056): any staff member can take a wrong entry off
+  a resident's register with a reason and add one that was missed at the
+  time it happened; an earlier day, or one older than the late-entry
+  window, needs a supervisor or admin. Nothing is edited in place — a
+  removal copies the row to `admin_audit` before it deletes it — so the
+  register stays append-only in spirit; see `docs/KNOWN-ISSUES.md` for
+  what does not follow (the guardian-gap snapshot).
 - *Flag known night-shift workers in the absence report so they are not
   read as absent on Sunday morning* — open.
 - *Review what security staff can see and edit; a way to flag a welfare

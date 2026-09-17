@@ -56,6 +56,21 @@ an email to that same, ticked audience is the same disclosure as the report
 they open, not a new one. The "What leaves by email" section, the processor
 table and the Settings copy are corrected below.
 
+Updated 17 September 2026 against migration 056: staff can now take a wrong
+entry off the register and put a missed one on, at the time it happened.
+Neither is an edit — a removal copies the whole row to `admin_audit` (the
+reason as the note) before it deletes it, so the audit trail still says what
+was recorded, by whom, and why it left; an addition is a new row marked
+`by_hand`, with its own reason on the audit trail the same way. The
+processing this adds is the reason text itself, which can name what was
+wrong ("signed in the wrong resident") and so, occasionally, another
+resident — kept on `admin_audit` for the same period as the register, like
+every other correction already there. `overnight_guardian_gaps` (054) is not
+re-derived when a correction changes what the gate said at midnight: that
+table is the record of what was sent in the nightly email, not a live view
+of the register, and the resident's History and the audit trail carry the
+correction instead. See `docs/KNOWN-ISSUES.md`.
+
 **This is not legal advice.** A system that records the daily presence of
 residents in accommodation, some of whom are in the international protection
 process, is systematic monitoring of people who are frequently vulnerable.

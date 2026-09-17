@@ -197,7 +197,7 @@ async function api(path, { method = "GET", body, signal } = {}) {
 
 const apiGet  = (path)        => api(path);
 const apiPost = (path, body, signal) => api(path, { method: "POST", body, signal });
-const apiDelete = (path)      => api(path, { method: "DELETE" });
+const apiDelete = (path, body) => api(path, { method: "DELETE", ...(body ? { body } : {}) });
 const apiPatch  = (path, body)  => api(path, { method: "PATCH", body });
 
 // A 401 means the session expired or was revoked (a supervisor disabling the
@@ -601,6 +601,15 @@ function dayLabel(ymd) {
 }
 function isoDate(d) { const p = (v) => String(v).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 
+// "2026-09-17T09:05", the value a <input type="datetime-local"> takes and
+// returns — the browser's own local wall-clock time, no timezone. Reading it
+// back with `new Date(value)` parses it as local time again, so the two are
+// exact inverses and the round trip never drifts by a timezone offset.
+function isoDateTimeLocal(d) {
+  const p = (v) => String(v).padStart(2, "0");
+  return `${isoDate(d)}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 // Quick ranges for a date pair: today, yesterday, this week (Monday to
 // today), this month; and, for the registers that only exist once a night
 // has closed, the last 7 or 28 nights ending yesterday. Returns [from, to]
@@ -661,7 +670,18 @@ function exportWithReason(reasonEl, buildUrl) {
 // or the other; canExport (a supervisor or admin) adds a CSV download, which
 // like every export asks for a reason and goes on the audit record — the
 // server refuses it for anyone else, so the button is only drawn for them.
-function mountHistory(container, residentId, { canExport = false } = {}) {
+//
+// Every row also carries Remove (migration 056: take a wrong entry off the
+// register) and the panel carries "Add a missed entry" (put one on at the
+// time it happened). Neither is gated here — who may do what by hand (same
+// site-day, an earlier day, within the late-entry window, older) lives in
+// the database (remove_register_entry / add_register_entry) and is refused
+// with a sentence written for a person, shown as a toast; the UI offers both
+// to everyone and lets the server say no. onChange runs after either
+// succeeds, so the page that mounted this can refresh whatever else it shows
+// (a card's status, the day's counts) — admin's own edit sheet has nothing
+// else to refresh and passes none.
+function mountHistory(container, residentId, { canExport = false, onChange = () => {} } = {}) {
   const to = new Date(); const from = new Date(); from.setDate(from.getDate() - 29);
   container.innerHTML = `
     <div class="history">
@@ -677,11 +697,23 @@ function mountHistory(container, residentId, { canExport = false } = {}) {
         <button type="button" data-kind="gate" aria-pressed="false">In &amp; out</button>
         <button type="button" data-kind="checkin" aria-pressed="false">Check-ins</button>
         ${canExport ? `<button type="button" class="hexport" aria-expanded="false">Export CSV</button>` : ""}
+        <button type="button" class="linkish haddentry">Add a missed entry</button>
       </div>
       ${canExport ? `<form class="row hexportform" hidden>
         <input class="field grow" name="reason" type="text" maxlength="200" required placeholder="Reason for the export" aria-label="Reason for the export">
         <button class="btn sm" type="submit">Download</button>
       </form>` : ""}
+      <form class="row haddform" hidden>
+        <select class="field" name="register" aria-label="Which register">
+          <option value="checkin">Check-in</option>
+          <option value="gate:in">Signed IN</option>
+          <option value="gate:out">Signed OUT</option>
+        </select>
+        <input class="field" type="datetime-local" name="at" required aria-label="When">
+        <input class="field grow" name="reason" type="text" maxlength="200" required placeholder="Reason — e.g. seen at 21:10, not entered" aria-label="Reason">
+        <button class="btn sm" type="submit">Add</button>
+        <button class="btn ghost sm" type="button" data-cancel>Cancel</button>
+      </form>
       <div class="hlist"><span class="hint">Loading…</span></div>
     </div>`;
   const list = container.querySelector(".hlist");
@@ -698,7 +730,8 @@ function mountHistory(container, residentId, { canExport = false } = {}) {
       <div class="logrow">
         <time datetime="${esc(e.occurred_at)}">${esc(dayTime(e.occurred_at))}</time>
         <span class="dir ${e.kind === "in" ? "in" : e.kind === "out" ? "out" : "chk"}">${label[e.kind] || esc(e.kind)}</span>
-        <span class="body"><span class="by">by ${esc(e.guard_name)}${e.late_entry ? " · recorded offline, synced later" : ""}</span></span>
+        <span class="body"><span class="by">by ${esc(e.guard_name)}${e.late_entry ? " · recorded offline, synced later" : ""}${e.by_hand ? " · entered by hand" : ""}</span></span>
+        <button type="button" class="linkish hremove" data-id="${esc(e.id)}" data-register="${esc(e.register)}">Remove</button>
       </div>`).join("") + (rows.length >= 2000 ? '<p class="hint">Showing the first 2,000. Narrow the dates for the rest.</p>' : "");
   };
   form.addEventListener("submit", (e) => { e.preventDefault(); load(); });
@@ -723,6 +756,98 @@ function mountHistory(container, residentId, { canExport = false } = {}) {
       if (ok) { exportForm.hidden = true; exportBtn.setAttribute("aria-expanded", "false"); }
     });
   }
+
+  // Add a missed entry: a check-in or a movement that happened but was never
+  // recorded. Defaulted to five minutes ago — long enough that "now" almost
+  // never looks right for something already over — and capped at now, since
+  // the register does not take the future.
+  const addBtn = container.querySelector(".haddentry");
+  const addForm = container.querySelector(".haddform");
+  addBtn.addEventListener("click", () => {
+    addForm.hidden = !addForm.hidden;
+    addBtn.setAttribute("aria-expanded", String(!addForm.hidden));
+    if (!addForm.hidden) {
+      const now = new Date();
+      addForm.elements.at.max = isoDateTimeLocal(now);
+      addForm.elements.at.value = isoDateTimeLocal(new Date(now.getTime() - 5 * 60000));
+      addForm.elements.reason.value = "";
+      addForm.elements.reason.focus();
+    }
+  });
+  dismissToastOnInput(addForm.elements.reason);
+  addForm.querySelector("[data-cancel]").addEventListener("click", () => {
+    addForm.hidden = true;
+    addBtn.setAttribute("aria-expanded", "false");
+  });
+  addForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const [register, direction] = addForm.elements.register.value.split(":");
+    const at = addForm.elements.at.value;
+    const reason = addForm.elements.reason.value.trim();
+    const submitBtn = addForm.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      await apiPost("/api/register-entries", {
+        register, resident_id: residentId, direction,
+        occurred_at: new Date(at).toISOString(), reason,
+      });
+      toast("Added to the register, marked entered by hand", "ok");
+      addForm.hidden = true;
+      addBtn.setAttribute("aria-expanded", "false");
+      load();
+      onChange();
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  // Remove: replaces one row's body with an inline reason form, in place,
+  // rather than opening a sheet of its own — the row it acts on stays in
+  // view the whole time. Delegated on the list itself, since load() rebuilds
+  // every row's markup on each range/filter change.
+  list.addEventListener("click", (e) => {
+    const cancelBtn = e.target.closest("[data-hremove-cancel]");
+    if (cancelBtn) {
+      const row = cancelBtn.closest(".logrow");
+      row.querySelector(".body").innerHTML = row.dataset.originalBody;
+      row.querySelector(".hremove").hidden = false;
+      return;
+    }
+    const removeBtn = e.target.closest(".hremove");
+    if (!removeBtn) return;
+    const row = removeBtn.closest(".logrow");
+    const body = row.querySelector(".body");
+    row.dataset.originalBody = body.innerHTML;
+    const id = removeBtn.dataset.id, register = removeBtn.dataset.register;
+    removeBtn.hidden = true;
+    body.innerHTML = `
+      <form class="row hremoveform">
+        <input class="field grow" name="reason" type="text" maxlength="200" placeholder="Reason — optional for your own entry in the last 15 minutes" aria-label="Reason">
+        <button class="btn sm" type="submit">Remove from the register</button>
+        <button class="btn ghost sm" type="button" data-hremove-cancel>Cancel</button>
+      </form>`;
+    const removeForm = body.querySelector(".hremoveform");
+    dismissToastOnInput(removeForm.elements.reason);
+    removeForm.elements.reason.focus();
+    removeForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const reason = removeForm.elements.reason.value.trim();
+      const submitBtn = removeForm.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      try {
+        await apiDelete(`/api/register-entries/${register}/${id}`, reason ? { reason } : undefined);
+        toast("Removed from the register — it stays on the audit trail", "ok");
+        load();
+        onChange();
+      } catch (err) {
+        toast(err.message, "err");
+        submitBtn.disabled = false;
+      }
+    });
+  });
+
   load();
 }
 

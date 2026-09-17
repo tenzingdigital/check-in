@@ -197,11 +197,11 @@ rewritten, as for 053) or closed **before `hut-nightly`'s first run**,
 because a behind tenant is a failed cron every night until then, and its
 purges — the DPA's retention promise — do not run.
 
-Two follow-ups from the same review, for a migration 056: (1)
+Two follow-ups from the same review, for a migration 057: (1)
 `snapshot_guardian_gaps()` reads the gate *as it stands* and labels the
 rows `site_today() - 1`, so `jobs.js` only runs it between 00:00 and 05:59
 site time (`snapshotGate()`; a late manual re-run records "outside the
-snapshot window" and skips the nightly email too). 056 should make the
+snapshot window" and skips the nightly email too). 057 should make the
 snapshot as-of-midnight — the presence of each member at 00:00 from
 `gate_events`, not the latest event now — and take the last seven nights
 with `on conflict do nothing`, exactly as 027 did for
@@ -579,6 +579,24 @@ createSession`) against the twelve-hour staff default, because an
 unattended tablet re-showing the staff login twice a day was judged worse
 than the exposure — a stolen kiosk cookie reaches only the two routes
 above, never the register, settings, or anyone's history.
+
+---
+
+### 21. `overnight_guardian_gaps` is not re-derived after a register correction (migration 056)
+
+056 lets staff take a wrong movement or check-in off the register and put a
+missed one on, at the time it happened, each re-deriving `daily_compliance`
+and `overnight_absences` for the resident on the spot. `overnight_guardian_gaps`
+(054) is deliberately left alone: it is not a live view of the register but
+the record of what the gate said at midnight, snapshotted once by the
+nightly job, and the nightly email built from it has usually already gone
+by the time anyone corrects the entry that would have changed it. Re-running
+that snapshot after the fact would rewrite a night the email already
+reported on. So a correction that would have closed (or opened) a guardian
+gap does not touch the snapshot or resend anything — the resident's History
+and the audit trail (`admin_audit`) carry the correction instead, and a
+reviewer reading the gap alongside the history sees both: what the register
+said at midnight, and what it was later found to actually have been.
 
 ---
 
