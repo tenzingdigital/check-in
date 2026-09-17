@@ -373,6 +373,10 @@ REPORTS['guardian-gaps'] = {
                   from residents k
                  where k.household_id = g.household_id and k.status = 'active'
                    and k.date_of_birth > current_date - make_interval(years => s.adult_age_years)) as children,
+               (select string_agg(btrim(a.first_name) || ' ' || btrim(a.last_name), ', ' order by a.last_name, a.first_name)
+                  from residents a
+                 where a.household_id = g.household_id and a.status = 'active'
+                   and a.date_of_birth <= current_date - make_interval(years => s.adult_age_years)) as adults,
                g.guardians_out,
                to_char(g.first_out_at at time zone s.local_timezone, 'YYYY-MM-DD HH24:MI') as first_out_at
           from overnight_guardian_gaps g

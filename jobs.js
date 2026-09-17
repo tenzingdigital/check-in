@@ -380,6 +380,13 @@ async function nightlyMessage(client, s) {
           from residents r
          where r.household_id = g.household_id and r.status = 'active'
            and r.date_of_birth > current_date - make_interval(years => s.adult)) as children,
+       -- The household's adults, named: the gap means every one of them was
+       -- off site at the snapshot (guardians_on_site = 0), so this list is
+       -- who was out (17 Sep 2026, the owner: names of the adults too).
+       (select string_agg(btrim(r.first_name) || ' ' || btrim(r.last_name), ', ' order by r.last_name, r.first_name)
+          from residents r
+         where r.household_id = g.household_id and r.status = 'active'
+           and r.date_of_birth <= current_date - make_interval(years => s.adult)) as adults,
        g.guardians_out,
        to_char(g.first_out_at at time zone s.tz, 'HH24:MI') as first_out
      from overnight_guardian_gaps g cross join s
@@ -457,7 +464,7 @@ async function nightlyMessage(client, s) {
 
   const items = {
     guardian_gaps: gapRows.map((r) =>
-      `${r.household}${r.room ? ' · ' + r.room : ''} — ${r.children || 'children on site'}; ${r.guardians_out} adult${r.guardians_out === 1 ? '' : 's'} signed out${r.first_out ? ', first at ' + r.first_out : ''}`),
+      `${r.household}${r.room ? ' · ' + r.room : ''} — children ${r.children || 'on site'}; ${r.adults ? `adult${r.guardians_out === 1 ? '' : 's'} ${r.adults}` : `${r.guardians_out} adult${r.guardians_out === 1 ? '' : 's'}`} signed out${r.first_out ? (r.guardians_out === 1 ? ' at ' : ', first at ') + r.first_out : ''}`),
     children_away: awayRows.map((r) =>
       `${r.name} (${r.age})${r.room ? ' · ' + r.room : ''} — off site at midnight, no authorised absence; ${r.with_adults ? 'out with ' + r.with_adults : 'NO ADULT from the household out with them'}`),
     conflicts: conflictRows.map((r) =>

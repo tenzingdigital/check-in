@@ -1934,7 +1934,7 @@ async function main() {
     };
     const unsubscribe = "https://hut-check-in.onrender.com/unsubscribe?t=default&k=abc&e=nightly";
     const items = {
-      guardian_gaps: ["Kovalenko family · Main · 12 — Sofia Kovalenko (6), Danylo Kovalenko (9); 1 adult signed out, first at 19:42", "Brennan family · Main · 4 — Ava Brennan (3); 2 adults signed out, first at 21:05"],
+      guardian_gaps: ["Kovalenko family · Main · 12 — children Sofia Kovalenko (6), Danylo Kovalenko (9); adult Olena Kovalenko signed out at 19:42", "Brennan family · Main · 4 — children Ava Brennan (3); adults Ciara Brennan, Jamal Brennan signed out, first at 21:05"],
       children_away: ["Amina Al-Sayed (7) · Annex · 2 — off site at midnight, no authorised absence"],
       conflicts: ["Tomasz Nowak · Main · 8 — checked in 21:10, the In & out register had him out since 18:30", "Lee Lonerfixture — checked in 09:02, no sign-in on record", "Pat Famfixture · Main · 1 — checked in 22:40, the In & out register had them out since 20:00"],
       at_figures: [],
@@ -1955,8 +1955,8 @@ async function main() {
     }
     assert.ok(out.text.includes(
 `Children on site without a guardian: 2 — https://hut-check-in.onrender.com/admin.html#report-guardian-gaps
-  - Kovalenko family · Main · 12 — Sofia Kovalenko (6), Danylo Kovalenko (9); 1 adult signed out, first at 19:42
-  - Brennan family · Main · 4 — Ava Brennan (3); 2 adults signed out, first at 21:05`),
+  - Kovalenko family · Main · 12 — children Sofia Kovalenko (6), Danylo Kovalenko (9); adult Olena Kovalenko signed out at 19:42
+  - Brennan family · Main · 4 — children Ava Brennan (3); adults Ciara Brennan, Jamal Brennan signed out, first at 21:05`),
       "the first section's lines follow its header, in order, with its own link and no other section's lines mixed in");
     assert.ok(out.text.includes("At the House Rules figures: 0 — https://hut-check-in.onrender.com/admin.html#absences"));
     assert.ok(!out.text.includes("#absences\n  - "), "the empty fourth section carries no lines");
@@ -2000,8 +2000,9 @@ async function main() {
     assert.equal(mine.night, lastNight);
     assert.match(mine.children, /Kim Famfixture \(\d+\)/, "the child is named, with an age as of the export");
     assert.equal(mine.guardians_out, 1);
+    assert.equal(mine.adults, "Pat Famfixture", "the adults are named — the gap means every one of them was out");
     assert.match(mine.first_out_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, "site time, not an ISO timestamp");
-    assert.deepEqual(Object.keys(mine), ["night", "household", "room", "children", "guardians_out", "first_out_at"]);
+    assert.deepEqual(Object.keys(mine), ["night", "household", "room", "children", "adults", "guardians_out", "first_out_at"]);
 
     // A check-in for Pat recorded while the gate had her OUT is a conflict.
     assert.equal((await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: fam.parent, direction: "out" } })).status, 200);
@@ -3460,7 +3461,7 @@ async function main() {
       assert.match(part, /Gapfixture family/, "the guardian-gap household is named");
       assert.match(part, /Missing Nights/, "the resident at a House Rules figure is named");
     }
-    assert.match(sent[0].text, /^  - Gapfixture family.* — .*Gil Gapfixture \(\d+\)/m, "the household line carries the children with ages, the child by name");
+    assert.match(sent[0].text, /^  - Gapfixture family.* — children .*Gil Gapfixture \(\d+\); adult Gia Gapfixture signed out at \d\d:\d\d/m, "the household line names the children with ages and the adult who was out, with the time");
     // Don't hard-code the streak: build the expected phrase from the same
     // consecutive-missed count jobs.js computes, in case warn_after_consecutive_nights
     // is not 3 in this fixture's app_settings.

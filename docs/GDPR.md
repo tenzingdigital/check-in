@@ -44,7 +44,7 @@ Updated 17 September 2026 against migration 055: the owner's ruling of 16
 September 2026 (Slaney Manor — the manager reads these on her phone) reaches
 the copy as well as the code. The nightly email itself now names residents
 in its body instead of linking to a login: the household, room, children
-and ages for a guardian gap; the resident, age and room for an overnight
+with ages and the adults by name for a guardian gap; the resident, age and room for an overnight
 absence, and which adults of the household were also out (or that none
 was); the resident, room, check-in time and last gate movement for a
 check-in conflict; the resident, room and figure for a House
@@ -299,9 +299,9 @@ closes to the centre's own active supervisors and administrators ticked
 "Gets the nightly email" on their staff record: four sections, each naming
 who it is about and linking into the app for the full record —
 households with children on site and no guardian at midnight, named with
-their room, children and ages, adults signed out and when the first of
-them left (the "Children on site without a guardian" report for that
-night); children away overnight with no authorised absence, named with
+their room, the children with ages, the adults by name (every one of
+them was off site — that is the gap) and when the first of them left
+(the "Children on site without a guardian" report for that night); children away overnight with no authorised absence, named with
 age and room and whether an adult of the household was out with them
 (the "Absent overnight" report); check-ins recorded while the
 In & out register had the person out, named with room, the check-in time
