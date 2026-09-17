@@ -1607,7 +1607,7 @@ async function main() {
     const tooLong = await supC.fetch(`/api/reports/register?from=2020-01-01&to=2022-01-01&reason=test`);
     assert.equal(tooLong.status, 400);
     const list = await api.fetch("/api/reports");
-    assert.equal(list.json.length, 21);
+    assert.equal(list.json.length, 22);
     assert.equal(list.json.filter((r) => r.admin).length, 1, "the access report is the one marked admin-only");
   });
 
@@ -1761,6 +1761,51 @@ async function main() {
     assert.equal(kioskDelete.status, 403, kioskDelete.text);
     const kioskAdd = await kioskCl.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "in", occurred_at: twoHoursAgo, reason: "x" } });
     assert.equal(kioskAdd.status, 403, kioskAdd.text);
+  });
+
+  await test("the register-corrections report lists a removed entry and an added one, with who and why (migration 056, review I-4)", async () => {
+    const today = siteToday();
+    const lastName = `Corr${Math.floor(Math.random() * 1e6)}`;
+    const made = await supC.fetch("/api/residents", { method: "POST", body: { first_name: "Corrections", last_name: lastName, date_of_birth: "1990-01-01" } });
+    assert.equal(made.status, 201, made.text);
+    const rid = made.json.id;
+
+    const signIn = await api.fetch("/api/gate-events", { method: "POST", body: { resident_id: rid, direction: "in" } });
+    assert.equal(signIn.status, 200, signIn.text);
+    const hist = await api.fetch(`/api/residents/${rid}/history`);
+    const row = hist.json.find((e) => e.register === "gate");
+    assert.ok(row, "the sign-in did not show up in the history");
+
+    const removed = await api.fetch(`/api/register-entries/gate/${row.id}`, { method: "DELETE", body: { reason: "wrong resident signed in" } });
+    assert.equal(removed.status, 204, removed.text);
+
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600e3).toISOString();
+    const added = await api.fetch("/api/register-entries", { method: "POST", body: { register: "checkin", resident_id: rid, occurred_at: twoHoursAgo, reason: "missed at the door" } });
+    assert.equal(added.status, 201, added.text);
+
+    // A guard is refused, as every report is.
+    const guardTry = await api.fetch(`/api/reports/register-corrections?from=${today}&to=${today}&reason=check&format=json`);
+    assert.equal(guardTry.status, 403, guardTry.text);
+
+    const corr = await supC.fetch(`/api/reports/register-corrections?from=${today}&to=${today}&reason=check&format=json`);
+    assert.equal(corr.status, 200, corr.text);
+    assert.equal(corr.json.title, "Register corrections");
+    const mine = corr.json.rows.filter((r) => r.resident === `Corrections ${lastName}`);
+    const removedRow = mine.find((r) => r.action === "removed");
+    const addedRow = mine.find((r) => r.action === "added");
+    assert.ok(removedRow, "the removed gate entry is not on the report");
+    assert.ok(addedRow, "the added check-in is not on the report");
+    assert.equal(removedRow.date, today);
+    assert.equal(removedRow.register, "In & out");
+    assert.equal(removedRow.entry, "IN");
+    assert.equal(removedRow.entered_by, "Gina Guard");
+    assert.equal(removedRow.by, "Gina Guard");
+    assert.equal(removedRow.reason, "wrong resident signed in");
+    assert.equal(addedRow.register, "Daily register");
+    assert.equal(addedRow.entry, "Check-in");
+    assert.equal(addedRow.entered_by, "Gina Guard");
+    assert.equal(addedRow.by, "Gina Guard");
+    assert.equal(addedRow.reason, "missed at the door");
   });
 
   await test("the register and attendance reports come as CSV and JSON, and the export is logged", async () => {

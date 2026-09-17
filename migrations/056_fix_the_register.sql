@@ -99,7 +99,7 @@ declare
   v_tz text; v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
   v_chk public.checkin_events; v_gate public.gate_events;
   v_resident uuid; v_guard uuid; v_at timestamptz; v_recorded timestamptz; v_day date; v_row jsonb;
-  v_next timestamptz;
+  v_next timestamptz; v_twin bigint;
 begin
   if not public.is_staff() then
     raise exception 'Not authorised to change the register' using errcode = '42501';
@@ -145,6 +145,25 @@ begin
     perform public.recompute_daily_compliance(v_resident, v_day);
   else
     delete from public.gate_events where id = p_id;
+
+    -- feature_door_checkin (026): a sign IN also writes a checkin_events row,
+    -- source = 'door', through the same call and so at the same occurred_at
+    -- (one now() for the whole transaction). Removing the IN without its
+    -- twin would leave the day reading as presented on evidence the register
+    -- has just declared wrong — the door's tap *was* the sign-in being
+    -- removed, not a second presentation. Found by resident and the shared
+    -- timestamp: only a sign IN ever makes one, so the match is exact.
+    select id into v_twin from public.checkin_events
+     where resident_id = v_resident and source = 'door' and occurred_at = v_at;
+    if v_twin is not null then
+      insert into public.admin_audit (actor_id, table_name, row_id, action, old_row, note)
+      select auth.uid(), 'checkin_events', v_twin::text, 'delete', to_jsonb(c),
+             coalesce(v_reason, 'own entry, within 15 minutes') || ' (door check-in recorded with the removed sign-in)'
+        from public.checkin_events c where c.id = v_twin;
+      delete from public.checkin_events where id = v_twin;
+      perform public.recompute_daily_compliance(v_resident, v_day);
+    end if;
+
     -- The nights this movement decided: from its own night up to the night
     -- before the next remaining movement (or last night).
     select min(e.occurred_at) into v_next from public.gate_events e where e.resident_id = v_resident and e.occurred_at > v_at;
@@ -261,3 +280,244 @@ from public.gate_events e
 join public.residents r on r.id = e.resident_id
 join public.profiles  g on g.id = e.guard_id
 where public.is_staff();
+
+-- ---------------------------------------------------------------------------
+-- 5. Corrections are erased and exported with the resident; a supervisor
+--    can read them (review findings I-2 and I-4)
+-- ---------------------------------------------------------------------------
+--
+-- remove_register_entry() / add_register_entry() write admin_audit rows
+-- shaped differently from every other write to that table: table_name is
+-- 'checkin_events' or 'gate_events', row_id is the event's own id, and the
+-- resident is only inside old_row/new_row, not in row_id. erase_audit_rows()
+-- and export_resident_record() only ever looked at rows where
+-- table_name = 'residents' — the resident's own edits — so an erasure left
+-- the resident's id, times and a free-text reason sitting in admin_audit
+-- after "erased", and a subject access export never showed a correction at
+-- all. Both are widened here to find the resident inside the event too.
+
+-- Copied verbatim from 012_audit_and_health.sql and extended: the same
+-- admin-only guard, the same residents delete, plus every
+-- checkin_events/gate_events audit row that names this resident inside
+-- old_row or new_row (a removal carries old_row, an addition new_row).
+create or replace function public.erase_audit_rows(p_resident_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v_n integer; v_n2 integer;
+begin
+  if not public.is_admin() then
+    raise exception 'Only an admin may erase a resident' using errcode = '42501';
+  end if;
+  delete from public.admin_audit
+   where table_name = 'residents' and row_id = p_resident_id::text;
+  get diagnostics v_n = row_count;
+  delete from public.admin_audit
+   where table_name in ('checkin_events', 'gate_events')
+     and (old_row->>'resident_id' = p_resident_id::text or new_row->>'resident_id' = p_resident_id::text);
+  get diagnostics v_n2 = row_count;
+  return v_n + v_n2;
+end;
+$$;
+revoke all on function public.erase_audit_rows(uuid) from public, anon;
+grant execute on function public.erase_audit_rows(uuid) to authenticated;
+
+-- Copied verbatim from its latest definition (029_holiday_cap_breaches_prefix.sql)
+-- and extended with one more key: every register correction naming this
+-- resident, so an Art. 15 export ("everything held about me") includes what
+-- was taken off the register and what was added by hand, the same way it
+-- already includes every change to the resident's own row.
+create or replace function public.export_resident_record(p_resident_id uuid)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = public, extensions
+as $$
+declare
+  v_out jsonb;
+begin
+  if not public.is_admin() then
+    raise exception 'Only an admin may export a resident record' using errcode = '42501';
+  end if;
+
+  select jsonb_build_object(
+    'exported_at', now(),
+    'exported_by', (select full_name from public.profiles where id = auth.uid()),
+    'resident', to_jsonb(r) - 'search_key',
+    'gate_events', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'kind', e.kind,
+               'occurred_at', e.occurred_at,
+               'recorded_at', e.recorded_at,
+               'late_entry', e.late_entry,
+               'recorded_by', g.full_name
+             ) order by e.occurred_at)
+      from public.gate_events e
+      join public.profiles g on g.id = e.guard_id
+      where e.resident_id = r.id
+    ), '[]'::jsonb),
+    'checkin_events', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'occurred_at', c.occurred_at,
+               'recorded_at', c.recorded_at,
+               'late_entry', c.late_entry,
+               'recorded_by', g.full_name
+             ) order by c.occurred_at)
+      from public.checkin_events c
+      join public.profiles g on g.id = c.guard_id
+      where c.resident_id = r.id
+    ), '[]'::jsonb),
+    'daily_compliance', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'date', dc.compliance_date,
+               'required', dc.required,
+               'presented', dc.presented,
+               'checkins', dc.checkin_count
+             ) order by dc.compliance_date)
+      from public.daily_compliance dc where dc.resident_id = r.id
+    ), '[]'::jsonb),
+    -- Who opened this record and when (migration 023). Part of "everything
+    -- held about me", and the reason the access log exists.
+    'views', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'at', v.viewed_at,
+               'by', p.full_name,
+               'where', v.surface
+             ) order by v.viewed_at)
+      from public.resident_views v
+      left join public.profiles p on p.id = v.actor_id
+      where v.resident_id = r.id
+    ), '[]'::jsonb),
+    -- Authorised absences and the rooms they have had (migration 028).
+    'authorised_absences', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'from', a.from_date, 'to', a.to_date, 'reason', a.reason,
+               'guardian_agreed', a.guardian_agreed, 'ended_on', a.ended_on,
+               'approved_by', p.full_name, 'recorded_at', a.created_at
+             ) order by a.from_date)
+      from public.authorised_absences a
+      left join public.profiles p on p.id = a.approved_by
+      where a.resident_id = r.id
+    ), '[]'::jsonb),
+    'rooms', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'room', ra.room_label, 'from', ra.from_at, 'to', ra.to_at,
+               'changed_by', p.full_name
+             ) order by ra.from_at)
+      from public.room_assignments ra
+      left join public.profiles p on p.id = ra.changed_by
+      where ra.resident_id = r.id
+    ), '[]'::jsonb),
+    'breach_reports', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'kind', b.kind, 'issued_on', b.issued_on, 'reference', b.reference,
+               'issued_by', p.full_name, 'recorded_at', b.created_at
+             ) order by b.issued_on)
+      from public.breach_reports b
+      left join public.profiles p on p.id = b.issued_by
+      where b.resident_id = r.id
+    ), '[]'::jsonb),
+    -- Every change an administrator made to this record, and every export
+    -- of it. Art. 15 is "everything held about me"; that includes who
+    -- edited it and when.
+    'changes', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'at', a.at,
+               'action', a.action,
+               'by', p.full_name,
+               'before', a.old_row,
+               'after', a.new_row,
+               'note', a.note
+             ) order by a.at)
+      from public.admin_audit a
+      left join public.profiles p on p.id = a.actor_id
+      where a.table_name = 'residents' and a.row_id = r.id::text
+    ), '[]'::jsonb),
+    -- Migration 056: a wrong check-in or movement taken off the register, or
+    -- a missed one added by hand. Keyed by the event, not the resident, so
+    -- it is found the same way erase_audit_rows() now finds it — inside
+    -- old_row/new_row rather than row_id.
+    'register_corrections', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'at', a.at,
+               'register', case a.table_name when 'checkin_events' then 'checkin' else 'gate' end,
+               'action', case a.action when 'delete' then 'removed' else 'added' end,
+               'entry', coalesce(a.old_row, a.new_row),
+               'by', p.full_name,
+               'reason', a.note
+             ) order by a.at)
+      from public.admin_audit a
+      left join public.profiles p on p.id = a.actor_id
+      where a.table_name in ('checkin_events', 'gate_events')
+        and (a.old_row->>'resident_id' = r.id::text or a.new_row->>'resident_id' = r.id::text)
+    ), '[]'::jsonb)
+  )
+  into v_out
+  from public.residents r
+  where r.id = p_resident_id;
+
+  if v_out is null then
+    raise exception 'Resident not found' using errcode = 'P0002';
+  end if;
+
+  return v_out;
+end;
+$$;
+revoke all on function public.export_resident_record(uuid) from anon, public;
+grant execute on function public.export_resident_record(uuid) to authenticated;
+
+-- A supervisor can already read every other report; admin_audit itself is
+-- admin-only (012's admin_audit_admin_read), because most of what it holds
+-- is wider than a register correction. This function is the narrow door: it
+-- hands back only the two tables' correction rows, in the shape the report
+-- prints, and nothing else in admin_audit — a supervisor gets these rows and
+-- nothing more from the table the review found unreadable (I-4).
+create or replace function public.register_corrections(p_from date, p_to date)
+returns table (
+  "date"     text,
+  "time"     text,
+  action     text,
+  register   text,
+  entry      text,
+  entry_time text,
+  resident   text,
+  entered_by text,
+  by         text,
+  reason     text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_supervisor() then
+    raise exception 'Only a supervisor or admin can see register corrections' using errcode = '42501';
+  end if;
+  return query
+    select to_char(a.at at time zone s.tz, 'YYYY-MM-DD'),
+           to_char(a.at at time zone s.tz, 'HH24:MI'),
+           case a.action when 'delete' then 'removed' else 'added' end,
+           case a.table_name when 'checkin_events' then 'Daily register' else 'In & out' end,
+           case a.table_name
+             when 'checkin_events' then 'Check-in'
+             else upper(coalesce(a.old_row, a.new_row)->>'kind')
+           end,
+           to_char(((coalesce(a.old_row, a.new_row)->>'occurred_at')::timestamptz) at time zone s.tz, 'YYYY-MM-DD HH24:MI'),
+           coalesce(btrim(r.first_name) || ' ' || btrim(r.last_name), '(erased)'),
+           g.full_name,
+           p.full_name,
+           a.note
+      from public.admin_audit a
+      cross join (select local_timezone as tz from public.app_settings where id) s
+      left join public.residents r on r.id = nullif(coalesce(a.old_row, a.new_row)->>'resident_id', '')::uuid
+      left join public.profiles  g on g.id = nullif(coalesce(a.old_row, a.new_row)->>'guard_id', '')::uuid
+      left join public.profiles  p on p.id = a.actor_id
+     where a.table_name in ('checkin_events', 'gate_events')
+       and (a.at at time zone s.tz)::date between p_from and p_to
+     order by a.at desc;
+end;
+$$;
+revoke all on function public.register_corrections(date, date) from public, anon;
+grant execute on function public.register_corrections(date, date) to authenticated;

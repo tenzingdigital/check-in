@@ -323,7 +323,7 @@ faqs = [
 ]
 body = (
   phead("Feature", "The daily register",
-        "One check-in per resident per day, recorded in two taps, closed automatically at midnight, and impossible to edit afterwards.") +
+        "One check-in per resident per day, recorded in two taps, closed automatically at midnight, and never quietly rewritten afterwards.") +
   sec("""    <h2>What your staff see</h2>
     <p>The whole register is on screen before anyone types. Every resident is listed, ordered by surname with letter separators down the side, and typing a name filters instantly — the search forgives typos, missing accents and names given in either order. One tap records the check-in; on a tablet, a swipe does the same thing without looking away.</p>
     <p>Each card says the one thing that matters at that moment: seen today and at what time, not yet seen, due today, never yet seen, away until a date, or not required. The confirmation is immediate and specific.</p>
@@ -348,7 +348,7 @@ body = (
   ]))
 page("/features/daily-register/",
      "The daily register — CheckSteady",
-     "A daily welfare register for residential sites: one check-in per resident per day in two taps, misses recorded automatically at midnight, and records that can never be edited.",
+     "A daily welfare register for residential sites: one check-in per resident per day in two taps, misses recorded automatically at midnight, and nothing rewritten in place — corrections stay on the audit trail.",
      [HOME, ("/features/daily-register/", "Daily register")], body, faqs)
 
 # --------------------------------------------------------------------------
@@ -436,7 +436,7 @@ faqs = [
  ("Does it record TRC and IRP numbers?",
   "Yes. A resident's identity document is recorded as either a TRC or an IRP with the number as printed on the card. The number is never shown in a list — only on the resident's own record, opened deliberately, and every opening is logged."),
  ("Can we show an inspector what happened on a given day?",
-  "Yes. The register for any date, the movement log for any range, occupancy, drills and marked-safe lists all print or export as spreadsheets. Because records are append-only, what you show is what was recorded at the time."),
+  "Yes. The register for any date, the movement log for any range, occupancy, drills and marked-safe lists all print or export as spreadsheets — and nothing in them is rewritten in place, so what you show is what is on the record, any correction and its reason included."),
  ("Does it decide that a resident has breached house rules?",
   "No. It counts consecutive missed nights and days absent in your window, and shows each count beside the figure in your settings. The judgement and the letter stay with the manager, and any notice issued is recorded against the resident so a second one is not sent for the same run."),
  ("Can residents be away with permission without it counting against them?",
@@ -462,7 +462,7 @@ body = (
       <div><h3>The weekly register update</h3><p>Every Sunday morning the staff you tick receive counts of resident absences, weekend updates, removals and room changes, with a link into the app, and the full update attached as a Word document naming residents and rooms — on by default, though a centre can turn that off. The full report is also in the app and downloads as a spreadsheet or a Word document.</p></div>
     </div>""") +
   sec("""    <h2>What an IPAS inspection asks for</h2>
-    <p>Every register record CheckSteady keeps is append-only: check-ins, movements, drills and notices cannot be edited or deleted afterwards, by anyone, including an administrator. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One printable document gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
+    <p>Nothing in CheckSteady's register is edited in place. A wrong check-in or movement can be taken off by a staff member with a reason — the whole entry, who removed it and why, stays on the audit trail — and a missed one added at the time it happened, marked as entered by hand. Drills and notices are never changed once made. That is the property that makes a register worth showing. Alongside it: the register for any date, the movement log for any range, occupancy over time, drill and evacuation records with who was marked safe and when, and a full file for any individual resident. One printable document gathers the weekly register, vacancies, breaches and the evacuation list for a date range.</p>
     <h2>Children away overnight, and the nightly email</h2>
     <p>Children are on the daily register but are not required to check in — the app requires a check-in only from adults — so the app derives an overnight absence from the In &amp; out register instead. One nightly email to the staff you tick names, in its body, each household with children on site and no guardian (family, room, children with ages, adults signed out and when the first of them left), each child away overnight with no authorised absence, each check-in recorded while the person was signed out at the gate, and each resident at the house rules figures — with a link into the app alongside each. One switch, on where the centre already received the emails it replaces, and off otherwise. All of it is a record of what the centre has, not a judgement that anything is wrong.</p>""", tint=True) +
   sec("""    <h2>Getting started without a project</h2>
@@ -504,7 +504,7 @@ body = (
       <div><h3>Beds and vacancies</h3><p>Rooms with bed counts and occupancy, and a vacancies report for what is genuinely free tonight.</p></div>
     </div>
     <h2>Records that hold up</h2>
-    <p>Check-ins and movements are append-only — no edits, no deletions, by anyone. Each carries who recorded it and when. When a funder, an inspector or a coroner asks what happened on a particular night, the answer is the record as it was made, not a version of it.</p>""") +
+    <p>Nothing on the register is rewritten in place. A wrong check-in or movement can be taken off with a reason — the whole entry, who and why, stays on the audit trail — and a missed one added at the time it happened. Each carries who recorded it and when. When a funder, an inspector or a coroner asks what happened on a particular night, the answer is the record as it stands, with every correction and its reason still on the trail.</p>""") +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs)) +
   CTA +
   nextlinks("Read next", [
@@ -614,7 +614,7 @@ body = (
       <div><h3>Families and rooms</h3><p>Households group parents and children, a room reads as a family, and children are on the daily register, marked not required rather than left off it.</p></div>
       <div><h3>Contracted beds and vacancies</h3><p>Physical beds and contracted beds held separately, room status open or under maintenance with a note, and a vacancies report for what the centre can actually offer.</p></div>
       <div><h3>Weekly register update</h3><p>Every Sunday morning the staff you choose get an email with counts of absences, weekend updates, removals and room changes, and a link into the app, with the full update also attached as a Word document naming residents and rooms — on by default, though you can turn that off.</p></div>
-      <div><h3>Records for the Department</h3><p>Append-only check-ins, movements and drills, plus the register for any date and occupancy, export as spreadsheets — for the contracting Department, or for your own contract review.</p></div>
+      <div><h3>Records for the Department</h3><p>Check-ins, movements and drills — never rewritten in place, a correction and its reason kept on the trail — plus the register for any date and occupancy, export as spreadsheets, for the contracting Department or your own contract review.</p></div>
     </div>""") +
   sec("""    <h2>Moving on and moving in</h2>
     <p>Residents move on. Marking someone departed archives them without losing their history, so a past resident's record is still there for the retention period if it is asked for. Bringing a new list in uses the same import throughout the app: a spreadsheet with a verdict shown for every line before anything is written, and a resident reference of the app's own for anyone the spreadsheet needs to refer to.</p>""", tint=True) +
@@ -806,7 +806,7 @@ faqs = [
  ("Where is the data stored?",
   "In the European Union — Frankfurt — encrypted in transit and at rest. Nothing is sent to a third party: the application talks only to its own service, and there are no analytics, trackers or external fonts on the app."),
  ("Can an administrator edit or delete a check-in?",
-  "No. Check-ins, movements, drills and notices are append-only and cannot be altered or removed by anyone, at any level, including us. A correction is recorded as a new entry alongside the original."),
+  "Not edited, no. A wrong entry can be taken off the register by a staff member with a reason — the whole entry, who removed it and why, stays on the audit trail — and a missed one added at the time it happened, marked as entered by hand. Nothing is ever quietly rewritten, at any level, including by us."),
  ("How is one centre kept separate from another?",
   "Each centre's records live in their own separate database schema, so isolation is structural rather than a filter somebody has to remember to apply. A mistake produces an error, not another centre's residents."),
  ("How do you handle a subject access request?",
@@ -822,7 +822,7 @@ body = (
   phead("Trust", "Security and GDPR",
         "What is held, who can reach it, how it is proved, and how it is erased.") +
   sec(f"""    <h2>The record is the product</h2>
-    <p>A register is only worth keeping if it cannot be quietly rewritten afterwards. Check-ins, movements, drills and notices in CheckSteady are append-only: they cannot be edited or deleted by a staff member, a supervisor, an administrator, or by us. Every entry carries who recorded it and when, and nobody can act as somebody else.</p>
+    <p>A register is only worth keeping if it cannot be quietly rewritten afterwards. Nothing in CheckSteady is: a wrong check-in or movement can be taken off the register by a staff member with a reason, and a missed one added at the time it happened, but never by editing the original — the whole entry, who and why, stays on the audit trail, for a staff member, a supervisor, an administrator or us alike. Drills and notices are never changed once made. Every entry carries who recorded it and when, and nobody can act as somebody else.</p>
     <div class="pairs">
       <div><h3>Hosted in the EU</h3><p>Frankfurt, encrypted in transit and at rest. No third-party analytics, trackers or external fonts on the app.</p></div>
       <div><h3>Separated by construction</h3><p>Each centre has its own database schema. One centre cannot read, change, export or erase another's records, and the tests prove it.</p></div>
@@ -837,12 +837,12 @@ body = (
   CTA +
   nextlinks("Read next", [
     ("/for/ipas-accommodation/", "For IPAS accommodation", "How the record set fits an accommodation contract."),
-    ("/features/daily-register/", "Daily register", "The record staff make, and why it cannot be edited."),
+    ("/features/daily-register/", "Daily register", "The record staff make, and how a mistake is put right without rewriting it."),
     ("/pricing/", "Pricing", "Per site, per month, every feature included."),
   ]))
 page("/security-and-gdpr/",
      "Security and GDPR — CheckSteady",
-     "Append-only records nobody can edit, each centre in its own database schema, EU hosting in Frankfurt, one-click subject access and logged, scheduled erasure.",
+     "Records nobody rewrites in place, each centre in its own database schema, EU hosting in Frankfurt, one-click subject access and logged, scheduled erasure.",
      [HOME, ("/security-and-gdpr/", "Security &amp; GDPR")], body, faqs)
 
 faqs = [
@@ -919,7 +919,7 @@ body = (
   f'<section class="section">\n  <div class="wrap">\n    <div class="split">\n{left}\n{form}\n    </div>\n  </div>\n</section>' +
   sec('    <h2>Common questions</h2>\n' + faq_html(faqs), tint=True) +
   nextlinks("Read next", [
-    ("/features/daily-register/", "Daily register", "What your staff do each day, and why it cannot be edited."),
+    ("/features/daily-register/", "Daily register", "What your staff do each day, and how a mistake is put right without rewriting it."),
     ("/security-and-gdpr/", "Security and GDPR", "Where the data lives and who can reach it."),
     ("/pricing/", "Pricing", "Per site, per month, every feature included."),
   ]))

@@ -258,26 +258,42 @@ flip either marks a minor in breach or exempts an adult. The age is computed
 as of the day being evaluated, so backfilling never applies the rule to a day
 the person was still a minor.
 
-**The record is append-only.** No role, including administrator, holds
-`UPDATE` or `DELETE` on `gate_events`, `checkin_events` or
-`daily_compliance`. Corrections are new events; a missed day is never edited
-to look attended. This serves accuracy (Art. 5(1)(d)) in both directions: a
-record cannot be quietly altered, and a resident disputing an entry has an
-intact history. Events synced after an outage carry `late_entry = true` and
-the server's `recorded_at` beside the terminal's `occurred_at`, so a synced
-event is never presented as if it had been recorded live.
+**The record is append-only, with one correction path.** No role, including
+administrator, holds `UPDATE` on `gate_events`, `checkin_events` or
+`daily_compliance`, and staff reach `DELETE` on the first two only through
+`remove_register_entry()` and `add_register_entry()` (migration 056) — never
+a direct grant. Removing a wrong check-in or movement deletes it and
+re-derives what depends on it: a removed check-in can make a required day
+miss again, a removed movement re-derives `overnight_absences` for the
+nights it decided. Adding a missed entry — at the time it happened, always
+with a reason, marked `by_hand` — can make a day that closed as missed read
+as presented instead. Nothing is edited in place to get there: the whole
+original row, who removed or added it, and why, go to `admin_audit` before
+the row itself changes; no value is ever changed under an existing entry.
+This serves accuracy (Art. 5(1)(d)) in both directions: a record cannot be
+quietly altered, and a resident disputing an entry has an intact history of
+what was recorded, corrected, and why. Events synced after an outage carry
+`late_entry = true` and the server's `recorded_at` beside the terminal's
+`occurred_at`, so a synced event is never presented as if it had been
+recorded live.
 
 **Administrators are on the record.** Triggers on `residents`, `profiles`
 and `app_settings` write `admin_audit` as the table owner with the row
 before and after; an export is noted with its reason. Admins can read it;
 nobody can change it. A resident's change history is part of their Art. 15
-export.
+export, and so, since migration 056, is every register correction that
+names them — a removed entry in full, an entry added by hand, who did it
+and why — the same rows `erase_resident()` now finds and removes.
 
 **Erasure leaves proof without leaving data.** `erase_resident()` removes the
-person, every event, every register row and their audit rows, then writes
-`erasure_log`: a SHA-256 digest of the internal id, the number of rows
-removed, the reason, the admin and the time. That demonstrates the erasure
-(Art. 5(2)) without keeping anything that identifies the person.
+person, every event, every register row, their audit rows and their
+register corrections — migration 056's `admin_audit` rows are keyed by the
+event, not the resident, so `erase_audit_rows()` finds them by the
+resident's id inside `old_row`/`new_row` rather than in `row_id`, the same
+way an Art. 15 export does (below) — then writes `erasure_log`: a SHA-256
+digest of the internal id, the number of rows removed, the reason, the
+admin and the time. That demonstrates the erasure (Art. 5(2)) without
+keeping anything that identifies the person.
 
 **Access is a session, not obscurity.** Every table has row-level security;
 every view and function is revoked from `anon`. The API refuses a request
@@ -390,7 +406,7 @@ supervisor by the database function itself, not just by the screen.
 | Reports for an inspection | Admin → Reports: register, attendance, movements, occupancy, evacuation, drills, as CSV or a printable page | Supervisors and admins. A reason is required; each export is written to `admin_audit` with the range (`note_report()`) |
 | Access (Art. 15) and portability (Art. 20) | Export button → `GET /api/residents/:id/export?reason=…` | JSON: the record, every event with the recording staff member's name, the register, the change history, and who has viewed the record. The reason is recorded in `admin_audit` |
 | Who has looked at a record | Admin → Reports → *Who viewed which record*, for a date range | Administrators only (`resident_views_between()`); a reason is required and the report itself is logged like any other |
-| Rectification (Art. 16) | Edit sheet (supervisors and admins) | Names, date of birth, identity document, departure date. The change is audited. Events are corrected by new events, never edited |
+| Rectification (Art. 16) | Edit sheet (supervisors and admins); a resident's History (any staff, migration 056) | Names, date of birth, identity document, departure date via the edit sheet — audited. A wrong check-in or movement is removed with a reason, or a missed one added by hand, from History — also audited; neither is edited in place, see "The record is append-only, with one correction path" above |
 | Erasure (Art. 17) | Erase button, with the reason and the full name typed back | See "Erasure leaves proof" above. The decision is the centre's; Art. 17(3)(b) may apply |
 | Objection (Art. 21) | Procedural | Only arises under legitimate interests |
 | Restriction (Art. 18) | Set `departed_on` | Stops the daily rule applying without deleting history |

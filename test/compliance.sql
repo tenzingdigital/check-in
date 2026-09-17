@@ -1582,3 +1582,79 @@ select pg_temp.expect('056.8: checkin_events.by_hand defaults to false',
 select pg_temp.expect('056.8: gate_events.by_hand defaults to false',
   (select column_default from information_schema.columns
     where table_schema = 'public' and table_name = 'gate_events' and column_name = 'by_hand'), 'false');
+
+\echo '--- 9. corrections are exported with the resident, and erased with them (review I-2)'
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+with c as (
+  select jsonb_array_elements(public.export_resident_record(:'fixer_id') -> 'register_corrections') as x
+)
+select bool_or(x->>'action' = 'removed') as has_removed,
+       bool_or(x->>'action' = 'added')   as has_added
+  from c \gset corr9_
+reset role;
+select pg_temp.expect('056.9: export_resident_record.register_corrections has a removed entry', (:'corr9_has_removed')::boolean, true);
+select pg_temp.expect('056.9: export_resident_record.register_corrections has an added entry', (:'corr9_has_added')::boolean, true);
+
+-- A throwaway resident: add an entry, remove it, then erase — the two
+-- correction rows this leaves in admin_audit are keyed by the event, not by
+-- this resident's id in row_id, and must go with the erasure all the same.
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+insert into public.residents (first_name, last_name, date_of_birth)
+  values ('Erased', 'Fixture', '1990-01-01') returning id as erased_id \gset
+reset role;
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.add_register_entry('gate', :'erased_id', 'in', now() - interval '1 hour', 'seeded for erasure test') as erased_gate_id \gset
+select public.remove_register_entry('gate', :'erased_gate_id', 'seeded for erasure test');
+reset role;
+select count(*)::int as n from public.admin_audit
+ where table_name in ('checkin_events', 'gate_events')
+   and (old_row->>'resident_id' = :'erased_id' or new_row->>'resident_id' = :'erased_id') \gset before9_
+select pg_temp.expect('056.9: the throwaway resident has correction rows before erasure', (:'before9_n')::integer, 2);
+
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.erase_resident(:'erased_id', 'test') is not null as erased9 \gset
+reset role;
+select count(*)::int as n from public.admin_audit
+ where table_name in ('checkin_events', 'gate_events')
+   and (old_row->>'resident_id' = :'erased_id' or new_row->>'resident_id' = :'erased_id') \gset after9_
+select pg_temp.expect('056.9: erasure removes the resident''s correction rows too', (:'after9_n')::integer, 0);
+
+\echo '--- 10. removing a sign IN removes its door check-in twin (review I-3)'
+update public.app_settings set feature_door_checkin = true;
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select 1 as _ from public.record_check(:'fixer_id', 'in') limit 1;
+reset role;
+select id from public.gate_events where resident_id = :'fixer_id' order by id desc limit 1 \gset doorgate_
+select id, source from public.checkin_events
+ where resident_id = :'fixer_id' and source = 'door' order by id desc limit 1 \gset doorchk_
+select pg_temp.expect('056.10: the door records a check-in for the sign-in', :'doorchk_source'::text, 'door'::text);
+select checkin_count from public.daily_compliance
+ where resident_id = :'fixer_id' and compliance_date = public.site_today() \gset before10_
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.remove_register_entry('gate', :'doorgate_id', null);
+reset role;
+
+select count(*)::int as n from public.checkin_events where id = :'doorchk_id' \gset gone10_
+select pg_temp.expect('056.10: the door check-in twin is gone with the sign-in', (:'gone10_n')::integer, 0);
+select count(*)::int as n from public.admin_audit
+ where table_name = 'gate_events' and row_id = :'doorgate_id'::text and action = 'delete' \gset auditgate10_
+select count(*)::int as n from public.admin_audit
+ where table_name = 'checkin_events' and row_id = :'doorchk_id'::text and action = 'delete' \gset auditchk10_
+select pg_temp.expect('056.10: the sign-in removal is audited', (:'auditgate10_n')::integer, 1);
+select pg_temp.expect('056.10: the door twin removal is audited too', (:'auditchk10_n')::integer, 1);
+
+select checkin_count from public.daily_compliance
+ where resident_id = :'fixer_id' and compliance_date = public.site_today() \gset after10_
+select pg_temp.expect('056.10: daily_compliance follows what remains once the twin is gone',
+  (:'after10_checkin_count')::integer, (:'before10_checkin_count')::integer - 1);
+
+update public.app_settings set feature_door_checkin = false;

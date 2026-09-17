@@ -199,12 +199,12 @@
     <li><b>Several at once:</b> tick a box, then Sign IN or OUT</li>
     <li>Ticking one family member ticks the family</li>
     <li><b>Select all shown</b> ticks everyone the search found</li>
-    <li>A mistake: record the opposite movement</li>
+    <li>A mistake: remove the wrong movement, or add the missed one, on the person's History</li>
   </ul>
   <details class="more"><summary>More detail</summary>
     <p><b>The three tiles.</b> <span class="ui">On site</span>, <span class="ui">Off site</span> and <span class="ui">Moved today</span> count the list below them. Tap a tile to see only those residents; tap again for everyone.</p>
     <p><b>Since when.</b> Every card says <span class="ui">on site since 14:20</span> or <span class="ui">off site since Thu 4 Sep 09:10</span>, the time of the last movement, with the day once it is not today. <span class="ui">No movement on record</span> means never signed in.</p>
-    <p><b>Nothing is edited afterwards.</b> A wrong movement is corrected by recording the opposite one, and both stay on the log with the times.</p>
+    <p><b>Nothing is edited afterwards.</b> A wrong movement is taken off the register instead, from the person's <span class="ui">History</span>, and the whole entry — who recorded it and why it went — stays on the audit trail.</p>
     <p><b>Several at once.</b> A box sits at the left of every card. Tick two or more, or tap <span class="ui">Select all shown</span> above the list (type a room or pick a tile first to narrow it), and a bar appears at the bottom with <span class="ui">Sign IN</span> and <span class="ui">Sign OUT</span> for everyone ticked. Each person still gets their own movement with the time and your name. Ticking one member of a family ticks the whole family on screen. <span class="ui">✕</span> in the bar clears the ticks; a single ticked box does nothing on its own, since <span class="ui">Sign in</span> or <span class="ui">Sign out</span> on the card is the one-person act.</p>
     <p><b>The sheet.</b> Tap a name and a sheet slides up. Close it with the <span class="ui">✕</span> at the top of the sheet (it stays in view while you scroll), a tap on the dimmed page behind it, <span class="ui">Escape</span> on a keyboard, or <span class="ui">Close</span> at the bottom. Tapping another name swaps straight to that person.</p>
     <p><b>Spelling.</b> Accents and name order are forgiven; a near miss still finds the person.</p>
@@ -224,9 +224,10 @@
     <p>On one person's <span class="ui">History</span>, <span class="ui">Both</span> / <span class="ui">In &amp; out</span> / <span class="ui">Check-ins</span> narrows it to one register, and supervisors and admins also see <span class="ui">Export CSV</span>: give a reason and the rows shown download as a spreadsheet, on the record like any other export.</p>
   </details>
   <details class="more"><summary>Fix a wrong entry, or add one you missed</summary>
-    <p>On one person's <span class="ui">History</span>, every row has <span class="ui">Remove</span>. It comes off the register with a reason and stays on the audit trail — nothing is edited in place. Your own entry from the last 15 minutes needs no reason; anything older, or someone else's, does. An earlier day needs a supervisor or admin.</p>
-    <p><span class="ui">Add a missed entry</span>, above the list, puts a check-in or a movement on at the time it happened rather than now, always with a reason, and marks it <span class="ui">entered by hand</span> so it is never mistaken for one recorded at the time. Any staff member can add one from the last two days; further back, up to 28 nights, needs a supervisor or admin.</p>
+    <p>On one person's <span class="ui">History</span>, every row has <span class="ui">Remove</span>. It comes off the register with a reason and stays on the audit trail — nothing is edited in place. Any staff member can remove a colleague's entry from today this way, not only their own. Your own entry from the last 15 minutes needs no reason; anything older, or someone else's, does. An earlier day needs a supervisor or admin.</p>
+    <p><span class="ui">Add a missed entry</span>, above the list, puts a check-in or a movement on at the time it happened rather than now, always with a reason, and marks it <span class="ui">entered by hand</span> so it is never mistaken for one recorded at the time. Any staff member can add one within the late-entry window — 48 hours unless Settings says otherwise; further back, up to 28 nights, needs a supervisor or admin.</p>
     <p>The <span class="ui">Log</span> tab has no <span class="ui">Remove</span> — it shows the day as it stands. A resident's own <span class="ui">History</span> is where a wrong entry comes off, or a missed one goes on.</p>
+    <p>Every removal and every by-hand addition names who did it and why on the audit trail. Supervisors and admins can see the full list under <span class="ui">Admin → Reports → Register corrections</span>.</p>
   </details>
   <a class="top" href="#top">Back to the top</a>
 
@@ -352,11 +353,11 @@
   <ul class="facts">
     <li>Daily register</li><li>Attendance</li><li>Movement log</li><li>Out and back</li><li>Absent now</li><li>Absent overnight</li>
     <li>Weekly register update</li>
-    <li>Child supervision arrangements</li><li>Children on site without a guardian</li><li>Check-ins recorded while signed out</li>
+    <li>Child supervision arrangements</li><li>Children on site without a guardian</li><li>Check-ins recorded while signed out</li><li>Register corrections</li>
     <li>Authorised absences</li><li>Breach reports</li><li>Drills</li><li>Who was marked safe</li><li>Visitors</li><li>Occupancy</li><li>Vacancies</li><li>Evacuation list</li><li>Room history</li>
   </ul>
   <details class="more"><summary>What each one is</summary>
-    <p><b>Daily register</b>: one row per resident per day, required, presented, first seen. <b>Attendance</b>: one row per resident with days required, presented and missed. <b>Movement log</b>: every sign in and out. <b>Out and back</b>: one row per absence, out and back on one line, hours away. <b>Absent now</b>, <b>Absent overnight</b>: see <a href="#absent">off site</a>. <b>Weekly register update</b>: the Sunday report, see <a href="#sunday">Send the Sunday report</a>. <b>Child supervision arrangements</b>: every arrangement recorded under Families, with who minded whom and when. <b>Children on site without a guardian</b>: each night a household had children on site, no guardian on site and no arrangement, as recorded at midnight. <b>Check-ins recorded while signed out</b>: each check-in recorded while In &amp; out had that person out, with who recorded it. <b>Drills</b> and <b>Who was marked safe</b>: the roll-call record. <b>Occupancy</b> and <b>Vacancies</b>: per room, the latter against contracted beds. <b>Evacuation list</b>: everyone with room, presence and need. Administrators also have <b>Who viewed which record</b>.</p>
+    <p><b>Daily register</b>: one row per resident per day, required, presented, first seen. <b>Attendance</b>: one row per resident with days required, presented and missed. <b>Movement log</b>: every sign in and out. <b>Out and back</b>: one row per absence, out and back on one line, hours away. <b>Absent now</b>, <b>Absent overnight</b>: see <a href="#absent">off site</a>. <b>Weekly register update</b>: the Sunday report, see <a href="#sunday">Send the Sunday report</a>. <b>Child supervision arrangements</b>: every arrangement recorded under Families, with who minded whom and when. <b>Children on site without a guardian</b>: each night a household had children on site, no guardian on site and no arrangement, as recorded at midnight. <b>Check-ins recorded while signed out</b>: each check-in recorded while In &amp; out had that person out, with who recorded it. <b>Register corrections</b>: every entry taken off the register or added by hand in the range, who did it and why — see <a href="#absent">Fix a wrong entry, or add one you missed</a>. <b>Drills</b> and <b>Who was marked safe</b>: the roll-call record. <b>Occupancy</b> and <b>Vacancies</b>: per room, the latter against contracted beds. <b>Evacuation list</b>: everyone with room, presence and need. Administrators also have <b>Who viewed which record</b>.</p>
   </details>
 
   <h3 id="sunday">Send the Sunday report</h3>

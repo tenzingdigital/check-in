@@ -60,7 +60,7 @@ CREATE FUNCTION __TENANT__.add_register_entry(p_register text, p_resident_id uui
     AS $$
 declare
   v_tz text; v_hours integer; v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
-  v_status text; v_id bigint; v_day date; v_next timestamptz; v_dup boolean;
+  v_status text; v_departed date; v_id bigint; v_day date; v_next timestamptz; v_dup boolean; v_before integer; v_dc __TENANT__.daily_compliance;
 begin
   if not __TENANT__.is_staff() then
     raise exception 'Not authorised to change the register' using errcode = '42501';
@@ -87,22 +87,31 @@ begin
       raise exception 'An entry can be added for the last 28 nights only' using errcode = '22023';
     end if;
   end if;
-  select status into v_status from __TENANT__.residents where id = p_resident_id;
+  select status, departed_on into v_status, v_departed from __TENANT__.residents where id = p_resident_id;
   if v_status is null then raise exception 'Resident not found' using errcode = 'P0002'; end if;
   v_day := (p_at at time zone v_tz)::date;
 
   if p_register = 'checkin' then
     -- record_checkin_at() places the day, repairs a closed day, and applies
-    -- the 60-second double-tap rule; by_hand is set on the row it made.
-    perform __TENANT__.record_checkin_at(p_resident_id, p_at, false, null, 'desk');
-    select max(id) into v_id from __TENANT__.checkin_events
-     where resident_id = p_resident_id and occurred_at = p_at;
-    if v_id is null then
+    -- the 60-second double-tap rule. Whether it inserted is read off the
+    -- day's row it returns: a count that did not move means the rule
+    -- swallowed a double submit, and that is a refusal here, not a second
+    -- audit row about the first call's event.
+    select checkin_count into v_before from __TENANT__.daily_compliance
+     where resident_id = p_resident_id and compliance_date = v_day;
+    v_dc := __TENANT__.record_checkin_at(p_resident_id, p_at, false, null, 'desk');
+    if v_dc.checkin_count = coalesce(v_before, 0) then
       raise exception 'A check-in within a minute of that time is already on the register' using errcode = '23505';
     end if;
-    update __TENANT__.checkin_events set by_hand = true where id = v_id and by_hand = false and guard_id = auth.uid();
+    -- The row this call made: same second (now() is fixed for the
+    -- transaction), this caller, this time.
+    select max(id) into v_id from __TENANT__.checkin_events
+     where resident_id = p_resident_id and occurred_at = p_at and guard_id = auth.uid() and recorded_at = now();
+    update __TENANT__.checkin_events set by_hand = true where id = v_id;
   else
-    if v_status <> 'active' then
+    -- The same rule as record_checkin_at(): a departed resident's days up
+    -- to and including departed_on are still theirs to correct.
+    if v_status <> 'active' and (v_departed is null or v_day > v_departed) then
       raise exception 'Resident is not active and cannot be signed in or out' using errcode = '23514';
     end if;
     select exists (select 1 from __TENANT__.gate_events
@@ -960,7 +969,7 @@ CREATE FUNCTION __TENANT__.erase_audit_rows(p_resident_id uuid) RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO '__TENANT__', 'public', 'extensions'
     AS $$
-declare v_n integer;
+declare v_n integer; v_n2 integer;
 begin
   if not __TENANT__.is_admin() then
     raise exception 'Only an admin may erase a resident' using errcode = '42501';
@@ -968,7 +977,11 @@ begin
   delete from __TENANT__.admin_audit
    where table_name = 'residents' and row_id = p_resident_id::text;
   get diagnostics v_n = row_count;
-  return v_n;
+  delete from __TENANT__.admin_audit
+   where table_name in ('checkin_events', 'gate_events')
+     and (old_row->>'resident_id' = p_resident_id::text or new_row->>'resident_id' = p_resident_id::text);
+  get diagnostics v_n2 = row_count;
+  return v_n + v_n2;
 end;
 $$;
 
@@ -1147,6 +1160,24 @@ begin
       from __TENANT__.admin_audit a
       left join __TENANT__.profiles p on p.id = a.actor_id
       where a.table_name = 'residents' and a.row_id = r.id::text
+    ), '[]'::jsonb),
+    -- Migration 056: a wrong check-in or movement taken off the register, or
+    -- a missed one added by hand. Keyed by the event, not the resident, so
+    -- it is found the same way erase_audit_rows() now finds it — inside
+    -- old_row/new_row rather than row_id.
+    'register_corrections', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'at', a.at,
+               'register', case a.table_name when 'checkin_events' then 'checkin' else 'gate' end,
+               'action', case a.action when 'delete' then 'removed' else 'added' end,
+               'entry', coalesce(a.old_row, a.new_row),
+               'by', p.full_name,
+               'reason', a.note
+             ) order by a.at)
+      from __TENANT__.admin_audit a
+      left join __TENANT__.profiles p on p.id = a.actor_id
+      where a.table_name in ('checkin_events', 'gate_events')
+        and (a.old_row->>'resident_id' = r.id::text or a.new_row->>'resident_id' = r.id::text)
     ), '[]'::jsonb)
   )
   into v_out
@@ -2530,6 +2561,45 @@ $$;
 
 --
 
+-- Name: register_corrections(date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.register_corrections(p_from date, p_to date) RETURNS TABLE(date text, "time" text, action text, register text, entry text, entry_time text, resident text, entered_by text, by text, reason text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+begin
+  if not __TENANT__.is_supervisor() then
+    raise exception 'Only a supervisor or admin can see register corrections' using errcode = '42501';
+  end if;
+  return query
+    select to_char(a.at at time zone s.tz, 'YYYY-MM-DD'),
+           to_char(a.at at time zone s.tz, 'HH24:MI'),
+           case a.action when 'delete' then 'removed' else 'added' end,
+           case a.table_name when 'checkin_events' then 'Daily register' else 'In & out' end,
+           case a.table_name
+             when 'checkin_events' then 'Check-in'
+             else upper(coalesce(a.old_row, a.new_row)->>'kind')
+           end,
+           to_char(((coalesce(a.old_row, a.new_row)->>'occurred_at')::timestamptz) at time zone s.tz, 'YYYY-MM-DD HH24:MI'),
+           coalesce(btrim(r.first_name) || ' ' || btrim(r.last_name), '(erased)'),
+           g.full_name,
+           p.full_name,
+           a.note
+      from __TENANT__.admin_audit a
+      cross join (select local_timezone as tz from __TENANT__.app_settings where id) s
+      left join __TENANT__.residents r on r.id = nullif(coalesce(a.old_row, a.new_row)->>'resident_id', '')::uuid
+      left join __TENANT__.profiles  g on g.id = nullif(coalesce(a.old_row, a.new_row)->>'guard_id', '')::uuid
+      left join __TENANT__.profiles  p on p.id = a.actor_id
+     where a.table_name in ('checkin_events', 'gate_events')
+       and (a.at at time zone s.tz)::date between p_from and p_to
+     order by a.at desc;
+end;
+$$;
+
+
+--
+
 -- Name: remove_register_entry(text, bigint, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2541,7 +2611,7 @@ declare
   v_tz text; v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
   v_chk __TENANT__.checkin_events; v_gate __TENANT__.gate_events;
   v_resident uuid; v_guard uuid; v_at timestamptz; v_recorded timestamptz; v_day date; v_row jsonb;
-  v_next timestamptz;
+  v_next timestamptz; v_twin bigint;
 begin
   if not __TENANT__.is_staff() then
     raise exception 'Not authorised to change the register' using errcode = '42501';
@@ -2587,6 +2657,25 @@ begin
     perform __TENANT__.recompute_daily_compliance(v_resident, v_day);
   else
     delete from __TENANT__.gate_events where id = p_id;
+
+    -- feature_door_checkin (026): a sign IN also writes a checkin_events row,
+    -- source = 'door', through the same call and so at the same occurred_at
+    -- (one now() for the whole transaction). Removing the IN without its
+    -- twin would leave the day reading as presented on evidence the register
+    -- has just declared wrong — the door's tap *was* the sign-in being
+    -- removed, not a second presentation. Found by resident and the shared
+    -- timestamp: only a sign IN ever makes one, so the match is exact.
+    select id into v_twin from __TENANT__.checkin_events
+     where resident_id = v_resident and source = 'door' and occurred_at = v_at;
+    if v_twin is not null then
+      insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, old_row, note)
+      select auth.uid(), 'checkin_events', v_twin::text, 'delete', to_jsonb(c),
+             coalesce(v_reason, 'own entry, within 15 minutes') || ' (door check-in recorded with the removed sign-in)'
+        from __TENANT__.checkin_events c where c.id = v_twin;
+      delete from __TENANT__.checkin_events where id = v_twin;
+      perform __TENANT__.recompute_daily_compliance(v_resident, v_day);
+    end if;
+
     -- The nights this movement decided: from its own night up to the night
     -- before the next remaining movement (or last night).
     select min(e.occurred_at) into v_next from __TENANT__.gate_events e where e.resident_id = v_resident and e.occurred_at > v_at;
@@ -6099,6 +6188,16 @@ GRANT ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) TO service_ro
 
 REVOKE ALL ON FUNCTION __TENANT__.refuse_archived_room() FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.refuse_archived_room() TO service_role;
+
+
+--
+
+-- Name: FUNCTION register_corrections(p_from date, p_to date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.register_corrections(p_from date, p_to date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.register_corrections(p_from date, p_to date) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.register_corrections(p_from date, p_to date) TO service_role;
 
 
 --

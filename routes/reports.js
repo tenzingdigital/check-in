@@ -20,6 +20,7 @@
 //   supervision  Appendix 5 child-supervision arrangements in the range (053)
 //   guardian-gaps      households that had children on site, no guardian on site and no arrangement at the midnight snapshot, night by night (054)
 //   checkin-conflicts  daily check-ins recorded while the In & out register had the person out (054)
+//   register-corrections  every wrong entry taken off the register and every missed one added by hand, in the range (056)
 //
 // Supervisors and admins. A reason is required and every export is written
 // to admin_audit by note_report() in the same transaction, so an inspection
@@ -408,6 +409,17 @@ REPORTS['checkin-conflicts'] = {
          where c.occurred_at >= ($1::date::timestamp) at time zone s.local_timezone
            and c.occurred_at <  (($2::date + 1)::timestamp) at time zone s.local_timezone
          order by c.occurred_at desc, r.last_name, r.first_name`,
+};
+
+// Every wrong check-in or movement taken off the register, and every missed
+// one added by hand, in the range (migration 056). admin_audit itself is
+// admin-only, so this runs through register_corrections(), a narrow
+// SECURITY DEFINER door onto exactly these rows and no others in that table
+// — a supervisor gets what the audit trail already held, and nothing more.
+REPORTS['register-corrections'] = {
+  title: 'Register corrections',
+  ranged: true,
+  sql: `select * from register_corrections($1, $2)`,
 };
 
 // Authorised absences overlapping the range, and who was marked safe on
