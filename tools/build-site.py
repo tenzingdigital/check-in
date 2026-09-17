@@ -315,7 +315,7 @@ faqs = [
  ("What happens if a resident is not seen?",
   "At local midnight — the site's own timezone, computed on the server — anyone who was required to check in and was not seen becomes a recorded miss. Nothing depends on a staff member remembering to close the day, and a tablet with a wrong clock cannot shift what today means."),
  ("Can a check-in be edited or deleted?",
-  "No. Check-ins are append-only and cannot be changed or removed by anyone, including an administrator. A correction is a new record, not an edit of an old one. This is what makes the register usable as evidence."),
+  "Not edited, no. A wrong entry can be taken off the register by a staff member with a reason — the whole entry, who removed it and why stay on the audit trail — and a missed one can be added at the time it happened, marked as entered by hand. Nothing is ever changed in place, which is what makes the register usable as evidence."),
  ("Does it decide when someone has breached the rules?",
   "No, and that is deliberate. CheckSteady shows the count beside the figure in your settings — three consecutive nights, ten days absent in twenty-eight — and stops there. The decision, and the letter, stay with the manager."),
  ("Can a resident be exempt from checking in?",

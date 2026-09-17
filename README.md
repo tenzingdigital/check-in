@@ -159,9 +159,13 @@ presentation at the hut, written by the check-in app. They answer different
 questions and are never merged: leaving the site is not the same act as being
 seen and recorded for the day.
 
-**Corrections are new events, not edits.** No role has UPDATE or DELETE on
-either ledger. If a guard signs in the wrong person, the fix is another event.
-Rows leave the tables only through the retention purge or a GDPR erasure
+**Corrections are audited removals and additions, never edits.** No role
+has UPDATE or DELETE on either ledger. A wrong entry comes off through
+`remove_register_entry()` (056), which copies the whole row to `admin_audit`
+with the reason before deleting it and recomputes the day's register row and
+the overnight-absence nights; a missed one goes on through
+`add_register_entry()` at the time it happened, marked `by_hand`. Otherwise
+rows leave the tables only through the retention purge or a GDPR erasure
 request.
 
 ### Compliance is per calendar day, not a rolling window
