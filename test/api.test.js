@@ -2948,7 +2948,35 @@ async function main() {
     const logged = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'weekly' order by at desc limit 1`));
     assert.match(logged.rows[0].note, /sent by hand/);
 
-    const offMails = (global.__mailSink || []).slice(before);
+    // The nightly email by hand: same shape, to the staff ticked for the
+    // nightly email, with the site switch off and no job_runs row (so the
+    // 00:30 run is not "already sent"). Nobody ticked → a plain 400.
+    assert.equal((await supC.fetch("/api/settings/nightly-email/send", { method: "POST" })).status, 403);
+    await withOwner((c) => c.query(`update public.app_settings set nightly_email = false`));
+    await withOwner((c) => c.query(`update public.profiles set safeguarding_alert = false`));
+    const nobody = await wkAdmin.fetch("/api/settings/nightly-email/send", { method: "POST" });
+    assert.equal(nobody.status, 400, nobody.text);
+    assert.match(nobody.json.error, /Tick at least one/);
+    assert.equal((await wkAdmin.fetch(`/api/staff/${niamh.json.id}/safeguarding-alert`, { method: "POST", body: { on: true } })).status, 200);
+    const runsBefore = (await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'nightly-email'`))).rows[0].n;
+    const nBefore = (global.__mailSink || []).length;
+    const tonight = await wkAdmin.fetch("/api/settings/nightly-email/send", { method: "POST" });
+    assert.equal(tonight.status, 200, tonight.text);
+    assert.equal(tonight.json.recipients, 1);
+    assert.equal(tonight.json.sent, 0, "the sink never delivers");
+    assert.match(tonight.json.night, /^\d{4}-\d{2}-\d{2}$/);
+    const nMails = (global.__mailSink || []).slice(nBefore);
+    assert.equal(nMails.length, 1);
+    assert.equal(nMails[0].to, "niamh@example.ie");
+    assert.match(nMails[0].subject, /: tonight — /);
+    assert.match(nMails[0].text, /Children on site without a guardian: \d+/);
+    assert.ok(nMails[0].headers && /e=nightly>$/.test(nMails[0].headers["List-Unsubscribe"]));
+    const nightLogged = await withOwner((c) => c.query(`select note from public.admin_audit where table_name = 'reports' and row_id = 'nightly' order by at desc limit 1`));
+    assert.match(nightLogged.rows[0].note, /sent by hand/);
+    assert.equal((await withOwner((c) => c.query(`select count(*)::int as n from public.job_runs where job = 'nightly-email'`))).rows[0].n, runsBefore, "no job_runs row from a send by hand");
+    await withOwner((c) => c.query(`update public.profiles set safeguarding_alert = false where id = $1`, [niamh.json.id]));
+
+    const offMails = (global.__mailSink || []).slice(before, nBefore);
     assert.equal(offMails.length, 2);
     assert.ok(offMails.every((m) => m.attachments === undefined), "with the switch off, nothing is attached");
 

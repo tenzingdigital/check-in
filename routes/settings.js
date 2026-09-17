@@ -169,6 +169,7 @@ router.delete('/demo-data', wrap(async (req, res) => {
 // ---------------------------------------------------------------------------
 const mail = require('../lib/mail');
 const weekly = require('../lib/weeklyReport');
+const jobs = require('../jobs');
 const prefs = require('../lib/emailPrefs');
 
 // Same rule as the nightly job (jobs.js reportLink()): PUBLIC_URL, or no
@@ -224,6 +225,28 @@ router.post('/weekly-report/send', wrap(async (req, res) => {
     return { sent, recipients: staff.length, from, to };
   });
   res.json(out);
+}));
+
+// POST /api/settings/nightly-email/send — tonight's email, now: the same
+// message the 00:30 run would send about last night, to the staff ticked
+// for it, switch or no switch, so an administrator can see what arrives
+// before relying on it (the owner, 17 Sep 2026: "I want to be able to test
+// the emails as they're working"). The message is built and sent by the
+// job's own code (jobs.js nightlyByHand) as the owner in the caller's
+// schema — the row queries read base tables the way the job does — after
+// the audit row is written as the caller. No job_runs row, so tonight's
+// real run is not "already sent".
+router.post('/nightly-email/send', wrap(async (req, res) => {
+  if (req.session.role !== 'admin') throw new HttpError(403, 'Only an administrator can send the nightly email');
+  const night = await db.withIdentity(req.session.userId, async (client) => {
+    const { rows: [s] } = await client.query(`select to_char(site_today() - 1, 'YYYY-MM-DD') as night from app_settings where id`);
+    await client.query('select note_report($1, $2, $3, $4)', ['nightly', 'sent by hand', s.night, s.night]);
+    return s.night;
+  });
+  const { schema } = await db.withOwner((c) => tenancy.schemaForUser(c, req.session.userId));
+  const out = await db.withOwnerIn(schema, (client) => jobs.nightlyByHand(client, schema))
+    .catch((err) => { throw new HttpError(400, err.message); });
+  res.json({ ...out, night });
 }));
 
 // ---------------------------------------------------------------------------

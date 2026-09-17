@@ -585,6 +585,8 @@
 
         <h2 class="mt6">Nightly email</h2>
         <label class="check"><input id="stNightly" type="checkbox"> <span><b>Nightly email to the staff ticked for alerts.</b> After the night closes, the staff ticked "Gets the nightly email" under Staff are emailed four sections, each with a link into the app: children on site without a guardian, children away overnight without authorisation, check-ins recorded while signed out, and residents at the House Rules figures. Sent on any night with something to count, and every Sunday regardless. The email names the residents behind each count.</span></label>
+        <div class="mt8"><button class="btn ghost sm" type="button" id="stNightlySend">Send tonight's email now</button>
+          <p class="hint under">Emails last night's message to everyone ticked, exactly as the 00:30 run would, so you can see what arrives. Asks first; a manual send is on the audit record and does not stop tonight's.</p></div>
 
         <h2 class="mt6">Weekly register update</h2>
         <label class="check"><input id="stWeekly" type="checkbox"> <span><b>Email the Weekly register update every Sunday.</b> At 10:00 on Sunday, the staff ticked to receive it are emailed a count for resident absences, weekend updates, removals and room updates, and a link into the app. The email body never names a resident; the tick below adds the update as a Word document, which does.</span></label>
@@ -2414,6 +2416,23 @@ $("settingsForm").addEventListener("submit", async (e) => {
   loadSettings();
 });
 $("stReload").addEventListener("click", loadSettings);
+$("stNightlySend").addEventListener("click", async () => {
+  const btn = $("stNightlySend");
+  if (btn.disabled) return;
+  if (!confirm("Email last night's nightly email now to everyone ticked to receive it? It names residents, and the send goes on the audit record.")) return;
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Sending…";
+  const out = await guarded(() => apiPost("/api/settings/nightly-email/send", {}), (err) => toast("Not sent: " + err.message, "err"));
+  btn.disabled = false;
+  btn.textContent = label;
+  if (!out) return;
+  if (out.sent === 0) {
+    toast(`Nothing was delivered for the night of ${out.night} — the mail service did not accept it. Try again in a minute, or tell whoever runs the service.`, "err");
+  } else {
+    toast(`Delivered for the night of ${out.night} (${out.total} to look at) to ${out.sent} of ${out.recipients} recipient${out.recipients === 1 ? "" : "s"}`, "ok");
+  }
+});
 $("stWeeklySend").addEventListener("click", async () => {
   const btn = $("stWeeklySend");
   if (btn.disabled) return;

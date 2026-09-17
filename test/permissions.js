@@ -134,6 +134,7 @@ module.exports = [
   { area: 'Administration', name: 'Erase a resident and their history (Art. 17)', method: 'DELETE', path: (fx) => `/api/residents/${fx.residentId}`, body: (fx) => ({ reason: 'matrix', confirm_name: fx.residentName }), expect: ADMIN, fresh: 'resident' },
   { area: 'Administration', name: "Change the site's settings, retention and feature switches", method: 'PATCH', path: () => '/api/settings', body: () => ({ site_name: 'Matrix Site' }), expect: ADMIN },
   { area: 'Administration', name: "Send the Weekly register update by email now", method: 'POST', path: () => '/api/settings/weekly-report/send', body: () => ({}), expect: ADMIN },
+  { area: 'Administration', name: "Send the nightly email now", method: 'POST', path: () => '/api/settings/nightly-email/send', body: () => ({}), expect: ADMIN },
   { area: 'Administration', name: 'Add a permitted absence period', method: 'POST', path: () => '/api/settings/absence-windows', body: () => ({ name: `Matrix ${crypto.randomInt(1e6)}`, from_date: '2030-01-01', to_date: '2030-01-02' }), expect: ADMIN },
   { area: 'Administration', name: 'Edit a permitted absence period', method: 'PATCH', path: (fx) => `/api/settings/absence-windows/${fx.absenceWindowId}`, body: () => ({ name: 'Edited' }), expect: ADMIN, fresh: 'absenceWindow' },
   { area: 'Administration', name: 'Remove a permitted absence period', method: 'DELETE', path: (fx) => `/api/settings/absence-windows/${fx.absenceWindowId}`, expect: ADMIN, fresh: 'absenceWindow' },
