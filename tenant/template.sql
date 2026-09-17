@@ -51,6 +51,85 @@ $$;
 
 --
 
+-- Name: add_register_entry(text, uuid, text, timestamp with time zone, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.add_register_entry(p_register text, p_resident_id uuid, p_direction text, p_at timestamp with time zone, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_tz text; v_hours integer; v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_status text; v_id bigint; v_day date; v_next timestamptz; v_dup boolean;
+begin
+  if not __TENANT__.is_staff() then
+    raise exception 'Not authorised to change the register' using errcode = '42501';
+  end if;
+  if p_register not in ('checkin', 'gate') then
+    raise exception 'register must be ''checkin'' or ''gate''' using errcode = '22023';
+  end if;
+  if p_register = 'gate' and p_direction not in ('in', 'out') then
+    raise exception 'direction must be ''in'' or ''out''' using errcode = '22023';
+  end if;
+  if v_reason is null or length(v_reason) > 200 then
+    raise exception 'A reason of 1 to 200 characters is required' using errcode = '22023';
+  end if;
+  if p_at is null then raise exception 'When it happened is required' using errcode = '22023'; end if;
+  if p_at > now() + interval '5 minutes' then
+    raise exception 'That time is in the future' using errcode = '22023';
+  end if;
+  select local_timezone, late_entry_window_hours into v_tz, v_hours from __TENANT__.app_settings where id;
+  if p_at < now() - make_interval(hours => v_hours) then
+    if not __TENANT__.is_supervisor() then
+      raise exception 'Only a supervisor or admin can add an entry older than % hours', v_hours using errcode = '42501';
+    end if;
+    if (p_at at time zone v_tz)::date < __TENANT__.site_today() - 28 then
+      raise exception 'An entry can be added for the last 28 nights only' using errcode = '22023';
+    end if;
+  end if;
+  select status into v_status from __TENANT__.residents where id = p_resident_id;
+  if v_status is null then raise exception 'Resident not found' using errcode = 'P0002'; end if;
+  v_day := (p_at at time zone v_tz)::date;
+
+  if p_register = 'checkin' then
+    -- record_checkin_at() places the day, repairs a closed day, and applies
+    -- the 60-second double-tap rule; by_hand is set on the row it made.
+    perform __TENANT__.record_checkin_at(p_resident_id, p_at, false, null, 'desk');
+    select max(id) into v_id from __TENANT__.checkin_events
+     where resident_id = p_resident_id and occurred_at = p_at;
+    if v_id is null then
+      raise exception 'A check-in within a minute of that time is already on the register' using errcode = '23505';
+    end if;
+    update __TENANT__.checkin_events set by_hand = true where id = v_id and by_hand = false and guard_id = auth.uid();
+  else
+    if v_status <> 'active' then
+      raise exception 'Resident is not active and cannot be signed in or out' using errcode = '23514';
+    end if;
+    select exists (select 1 from __TENANT__.gate_events
+                    where resident_id = p_resident_id and kind = p_direction
+                      and abs(extract(epoch from (occurred_at - p_at))) < 60) into v_dup;
+    if v_dup then
+      raise exception 'A movement within a minute of that time is already on the register' using errcode = '23505';
+    end if;
+    insert into __TENANT__.gate_events (resident_id, guard_id, kind, occurred_at, recorded_at, late_entry, by_hand)
+    values (p_resident_id, auth.uid(), p_direction, p_at, now(), false, true)
+    returning id into v_id;
+    select min(e.occurred_at) into v_next from __TENANT__.gate_events e where e.resident_id = p_resident_id and e.occurred_at > p_at;
+    perform __TENANT__.recompute_overnight_absences(p_resident_id, v_day,
+      least(__TENANT__.site_today() - 1, coalesce((v_next at time zone v_tz)::date, __TENANT__.site_today() - 1)));
+  end if;
+
+  insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, new_row, note)
+  select auth.uid(), case when p_register = 'checkin' then 'checkin_events' else 'gate_events' end, v_id::text, 'insert',
+         case when p_register = 'checkin' then (select to_jsonb(c) from __TENANT__.checkin_events c where c.id = v_id)
+              else (select to_jsonb(g) from __TENANT__.gate_events g where g.id = v_id) end,
+         v_reason;
+  return v_id;
+end $$;
+
+
+--
+
 -- Name: admin_create_staff(text, text, text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1909,6 +1988,65 @@ end $$;
 
 --
 
+-- Name: recompute_daily_compliance(uuid, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.recompute_daily_compliance(p_resident_id uuid, p_day date) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_tz text;
+begin
+  select local_timezone into v_tz from __TENANT__.app_settings where id;
+  update __TENANT__.daily_compliance dc
+     set presented     = agg.n > 0,
+         first_seen_at = agg.first_at,
+         checkin_count = agg.n
+    from (select count(*)::integer as n, min(e.occurred_at) as first_at
+            from __TENANT__.checkin_events e
+           where e.resident_id = p_resident_id
+             and (e.occurred_at at time zone v_tz)::date = p_day) agg
+   where dc.resident_id = p_resident_id and dc.compliance_date = p_day;
+end $$;
+
+
+--
+
+-- Name: recompute_overnight_absences(uuid, date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.recompute_overnight_absences(p_resident_id uuid, p_from date, p_to date) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare v_tz text; v_night date; v_end timestamptz; v_kind text; v_since timestamptz; v_res __TENANT__.residents; n integer := 0;
+begin
+  select local_timezone into v_tz from __TENANT__.app_settings where id;
+  select * into v_res from __TENANT__.residents where id = p_resident_id;
+  if not found then return 0; end if;
+  v_night := p_from;
+  while v_night <= least(p_to, __TENANT__.site_today() - 1) loop
+    v_end := ((v_night + 1)::timestamp) at time zone v_tz;
+    select e.kind, e.occurred_at into v_kind, v_since
+      from __TENANT__.gate_events e
+     where e.resident_id = p_resident_id and e.occurred_at < v_end
+     order by e.occurred_at desc, e.id desc limit 1;
+    delete from __TENANT__.overnight_absences where resident_id = p_resident_id and night = v_night;
+    if v_res.registered_at < v_end
+       and (v_res.status = 'active' or (v_res.status = 'departed' and v_res.departed_on is not null and v_res.departed_on > v_night))
+       and (v_kind is null or v_kind = 'out') then
+      insert into __TENANT__.overnight_absences (night, resident_id, off_site_since) values (v_night, p_resident_id, v_since)
+      on conflict do nothing;
+    end if;
+    n := n + 1;
+    v_night := v_night + 1;
+  end loop;
+  return n;
+end $$;
+
+
+--
+
 -- Name: gate_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1921,6 +2059,7 @@ CREATE TABLE __TENANT__.gate_events (
     recorded_at timestamp with time zone DEFAULT now() NOT NULL,
     late_entry boolean DEFAULT false NOT NULL,
     client_ref uuid,
+    by_hand boolean DEFAULT false NOT NULL,
     CONSTRAINT gate_events_kind_check CHECK ((kind = ANY (ARRAY['in'::text, 'out'::text])))
 );
 
@@ -2387,6 +2526,74 @@ begin
   return new;
 end;
 $$;
+
+
+--
+
+-- Name: remove_register_entry(text, bigint, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION __TENANT__.remove_register_entry(p_register text, p_id bigint, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO '__TENANT__', 'public', 'extensions'
+    AS $$
+declare
+  v_tz text; v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_chk __TENANT__.checkin_events; v_gate __TENANT__.gate_events;
+  v_resident uuid; v_guard uuid; v_at timestamptz; v_recorded timestamptz; v_day date; v_row jsonb;
+  v_next timestamptz;
+begin
+  if not __TENANT__.is_staff() then
+    raise exception 'Not authorised to change the register' using errcode = '42501';
+  end if;
+  if p_register not in ('checkin', 'gate') then
+    raise exception 'register must be ''checkin'' or ''gate''' using errcode = '22023';
+  end if;
+  if v_reason is not null and length(v_reason) > 200 then
+    raise exception 'The reason is at most 200 characters' using errcode = '22023';
+  end if;
+  select local_timezone into v_tz from __TENANT__.app_settings where id;
+
+  if p_register = 'checkin' then
+    select * into v_chk from __TENANT__.checkin_events where id = p_id;
+    if not found then raise exception 'No such check-in' using errcode = 'P0002'; end if;
+    v_resident := v_chk.resident_id; v_guard := v_chk.guard_id; v_at := v_chk.occurred_at;
+    v_recorded := coalesce(v_chk.recorded_at, v_chk.occurred_at); v_row := to_jsonb(v_chk);
+  else
+    select * into v_gate from __TENANT__.gate_events where id = p_id;
+    if not found then raise exception 'No such movement' using errcode = 'P0002'; end if;
+    v_resident := v_gate.resident_id; v_guard := v_gate.guard_id; v_at := v_gate.occurred_at;
+    v_recorded := coalesce(v_gate.recorded_at, v_gate.occurred_at); v_row := to_jsonb(v_gate);
+  end if;
+  v_day := (v_at at time zone v_tz)::date;
+
+  if v_day < __TENANT__.site_today() then
+    if not __TENANT__.is_supervisor() then
+      raise exception 'Only a supervisor or admin can remove an entry from an earlier day' using errcode = '42501';
+    end if;
+    if v_reason is null then
+      raise exception 'A reason is required to remove an entry from an earlier day' using errcode = '22023';
+    end if;
+  elsif v_reason is null and not (v_guard = auth.uid() and v_recorded > now() - interval '15 minutes') then
+    raise exception 'A reason is required unless it is your own entry from the last 15 minutes' using errcode = '22023';
+  end if;
+
+  insert into __TENANT__.admin_audit (actor_id, table_name, row_id, action, old_row, note)
+  values (auth.uid(), case when p_register = 'checkin' then 'checkin_events' else 'gate_events' end, p_id::text, 'delete', v_row,
+          coalesce(v_reason, 'own entry, within 15 minutes'));
+
+  if p_register = 'checkin' then
+    delete from __TENANT__.checkin_events where id = p_id;
+    perform __TENANT__.recompute_daily_compliance(v_resident, v_day);
+  else
+    delete from __TENANT__.gate_events where id = p_id;
+    -- The nights this movement decided: from its own night up to the night
+    -- before the next remaining movement (or last night).
+    select min(e.occurred_at) into v_next from __TENANT__.gate_events e where e.resident_id = v_resident and e.occurred_at > v_at;
+    perform __TENANT__.recompute_overnight_absences(v_resident, v_day,
+      least(__TENANT__.site_today() - 1, coalesce((v_next at time zone v_tz)::date, __TENANT__.site_today() - 1)));
+  end if;
+end $$;
 
 
 --
@@ -2946,6 +3153,7 @@ CREATE TABLE __TENANT__.checkin_events (
     late_entry boolean DEFAULT false NOT NULL,
     client_ref uuid,
     source text DEFAULT 'desk'::text NOT NULL,
+    by_hand boolean DEFAULT false NOT NULL,
     CONSTRAINT checkin_events_source_check CHECK ((source = ANY (ARRAY['desk'::text, 'door'::text, 'kiosk'::text])))
 );
 
@@ -3285,7 +3493,8 @@ CREATE VIEW __TENANT__.v_check_log AS
     e.guard_id,
     g.full_name AS guard_name,
     e.late_entry,
-    e.recorded_at
+    e.recorded_at,
+    e.by_hand
    FROM ((__TENANT__.gate_events e
      JOIN __TENANT__.residents r ON ((r.id = e.resident_id)))
      JOIN __TENANT__.profiles g ON ((g.id = e.guard_id)))
@@ -5127,6 +5336,16 @@ GRANT ALL ON FUNCTION __TENANT__.absence_authorised(p_resident_id uuid, p_day da
 
 --
 
+-- Name: FUNCTION add_register_entry(p_register text, p_resident_id uuid, p_direction text, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.add_register_entry(p_register text, p_resident_id uuid, p_direction text, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.add_register_entry(p_register text, p_resident_id uuid, p_direction text, p_at timestamp with time zone, p_reason text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.add_register_entry(p_register text, p_resident_id uuid, p_direction text, p_at timestamp with time zone, p_reason text) TO service_role;
+
+
+--
+
 -- Name: FUNCTION admin_create_staff(p_email text, p_password text, p_full_name text, p_role text); Type: ACL; Schema: public; Owner: -
 --
 
@@ -5741,6 +5960,24 @@ GRANT ALL ON FUNCTION __TENANT__.purge_supervision_arrangements() TO service_rol
 
 --
 
+-- Name: FUNCTION recompute_daily_compliance(p_resident_id uuid, p_day date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.recompute_daily_compliance(p_resident_id uuid, p_day date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.recompute_daily_compliance(p_resident_id uuid, p_day date) TO service_role;
+
+
+--
+
+-- Name: FUNCTION recompute_overnight_absences(p_resident_id uuid, p_from date, p_to date); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.recompute_overnight_absences(p_resident_id uuid, p_from date, p_to date) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.recompute_overnight_absences(p_resident_id uuid, p_from date, p_to date) TO service_role;
+
+
+--
+
 -- Name: TABLE gate_events; Type: ACL; Schema: public; Owner: -
 --
 
@@ -5862,6 +6099,16 @@ GRANT ALL ON FUNCTION __TENANT__.record_visit_departure(p_id uuid) TO service_ro
 
 REVOKE ALL ON FUNCTION __TENANT__.refuse_archived_room() FROM PUBLIC;
 GRANT ALL ON FUNCTION __TENANT__.refuse_archived_room() TO service_role;
+
+
+--
+
+-- Name: FUNCTION remove_register_entry(p_register text, p_id bigint, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION __TENANT__.remove_register_entry(p_register text, p_id bigint, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION __TENANT__.remove_register_entry(p_register text, p_id bigint, p_reason text) TO authenticated;
+GRANT ALL ON FUNCTION __TENANT__.remove_register_entry(p_register text, p_id bigint, p_reason text) TO service_role;
 
 
 --

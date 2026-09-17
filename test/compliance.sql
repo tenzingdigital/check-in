@@ -1382,3 +1382,193 @@ update public.app_settings set compliance_retention_days = 2555;
 select pg_temp.expect('054 purge removes the old row', (:'gpurge_n')::integer, 1);
 select count(*)::int as n from public.overnight_guardian_gaps where household_id = :'gap_hh' \gset gleft_
 select pg_temp.expect('054 purge keeps tonight''s', (:'gleft_n')::integer, 1);
+
+\echo ''
+\echo '=========== 056: FIX THE REGISTER (REMOVE / ADD, AUDITED) ==========='
+-- Fixture: one resident, created as the supervisor (residents is a
+-- supervisor-only table), exercised as guard/supervisor/kiosk.
+reset role;
+reset request.jwt.claim.sub;
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+insert into public.residents (first_name, last_name, date_of_birth)
+  values ('Fixer', 'Fixture', '1990-01-01') returning id as fixer_id \gset
+reset role;
+reset request.jwt.claim.sub;
+
+\echo '--- 1. a guard removes their own gate entry, same day, within 15 minutes: no reason needed'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.record_check(:'fixer_id', 'in');
+reset role;
+select id as gate1_id from public.gate_events where resident_id = :'fixer_id' order by id desc limit 1 \gset
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.remove_register_entry('gate', :'gate1_id', null);
+reset role;
+select count(*)::int as n from public.gate_events where id = :'gate1_id' \gset gone1_
+select pg_temp.expect('056.1: own recent entry removed', (:'gone1_n')::integer, 0);
+select table_name, row_id, action, note, (old_row->>'kind') as kind
+  from public.admin_audit where table_name = 'gate_events' and row_id = :'gate1_id'::text \gset aud1_
+select pg_temp.expect('056.1: audit table_name', :'aud1_table_name'::text, 'gate_events'::text);
+select pg_temp.expect('056.1: audit row_id', :'aud1_row_id'::text, :'gate1_id'::text);
+select pg_temp.expect('056.1: audit action = delete', :'aud1_action'::text, 'delete'::text);
+select pg_temp.expect('056.1: audit note (no reason needed, own & recent)', :'aud1_note'::text, 'own entry, within 15 minutes'::text);
+select pg_temp.expect('056.1: audit old_row carries the kind', :'aud1_kind'::text, 'in'::text);
+
+\echo '--- 2. someone else''s same-day entry needs a reason; the supervisor may still remove it'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.record_check(:'fixer_id', 'in');
+reset role;
+select id as gate2_id from public.gate_events where resident_id = :'fixer_id' order by id desc limit 1 \gset
+
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.expect('056.2: supervisor without a reason on a guard''s entry is refused (22023)',
+  pg_temp.try('x', 'select public.remove_register_entry(''gate'', ' || :'gate2_id' || ', null)') like '%reason is required%', true);
+select public.remove_register_entry('gate', :'gate2_id', 'wrong person');
+reset role;
+select count(*)::int as n from public.gate_events where id = :'gate2_id' \gset gone2_
+select pg_temp.expect('056.2: removed once a reason is given', (:'gone2_n')::integer, 0);
+
+\echo '--- 3. an earlier day''s movement: supervisor/admin only, with a reason; overnight_absences re-derives'
+-- Registered further back so registered_at does not itself block the nights
+-- being tested (recompute_overnight_absences requires registered_at < the
+-- night's midnight).
+reset role;
+update public.residents set registered_at = now() - interval '10 days' where id = :'fixer_id';
+select ((public.site_today() - 3)::timestamp + time '09:00') at time zone
+  (select local_timezone from public.app_settings where id) as in_ts \gset
+select ((public.site_today() - 2)::timestamp + time '22:00') at time zone
+  (select local_timezone from public.app_settings where id) as out_ts \gset
+insert into public.gate_events (resident_id, guard_id, kind, occurred_at)
+  values (:'fixer_id', '11111111-1111-1111-1111-111111111111', 'in', :'in_ts'::timestamptz);
+insert into public.gate_events (resident_id, guard_id, kind, occurred_at)
+  values (:'fixer_id', '11111111-1111-1111-1111-111111111111', 'out', :'out_ts'::timestamptz)
+  returning id as out_id \gset
+select public.snapshot_overnight_absences(public.site_today() - 2) as snap1 \gset
+select public.snapshot_overnight_absences(public.site_today() - 1) as snap2 \gset
+select count(*)::int as n from public.overnight_absences
+ where resident_id = :'fixer_id' and night in (public.site_today() - 2, public.site_today() - 1) \gset abs1_
+select pg_temp.expect('056.3: both nights recorded absent (last movement was OUT)', (:'abs1_n')::integer, 2);
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('056.3: a guard cannot remove an earlier day''s entry (42501)',
+  pg_temp.try('x', 'select public.remove_register_entry(''gate'', ' || :'out_id' || ', ''tapped out instead of in'')') like '%blocked%', true);
+reset role;
+
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.remove_register_entry('gate', :'out_id', 'tapped out instead of in');
+reset role;
+select count(*)::int as n from public.overnight_absences
+ where resident_id = :'fixer_id' and night in (public.site_today() - 2, public.site_today() - 1) \gset abs2_
+select pg_temp.expect('056.3: both nights re-derived as present (last movement is now IN)', (:'abs2_n')::integer, 0);
+
+\echo '--- 4. removing a check-in makes daily_compliance today missed again'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.record_checkin(:'fixer_id');
+reset role;
+select presented, checkin_count from public.daily_compliance
+ where resident_id = :'fixer_id' and compliance_date = public.site_today() \gset dc1_
+select pg_temp.expect('056.4: check-in presented today', (:'dc1_presented')::boolean, true);
+select pg_temp.expect('056.4: checkin_count = 1', (:'dc1_checkin_count')::integer, 1);
+select id as chk1_id from public.checkin_events where resident_id = :'fixer_id' order by id desc limit 1 \gset
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.remove_register_entry('checkin', :'chk1_id', null);
+reset role;
+select presented, checkin_count, (first_seen_at is null) as no_seen from public.daily_compliance
+ where resident_id = :'fixer_id' and compliance_date = public.site_today() \gset dc2_
+select pg_temp.expect('056.4: no longer presented after removal', (:'dc2_presented')::boolean, false);
+select pg_temp.expect('056.4: checkin_count back to 0', (:'dc2_checkin_count')::integer, 0);
+select pg_temp.expect('056.4: first_seen_at cleared', (:'dc2_no_seen')::boolean, true);
+
+\echo '--- 5. adding a missed check-in, within the window and (for staff) beyond it'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.add_register_entry('checkin', :'fixer_id', null, now() - interval '2 hours', 'seen at the door, not entered') as add1_id \gset
+reset role;
+select by_hand, (guard_id::text) as guard from public.checkin_events where id = :'add1_id' \gset add1_
+select pg_temp.expect('056.5: by_hand = true', (:'add1_by_hand')::boolean, true);
+select pg_temp.expect('056.5: attributed to the caller', :'add1_guard'::text, '11111111-1111-1111-1111-111111111111'::text);
+select action, note from public.admin_audit where table_name = 'checkin_events' and row_id = :'add1_id'::text \gset aud5_
+select pg_temp.expect('056.5: audit action = insert', :'aud5_action'::text, 'insert'::text);
+select pg_temp.expect('056.5: audit note carries the reason', :'aud5_note'::text, 'seen at the door, not entered'::text);
+select presented from public.daily_compliance
+ where resident_id = :'fixer_id' and compliance_date = public.site_today() \gset dc5_
+select pg_temp.expect('056.5: today presented after the by-hand add', (:'dc5_presented')::boolean, true);
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('056.5: a guard cannot add an entry older than the late-entry window (42501)',
+  pg_temp.try('x', 'select public.add_register_entry(''checkin'', ' || quote_literal(:'fixer_id') || ', null, now() - interval ''3 days'', ''x'')') like '%blocked%', true);
+reset role;
+
+-- Seed that day's row closed and missed first, as the 054-era tests do, so
+-- the assertion below proves add_register_entry repairs a CLOSED day
+-- (closed_at untouched, presented flips true) rather than merely creating one.
+select (now() - interval '3 days') as day3_ts \gset
+select ((:'day3_ts'::timestamptz) at time zone (select local_timezone from public.app_settings where id))::date as day3 \gset
+reset role;
+insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
+values (:'fixer_id', :'day3'::date, true, false, null, 0, now());
+
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.add_register_entry('checkin', :'fixer_id', null, :'day3_ts'::timestamptz, 'forgot to log it') as add2_id \gset
+reset role;
+select presented, (closed_at is not null) as still_closed from public.daily_compliance
+ where resident_id = :'fixer_id' and compliance_date = :'day3'::date \gset dc6_
+select pg_temp.expect('056.5: supervisor repairs a closed day (presented)', (:'dc6_presented')::boolean, true);
+select pg_temp.expect('056.5: the day stays closed', (:'dc6_still_closed')::boolean, true);
+
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select pg_temp.expect('056.5: even a supervisor cannot add older than 28 nights (22023)',
+  pg_temp.try('x', 'select public.add_register_entry(''checkin'', ' || quote_literal(:'fixer_id') || ', null, now() - interval ''40 days'', ''x'')') like '%blocked%', true);
+select pg_temp.expect('056.5: an empty reason is refused (22023)',
+  pg_temp.try('x', 'select public.add_register_entry(''checkin'', ' || quote_literal(:'fixer_id') || ', null, now() - interval ''1 hour'', ''   '')') like '%blocked%', true);
+select pg_temp.expect('056.5: a future time is refused (22023)',
+  pg_temp.try('x', 'select public.add_register_entry(''checkin'', ' || quote_literal(:'fixer_id') || ', null, now() + interval ''1 hour'', ''x'')') like '%blocked%', true);
+reset role;
+
+\echo '--- 6. adding a missed gate movement'
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('056.6: an invalid direction is refused (22023)',
+  pg_temp.try('x', 'select public.add_register_entry(''gate'', ' || quote_literal(:'fixer_id') || ', ''sideways'', now(), ''x'')') like '%blocked%', true);
+select public.add_register_entry('gate', :'fixer_id', 'in', now() - interval '1 hour', 'forgot to sign him in') as gate6_id \gset
+reset role;
+select by_hand, late_entry from public.gate_events where id = :'gate6_id' \gset g6_
+select pg_temp.expect('056.6: by_hand = true', (:'g6_by_hand')::boolean, true);
+select pg_temp.expect('056.6: late_entry = false (by_hand is not late_entry)', (:'g6_late_entry')::boolean, false);
+
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('056.6: a second identical movement is refused (23505)',
+  pg_temp.try('x', 'select public.add_register_entry(''gate'', ' || quote_literal(:'fixer_id') || ', ''in'', now() - interval ''1 hour'', ''forgot to sign him in'')') like '%blocked%', true);
+reset role;
+
+\echo '--- 7. the kiosk (migration 051: not staff) may neither remove nor add'
+set role authenticated;
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+select pg_temp.expect('056.7: kiosk cannot remove (42501)',
+  pg_temp.try('x', 'select public.remove_register_entry(''gate'', ' || :'gate6_id' || ', ''x'')') like '%blocked%', true);
+select pg_temp.expect('056.7: kiosk cannot add (42501)',
+  pg_temp.try('x', 'select public.add_register_entry(''gate'', ' || quote_literal(:'fixer_id') || ', ''in'', now() - interval ''2 hours'', ''x'')') like '%blocked%', true);
+reset role;
+reset request.jwt.claim.sub;
+
+\echo '--- 8. by_hand defaults to false, as 055 checks weekly_report_attach_document'
+select pg_temp.expect('056.8: checkin_events.by_hand defaults to false',
+  (select column_default from information_schema.columns
+    where table_schema = 'public' and table_name = 'checkin_events' and column_name = 'by_hand'), 'false');
+select pg_temp.expect('056.8: gate_events.by_hand defaults to false',
+  (select column_default from information_schema.columns
+    where table_schema = 'public' and table_name = 'gate_events' and column_name = 'by_hand'), 'false');
