@@ -1503,6 +1503,16 @@ select pg_temp.expect('056.5: audit note carries the reason', :'aud5_note'::text
 select presented from public.daily_compliance
  where resident_id = :'fixer_id' and compliance_date = public.site_today() \gset dc5_
 select pg_temp.expect('056.5: today presented after the by-hand add', (:'dc5_presented')::boolean, true);
+-- A double submit of the same add: record_checkin_at's 60-second rule
+-- swallows the insert, and this must be a refusal, not a second audit row
+-- about the first call's event.
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select pg_temp.expect('056.5: the same add a second time is refused (23505)',
+  pg_temp.try('x', 'select public.add_register_entry(''checkin'', ' || quote_literal(:'fixer_id') || ', null, now() - interval ''2 hours'', ''again'')') like '%blocked%', true);
+reset role;
+select count(*) as n from public.admin_audit where table_name = 'checkin_events' and row_id = :'add1_id'::text and action = 'insert' \gset aud5b_
+select pg_temp.expect('056.5: still one audit row for the event', (:'aud5b_n')::integer, 1);
 
 set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';

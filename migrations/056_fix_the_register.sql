@@ -159,7 +159,7 @@ create or replace function public.add_register_entry(p_register text, p_resident
 returns bigint language plpgsql security definer set search_path = public, extensions as $$
 declare
   v_tz text; v_hours integer; v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
-  v_status text; v_id bigint; v_day date; v_next timestamptz; v_dup boolean;
+  v_status text; v_departed date; v_id bigint; v_day date; v_next timestamptz; v_dup boolean; v_before integer; v_dc public.daily_compliance;
 begin
   if not public.is_staff() then
     raise exception 'Not authorised to change the register' using errcode = '42501';
@@ -186,22 +186,31 @@ begin
       raise exception 'An entry can be added for the last 28 nights only' using errcode = '22023';
     end if;
   end if;
-  select status into v_status from public.residents where id = p_resident_id;
+  select status, departed_on into v_status, v_departed from public.residents where id = p_resident_id;
   if v_status is null then raise exception 'Resident not found' using errcode = 'P0002'; end if;
   v_day := (p_at at time zone v_tz)::date;
 
   if p_register = 'checkin' then
     -- record_checkin_at() places the day, repairs a closed day, and applies
-    -- the 60-second double-tap rule; by_hand is set on the row it made.
-    perform public.record_checkin_at(p_resident_id, p_at, false, null, 'desk');
-    select max(id) into v_id from public.checkin_events
-     where resident_id = p_resident_id and occurred_at = p_at;
-    if v_id is null then
+    -- the 60-second double-tap rule. Whether it inserted is read off the
+    -- day's row it returns: a count that did not move means the rule
+    -- swallowed a double submit, and that is a refusal here, not a second
+    -- audit row about the first call's event.
+    select checkin_count into v_before from public.daily_compliance
+     where resident_id = p_resident_id and compliance_date = v_day;
+    v_dc := public.record_checkin_at(p_resident_id, p_at, false, null, 'desk');
+    if v_dc.checkin_count = coalesce(v_before, 0) then
       raise exception 'A check-in within a minute of that time is already on the register' using errcode = '23505';
     end if;
-    update public.checkin_events set by_hand = true where id = v_id and by_hand = false and guard_id = auth.uid();
+    -- The row this call made: same second (now() is fixed for the
+    -- transaction), this caller, this time.
+    select max(id) into v_id from public.checkin_events
+     where resident_id = p_resident_id and occurred_at = p_at and guard_id = auth.uid() and recorded_at = now();
+    update public.checkin_events set by_hand = true where id = v_id;
   else
-    if v_status <> 'active' then
+    -- The same rule as record_checkin_at(): a departed resident's days up
+    -- to and including departed_on are still theirs to correct.
+    if v_status <> 'active' and (v_departed is null or v_day > v_departed) then
       raise exception 'Resident is not active and cannot be signed in or out' using errcode = '23514';
     end if;
     select exists (select 1 from public.gate_events
