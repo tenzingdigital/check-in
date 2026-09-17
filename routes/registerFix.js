@@ -44,8 +44,13 @@ router.post('/register-entries', wrap(async (req, res) => {
   const register = String(body.register || '');
   const resident_id = uuidParam(body.resident_id, 'resident_id');
   const direction = body.direction != null ? String(body.direction) : null;
-  const occurred_at = String(body.occurred_at || '');
-  if (!Number.isFinite(Date.parse(occurred_at))) throw new HttpError(400, 'occurred_at must be a date');
+  // Parsed here and sent to Postgres as ISO 8601: Date.parse accepts forms
+  // Postgres reads differently ("Sep 17 2026 09:00 GMT+0100" lands on the
+  // wrong day there) or not at all, and a register date must not depend on
+  // which parser saw the string.
+  const parsed = Date.parse(String(body.occurred_at || ''));
+  if (!Number.isFinite(parsed)) throw new HttpError(400, 'occurred_at must be a date');
+  const occurred_at = new Date(parsed).toISOString();
   const reason = body.reason != null ? String(body.reason) : null;
 
   const id = await db.withIdentity(req.session.userId, async (client) => {

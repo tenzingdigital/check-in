@@ -1733,6 +1733,23 @@ async function main() {
     assert.equal(missingReason.status, 400, missingReason.text);
     const unknownId = await api.fetch("/api/register-entries/gate/999999999", { method: "DELETE", body: {} });
     assert.equal(unknownId.status, 404, unknownId.text);
+    // The same add twice: a 409 with the function's own sentence, not a
+    // constraint name. And a time in a form Date.parse takes but Postgres
+    // reads differently is normalised to ISO before it is sent, so the
+    // register date is the one the browser meant.
+    const dup = await api.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "in", occurred_at: twoHoursAgo, reason: "x" } });
+    assert.equal(dup.status, 201, dup.text);
+    const dupAgain = await api.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "in", occurred_at: twoHoursAgo, reason: "x" } });
+    assert.equal(dupAgain.status, 409, dupAgain.text);
+    assert.match(dupAgain.json.error, /already on the register/);
+    const odd = new Date(Date.now() - 90 * 60000);
+    const oddForm = odd.toString(); // "Thu Sep 17 2026 09:00:00 GMT+0100 (Irish Standard Time)"
+    const oddAdd = await api.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "out", occurred_at: oddForm, reason: "x" } });
+    assert.equal(oddAdd.status, 201, oddAdd.text);
+    const oddRow = (await api.fetch(`/api/residents/${rid}/history?kind=gate`)).json.find((e) => String(e.id) === String(oddAdd.json.id));
+    assert.ok(oddRow && Math.abs(Date.parse(oddRow.occurred_at) - odd.getTime()) < 1000, "stored at the time the browser meant");
+    const notADate = await api.fetch("/api/register-entries", { method: "POST", body: { register: "gate", resident_id: rid, direction: "in", occurred_at: "yesterday-ish", reason: "x" } });
+    assert.equal(notADate.status, 400, notADate.text);
 
     // A kiosk session: the gate in lib/auth.js refuses it everything but its
     // own two routes, same as every other route it cannot reach.

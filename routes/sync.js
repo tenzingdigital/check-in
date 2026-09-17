@@ -123,7 +123,7 @@ router.post('/sync', wrap(async (req, res) => {
       });
       results.push({ ref: item.ref, status: 'ok' });
     } catch (err) {
-      // Only the four SQLSTATEs the RPCs raise on purpose carry a message a
+      // Only the SQLSTATEs the RPCs raise on purpose carry a message a
       // guard may read (lib/api.js). Anything else is an outage or a bug:
       // let it become a 500 so the whole batch is retried later, rather than
       // telling the terminal an event is permanently unrecordable.
