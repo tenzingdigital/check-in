@@ -731,7 +731,10 @@ select pg_temp.expect('late_entry_window_hours defaults to 48',
 
 -- The event "happened" 25 hours ago: inside the window, on the previous
 -- site-local day. Close-out has already written that day as missed.
-select (now() - interval '25 hours') as late_ts \gset
+-- Anchored to the half-hour: a plain now() - 25h run in the last minute of
+-- an hour lands on 23:59:xx, and the "+20 seconds" double-tap below then
+-- falls into the next site day, which is a new presentation, not a tap.
+select (date_trunc('hour', now()) - interval '25 hours' + interval '30 minutes') as late_ts \gset
 select ((:'late_ts'::timestamptz) at time zone 'Europe/Dublin')::date as late_day \gset
 insert into public.daily_compliance (resident_id, compliance_date, required, presented, first_seen_at, checkin_count, closed_at)
 values (:'late_id', :'late_day'::date, true, false, null, 0, now());
@@ -1490,9 +1493,12 @@ select pg_temp.expect('056.4: checkin_count back to 0', (:'dc2_checkin_count')::
 select pg_temp.expect('056.4: first_seen_at cleared', (:'dc2_no_seen')::boolean, true);
 
 \echo '--- 5. adding a missed check-in, within the window and (for staff) beyond it'
+-- "Earlier today", not "two hours ago": between local midnight and 02:00
+-- the latter is yesterday, and the assertion below is about today's row.
+select greatest(now() - interval '2 hours', (public.site_today()::timestamp + interval '1 minute') at time zone (select local_timezone from public.app_settings where id)) as add1_at \gset
 set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
-select public.add_register_entry('checkin', :'fixer_id', null, now() - interval '2 hours', 'seen at the door, not entered') as add1_id \gset
+select public.add_register_entry('checkin', :'fixer_id', null, :'add1_at'::timestamptz, 'seen at the door, not entered') as add1_id \gset
 reset role;
 select by_hand, (guard_id::text) as guard from public.checkin_events where id = :'add1_id' \gset add1_
 select pg_temp.expect('056.5: by_hand = true', (:'add1_by_hand')::boolean, true);
@@ -1509,7 +1515,7 @@ select pg_temp.expect('056.5: today presented after the by-hand add', (:'dc5_pre
 set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 select pg_temp.expect('056.5: the same add a second time is refused (23505)',
-  pg_temp.try('x', 'select public.add_register_entry(''checkin'', ' || quote_literal(:'fixer_id') || ', null, now() - interval ''2 hours'', ''again'')') like '%blocked%', true);
+  pg_temp.try('x', 'select public.add_register_entry(''checkin'', ' || quote_literal(:'fixer_id') || ', null, ' || quote_literal(:'add1_at') || '::timestamptz, ''again'')') like '%blocked%', true);
 reset role;
 select count(*) as n from public.admin_audit where table_name = 'checkin_events' and row_id = :'add1_id'::text and action = 'insert' \gset aud5b_
 select pg_temp.expect('056.5: still one audit row for the event', (:'aud5b_n')::integer, 1);
@@ -1607,7 +1613,8 @@ reset role;
 
 set role authenticated;
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
-select public.add_register_entry('gate', :'erased_id', 'in', now() - interval '1 hour', 'seeded for erasure test') as erased_gate_id \gset
+-- Earlier today (see add1_at above): a guard may remove only a same-day entry.
+select public.add_register_entry('gate', :'erased_id', 'in', :'add1_at'::timestamptz, 'seeded for erasure test') as erased_gate_id \gset
 select public.remove_register_entry('gate', :'erased_gate_id', 'seeded for erasure test');
 reset role;
 select count(*)::int as n from public.admin_audit
