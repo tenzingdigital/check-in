@@ -411,7 +411,7 @@ body = (
         "Who is on site right now, and every movement with a name and a time on it — the record the roll call is built from.") +
   sec("""    <h2>The live count</h2>
     <p>A separate screen from the daily register, and deliberately so: this one answers <em>where is everybody</em>, not <em>has everybody been seen</em>. Tiles at the top count who is on site, who is off site, and who has moved today, and each one is a filter.</p>
-    <p>A swipe right signs someone in, a swipe left signs them out. Residents on an authorised absence show as away with their return date. Every movement carries the staff member who recorded it.</p>
+    <p>Each card carries the movement it expects next: <b>Sign in</b> for somebody off site, <b>Sign out</b> for somebody on it, one tap either way. On a tablet a swipe does the same — right to sign in, left to sign out — without looking away. Residents on an authorised absence show as away with their return date, and every movement carries the staff member who recorded it.</p>
     <div class="pairs">
       <div><h3>A group at once</h3><p>A minibus back from an outing, a family arriving together: tick several people and sign them all in or out in one action, each with their own recorded movement.</p></div>
       <div><h3>The day's log</h3><p>Every movement for a day or a range, newest first, with the time and the staff member. Quick ranges for today, this week and last month, and a spreadsheet export.</p></div>

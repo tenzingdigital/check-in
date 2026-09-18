@@ -69,11 +69,43 @@
   .guide .mock .strip.in { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); color: var(--accent); justify-content: flex-start; }
   .guide .mock .strip.out { background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn-text); justify-content: flex-end; }
   .guide .mock .strip.chk { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); color: var(--ok); }
-  .guide .mock .card { position: relative; margin: 0 0 0 34%; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 20px var(--shadow); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  /* Offset far enough to read the strip behind it — that strip is the swipe,
+     which still works and is still taught. The card carries the action button
+     as well as the pill now, so the text between them is allowed to ellipsize
+     rather than push either off the end. */
+  /* width:auto undoes the width:100% that app-common.css gives every .card in
+     the apps. The guide loads that stylesheet too, so this drawing has always
+     been 34% wider than the box that clips it — the pill on the right has been
+     cut off since the mock was written, which only became obvious once the
+     action button was added beside it. */
+  .guide .mock .card { width: auto; position: relative; margin: 0 0 0 34%; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 20px var(--shadow); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .guide .mock .card > div { flex: 1; min-width: 0; }
+  .guide .mock .card > div small { display: block; }
+  .guide .mock .card .pill { flex: none; }
+  /* On a phone — which is where this guide is actually read — there is not
+     room for the strip, the name, the pill and the button. The pill is the
+     one thing this drawing is not teaching, so it is the one that goes. */
+  @media (max-width: 560px) {
+    .guide .mock .card { margin-left: 22%; }
+    .guide .mock .card .pill { display: none; }
+  }
   .guide .mock .card b { display: block; font-size: 16px; }
+  /* The action on the card, drawn: it is the main way to record something, so
+     it belongs in the picture beside the pill. The strip behind the card is
+     the swipe, which still works and is still taught below. */
+  .guide .mock .card .act {
+    flex: none; font-size: 13px; font-weight: 650; white-space: nowrap;
+    padding: 7px 11px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface-2);
+  }
+  .guide .mock .card .act.in  { color: var(--accent); }
+  .guide .mock .card .act.chk { color: var(--ok); }
   .guide .mock .card small { color: var(--muted); font-size: 13px; }
   .guide .mock .pill { font-size: 11px; }
-  .guide .arrows { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; margin: 4px 4px 0; }
+  /* Two labels on one line on a desk; stacked on a phone rather than forcing
+     the whole guide wider than the screen, which is what pushed the card and
+     its button off the right edge. */
+  .guide .arrows { display: flex; flex-wrap: wrap; gap: 2px 14px; justify-content: space-between; color: var(--muted); font-size: 13px; margin: 4px 4px 0; }
   .guide .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 10px 0; box-shadow: var(--lift); }
   .guide .card b { display: block; margin-bottom: 4px; }
   .guide .who { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); vertical-align: middle; margin-left: 6px; }
@@ -187,9 +219,9 @@
   <p class="one">Who is on site right now? Every sign-in and sign-out is a movement with a time and your name on it.</p>
   <div class="mock" aria-hidden="true">
     <div class="strip in">Sign IN</div>
-    <div class="card"><div><b>Amara Adebayo</b><small>Castle · K1 · off site since 09:10</small></div><span class="pill out">Off site</span></div>
+    <div class="card"><div><b>Amara Adebayo</b><small>Castle · K1 · off site since 09:10</small></div><span class="pill out">Off site</span><span class="act in">Sign in</span></div>
   </div>
-  <div class="arrows" aria-hidden="true"><span>◀ swipe left: sign OUT</span><span>swipe right: sign IN ▶</span></div>
+  <div class="arrows" aria-hidden="true"><span><b>Tap the button on the card</b></span><span>or swipe: ◀ OUT &nbsp;·&nbsp; IN ▶</span></div>
   <ol class="recipe">
     <li><span>Find the person.<small>Type part of a name, a room such as <span class="ui">B1</span>, or a building such as <span class="ui">Castle</span>. <span class="ui">B</span> alone lists every B room.</small></span></li>
     <li><span>Look at them.<small>The app records that you checked; it does not check for you.</small></span></li>
@@ -236,9 +268,9 @@
   <p class="one">Has this resident presented today? One check-in per day, midnight to midnight. Being signed in at the door is a different thing.</p>
   <div class="mock" aria-hidden="true">
     <div class="strip chk">Check in ✓</div>
-    <div class="card"><div><b>Bartek Adebayo</b><small>Castle · B1 · last seen yesterday</small></div><span class="pill out">Not yet</span></div>
+    <div class="card"><div><b>Bartek Adebayo</b><small>Castle · B1 · last seen yesterday</small></div><span class="pill out">Not yet</span><span class="act chk">Check in</span></div>
   </div>
-  <div class="arrows" aria-hidden="true"><span>◀ swipe either way: check in ▶</span><span></span></div>
+  <div class="arrows" aria-hidden="true"><span><b>Tap the button on the card</b></span><span>or swipe either way ▶</span></div>
   <ol class="recipe green">
     <li><span>The list opens on <span class="ui">Not seen</span>.<small>Residents required today who have not checked in. Type a name to find anyone.</small></span></li>
     <li><span>Look at them, then tap <span class="ui">Check in</span> on the card.<small>Or swipe the card either way, or tap the name and press the button on the sheet.</small></span></li>

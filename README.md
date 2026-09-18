@@ -512,8 +512,8 @@ out of the two working apps:
   Drills and incidents are kept as a record for as long as the register.
 - **The register opens on who has not been seen today.** A recorded
   check-in drops the card off that view; the tiles and "Show everyone" are
-  one tap away, and a typed name always searches everyone. A card swiped
-  either way records the check-in.
+  one tap away, and a typed name always searches everyone. Check someone in
+  by tapping the button on their card; a swipe either way does the same.
 - **Households** (only when the site's *Households* feature is on): link
   family members from a resident's edit sheet. A family stays together on
   the roll call, children marked, and reads as a family in a room. The
