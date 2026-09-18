@@ -19,7 +19,7 @@
    'self', so nothing about lib/security.js changes.
    ========================================================================= */
 
-const VERSION = "hut-shell-v3";
+const VERSION = "hut-shell-v4";   // bumped whenever SHELL changes, so activate() drops the old cache
 const SHELL = [
   "/",
   "/index.html",
@@ -32,6 +32,7 @@ const SHELL = [
   "/app-common.js",
   "/offline.js",
   "/manifest.webmanifest",
+  "/favicon.ico",
   "/icon.svg",
   "/apple-touch-icon.png",
 ];
