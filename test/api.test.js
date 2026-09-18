@@ -4469,7 +4469,7 @@ async function main() {
     assert.match(csp, /frame-ancestors 'none'/);
 
     const crypto = require("crypto");
-    for (const page of ["/index.html", "/checkin.html", "/admin.html", "/org.html"]) {
+    for (const page of ["/index.html", "/checkin.html", "/admin.html", "/org.html", "/kiosk.html"]) {
       const html = (await api.fetch(page)).text;
       for (const m of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
         const hash = crypto.createHash("sha256").update(m[1], "utf8").digest("base64");

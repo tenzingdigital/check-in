@@ -201,7 +201,8 @@
   .kioskHit:disabled { opacity: .72; cursor: not-allowed; }
   /* The room code as it is painted on the door — "C09" — before the name.
      Only present when the server chose to show it (two residents sharing a
-     name); a resident's room is otherwise never put on screen. */
+     name, or the room itself was what was typed — 057); a resident's room
+     is otherwise never put on screen. */
   .kioskHitRoom {
     flex: none; font-size: 15px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
     font-variant-numeric: tabular-nums; padding: 6px 11px; border-radius: 10px;
@@ -366,14 +367,14 @@ const STRINGS = {
   },
   uk: {
     name: "Українська", tap: "Торкніться, щоб відмітитися", heading: "Відмітитися", placeholder: "Ваше ім’я або кімната",
-    checking: "Відмічаємо вас — залишайтеся десять секунд", notMe: "Це не я", thanks: "Дякуємо",
+    checking: "Відмічаємо вас — зачекайте десять секунд", notMe: "Це не я", thanks: "Дякуємо",
     failTitle: "Не відмічено", failSub: "Будь ласка, зверніться до працівника", today: "Відмічено сьогодні",
     twoLetters: "Введіть щонайменше дві літери", staff: "Персонал",
     noMatch: "Збігів немає. Зверніться до працівника по допомогу.", done: "Відмічено — доброї ночі.",
   },
   ru: {
     name: "Русский", tap: "Коснитесь, чтобы отметиться", heading: "Отметиться", placeholder: "Ваше имя или комната",
-    checking: "Отмечаем вас — оставайтесь десять секунд", notMe: "Это не я", thanks: "Спасибо",
+    checking: "Отмечаем вас — подождите десять секунд", notMe: "Это не я", thanks: "Спасибо",
     failTitle: "Не отмечено", failSub: "Пожалуйста, обратитесь к сотруднику", today: "Отмечено сегодня",
     twoLetters: "Введите не менее двух букв", staff: "Персонал",
     noMatch: "Совпадений нет. Обратитесь к сотруднику за помощью.", done: "Отмечено — доброй ночи.",
@@ -387,10 +388,10 @@ const STRINGS = {
   },
   ar: {
     name: "العربية", tap: "المس الشاشة لتسجيل الحضور", heading: "تسجيل الحضور", placeholder: "اسمك أو غرفتك",
-    checking: "نسجّل حضورك — يرجى البقاء عشر ثوانٍ", notMe: "هذا ليس أنا", thanks: "شكرًا لك",
+    checking: "نسجّل حضورك — يرجى البقاء عشر ثوانٍ", notMe: "ليس هذا أنا", thanks: "شكرًا لك",
     failTitle: "لم يُسجَّل الحضور", failSub: "يرجى مراجعة أحد الموظفين", today: "تم تسجيل الحضور اليوم",
     twoLetters: "اكتب حرفين على الأقل", staff: "الموظفون",
-    noMatch: "لا توجد نتائج. يرجى مراجعة أحد الموظفين للمساعدة.", done: "تم تسجيل حضورك — تصبح على خير.",
+    noMatch: "لا توجد نتائج. يرجى مراجعة أحد الموظفين للمساعدة.", done: "تم تسجيل حضورك — ليلة سعيدة.",
   },
   fr: {
     name: "Français", tap: "Touchez pour vous enregistrer", heading: "Enregistrement", placeholder: "Votre nom ou votre chambre",
@@ -474,7 +475,7 @@ function paintClock() {
   const locale = LOCALE[state.lang] || "en-IE";
   let time, date;
   try {
-    time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+    time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(now);
     date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long" }).format(now);
     // "Friday 18 September", as the day is said, not "Friday, 18 September".
     if (state.lang === "en") date = date.replace(",", "");
@@ -509,7 +510,10 @@ async function loadBranding() {
   $("cardSite").textContent = state.siteName;
   const img = $("attractPhoto");
   if (b.has_photo) {
-    if (!img.getAttribute("src")) img.src = "/api/kiosk/photo";
+    // Re-assigned on every idle return: a photograph replaced during the
+    // day then shows within a minute (the server answers 304 while it is
+    // unchanged, so this costs a header round-trip, not the bytes).
+    img.src = "/api/kiosk/photo";
   } else {
     img.removeAttribute("src");
     $("stage").classList.add("nophoto");
