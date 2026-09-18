@@ -5266,6 +5266,10 @@ async function main() {
     const photoAdmin = await loginAs("kioskphotoadmin@hut.example");
     const photoSup = await loginAs("sup2@hut.example");
 
+    // Anonymous: refused at the session gate before the 4 MB raw parser
+    // ever runs — the parser sits behind requireSession for that reason.
+    const anon = await client(base).fetch("/api/settings/kiosk-photo", { method: "PUT", raw: Buffer.alloc(16, 1), headers: { "Content-Type": "image/png" } });
+    assert.equal(anon.status, 401, anon.text);
     const put = await photoAdmin.fetch("/api/settings/kiosk-photo", {
       method: "PUT", raw: pngBytes, headers: { "Content-Type": "image/png" },
     });
