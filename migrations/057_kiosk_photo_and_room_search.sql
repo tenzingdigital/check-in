@@ -236,6 +236,11 @@ begin
                   || case when rm.floor <> '' then ' · ' || rm.floor else '' end
                   || ' · ' || rm.number
         end                                                 as m_room_label,
+        -- Did THIS row match because the query was its room? Then the
+        -- person at the tablet typed the room themselves, and showing it
+        -- back as the badge on the card reveals nothing they did not know.
+        (rm.id is not null and (lower(rm.number) = v_nq
+           or lower(b.name || case when rm.floor <> '' then ' · ' || rm.floor else '' end || ' · ' || rm.number) = v_nq)) as m_by_room,
         exists (
           select 1 from public.daily_compliance d
           where d.resident_id = r.id
@@ -295,10 +300,11 @@ begin
     select
       m.m_id,
       m.m_full_name,
-      -- The room is shown only to tell two same-named residents apart — by
-      -- default one resident's room is never revealed to whoever is standing
-      -- at the tablet.
-      case when count(*) over (partition by m.m_full_name) > 1 then m.m_room_label else null end,
+      -- The room is shown to tell two same-named residents apart, and when
+      -- the query WAS the room (057) — by default one resident's room is
+      -- never revealed to whoever is standing at the tablet, and a name
+      -- search still reveals none.
+      case when m.m_by_room or count(*) over (partition by m.m_full_name) > 1 then m.m_room_label else null end,
       m.m_checked_in_today
     from matched m
     order by m.m_full_name

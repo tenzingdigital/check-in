@@ -5346,7 +5346,11 @@ async function main() {
 
     const found = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: number.toLowerCase() } });
     assert.equal(found.status, 200, found.text);
-    assert.ok(found.json.results.some((r) => r.id === resident.json.id), "the room code alone did not find the resident");
+    const hit = found.json.results.find((r) => r.id === resident.json.id);
+    assert.ok(hit, "the room code alone did not find the resident");
+    assert.ok(hit.room_label && hit.room_label.endsWith(` · ${number}`), "a room-code search shows the room back — the caller typed it");
+    const byName = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: "codey" } });
+    assert.equal(byName.json.results.find((r) => r.id === resident.json.id).room_label, null, "a name search still reveals no room");
 
     const partial = await kioskC.fetch("/api/kiosk/search", { method: "POST", body: { q: number.toLowerCase().slice(0, -1) } });
     assert.equal(partial.status, 200, partial.text);

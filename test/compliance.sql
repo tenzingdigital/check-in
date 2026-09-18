@@ -1744,8 +1744,11 @@ reset role;
 
 set role authenticated;
 set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
-select full_name from public.kiosk_search('c09') \gset code_
+select full_name, room_label from public.kiosk_search('c09') \gset code_
 select count(*)::int as n from public.kiosk_search('c0') \gset partial_
+select room_label is null as no_room from public.kiosk_search('codey') \gset byname_
 reset role;
 select pg_temp.expect('057: the room code alone finds the resident', :'code_full_name'::text, 'Codey Doorknock'::text);
+select pg_temp.expect('057: a room-code search shows the room back (the caller typed it)', :'code_room_label'::text, 'Slaney · C09'::text);
+select pg_temp.expect('057: a name search still shows no room', (:'byname_no_room')::boolean, true);
 select pg_temp.expect('057: a prefix of the code finds nobody', (:'partial_n')::integer, 0);
