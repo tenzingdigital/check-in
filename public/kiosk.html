@@ -10,9 +10,9 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="CheckSteady">
-<meta name="theme-color" content="#1d4ed8">
+<meta name="theme-color" content="#0b1f3a">
 <title>CheckSteady — Self check-in</title>
 
 <!--
@@ -24,78 +24,243 @@
   Unlike the other two pages this one carries no login form: a kiosk session
   is created once, on index.html, and left running on a tablet inside Guided
   Access. This page only ever does one of two things on load — show the
-  search, or send the browser away (no session, or a session that is not
-  the kiosk role) — see boot() in the inline script below.
+  attract screen, or send the browser away (no session, or a session that is
+  not the kiosk role) — see boot() in the inline script below.
 
-  The kiosk role reaches exactly two endpoints, POST /api/kiosk/search and
-  POST /api/kiosk/checkin (routes/kiosk.js, migration 051); GET /api/session
-  answers with settings: null for this role (app_settings is staff-only), so
-  this page never reads state.settings for anything, including the site
-  name — it shows "CheckSteady" and the tablet account's own name instead.
+  Three layers, back to front:
+    1. the photograph of the centre (GET /api/kiosk/photo, migration 057),
+       fixed full-screen; sharp behind the attract view, blurred behind
+       everything else; a gradient stands in when no photograph is set;
+    2. the attract view — site name, date, clock, "Tap to check in", the
+       language row — shown on boot and again after 30 s idle;
+    3. the glass card — search, confirm, thank you, not-checked-in — over the
+       blurred photograph.
+
+  The kiosk role reaches exactly four endpoints, all under /api/kiosk/
+  (routes/kiosk.js, migrations 051 and 057): search, checkin, branding and
+  photo. GET /api/session answers with settings: null for this role
+  (app_settings is staff-only), so the site name comes from /branding, which
+  hands back site_name and has_photo and nothing else.
+
+  Six languages (STRINGS below). Every translatable element carries data-s
+  with its key; applyLang() rewrites them all. The choice is remembered in
+  localStorage['kioskLang'] and reverts to English when the idle timer
+  returns to the attract view, so the next resident is not met in the last
+  one's language.
 -->
 
 <link rel="stylesheet" href="/app-common.css">
 <style>
-  /* One job, one column, no header nav, no counts. A tablet standing at the
-     door is read at arm's length, so everything here is larger than the
-     equivalent on the staff pages. */
-  body.app-kiosk { display: flex; min-height: 100vh; flex-direction: column; }
-
-  .kioskHead {
-    display: flex; align-items: baseline; justify-content: space-between;
-    gap: 10px; padding: 18px 20px 6px; max-width: 640px; margin: 0 auto; width: 100%;
+  /* Everything here is read at arm's length on a tablet by a door, so every
+     size is larger than the staff pages' equivalent. The colour tokens come
+     from app-common.css; the few that are the kiosk's own — the ink behind
+     the photograph, the glass — sit below, in both schemes. */
+  :root {
+    --k-ink:        rgba(6, 12, 24, .78);
+    --k-glass:      rgba(20, 26, 40, .86);
+    --k-glass-edge: rgba(255, 255, 255, .16);
+    --k-hit:        rgba(255, 255, 255, .06);
+    --k-hit-line:   rgba(255, 255, 255, .10);
+    --k-field:      rgba(255, 255, 255, .07);
+    --k-field-line: rgba(255, 255, 255, .16);
   }
-  .kioskHead .brand { font-size: 15px; font-weight: 650; color: var(--muted); margin: 0; }
-  .kioskHead .who { font-size: 13px; color: var(--muted); text-align: right; }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --k-glass:      rgba(255, 255, 255, .88);
+      --k-glass-edge: rgba(255, 255, 255, .35);
+      --k-hit:        rgba(255, 255, 255, .72);
+      --k-hit-line:   rgba(16, 24, 40, .10);
+      --k-field:      rgba(255, 255, 255, .85);
+      --k-field-line: rgba(16, 24, 40, .14);
+    }
+  }
 
+  body.app-kiosk { min-height: 100vh; overflow: hidden; padding: 0; background: #0b1f3a; }
+
+  /* ---- layer 1: the photograph ---- */
+  .stage { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: linear-gradient(160deg, #0b1f3a, #1d4ed8); }
+  .attractPhoto {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;
+    transition: filter .5s ease, transform .5s ease;
+  }
+  /* Behind the card the same photograph is blurred and dimmed; the scale
+     hides the blur's soft edges at the screen's rim. */
+  body.card-open .attractPhoto { filter: blur(18px) brightness(.55); transform: scale(1.06); }
+  .stage.nophoto .attractPhoto { display: none; }
+  /* Without a photograph: the gradient above and a very faint, very large
+     CheckSteady tick in the corner. */
+  .fallbackTick {
+    position: absolute; right: -6vw; bottom: -8vh; width: 58vmin; height: 58vmin; display: none;
+    opacity: .06;
+  }
+  .stage.nophoto .fallbackTick { display: block; }
+  .fallbackTick rect { fill: #fff; }
+  .fallbackTick path { fill: none; stroke: #0b1f3a; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---- layer 2: the attract view ---- */
+  .attract {
+    position: fixed; inset: 0; z-index: 2; cursor: pointer; color: #fff;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    transition: opacity .22s ease, visibility 0s linear 0s;
+  }
+  .attract.gone { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .22s ease, visibility 0s linear .22s; }
+  .attractScrim {
+    position: absolute; inset: 0;
+    background: linear-gradient(to bottom, rgba(6, 12, 24, 0) 45%, var(--k-ink) 100%);
+  }
+  .attractFoot {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+    padding: 0 max(40px, env(safe-area-inset-right)) calc(36px + env(safe-area-inset-bottom)) max(40px, env(safe-area-inset-left));
+  }
+  .attractInfo { min-width: 0; flex: 1 1 auto; }
+  .attractName {
+    font-size: clamp(44px, 4.6vw, 56px); font-weight: 700; letter-spacing: -0.01em; line-height: 1.08;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, .35);
+    overflow-wrap: anywhere;
+  }
+  .attractDate { margin-top: 8px; font-size: 18px; color: rgba(255, 255, 255, .8); text-shadow: 0 1px 10px rgba(0, 0, 0, .35); }
+  .attractClock {
+    flex: none; font-size: 72px; font-weight: 600; line-height: 1; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums; text-shadow: 0 2px 18px rgba(0, 0, 0, .35);
+  }
+  .attractTapWrap {
+    position: absolute; left: 0; right: 0; bottom: calc(190px + env(safe-area-inset-bottom));
+    display: flex; justify-content: center; pointer-events: none;
+  }
+  .attractTap {
+    background: rgba(255, 255, 255, .92); color: #101828; font-size: 22px; font-weight: 650;
+    padding: 18px 34px; border-radius: 999px; box-shadow: 0 12px 40px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .18);
+    animation: tapPulse 2.4s ease-in-out infinite;
+  }
+  @keyframes tapPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+
+  /* ---- the language row: on the photograph and again in the card ---- */
+  .langRow { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .attract .langRow {
+    position: absolute; top: calc(20px + env(safe-area-inset-top)); right: max(24px, env(safe-area-inset-right));
+    left: max(24px, env(safe-area-inset-left));
+  }
+  .lang {
+    border-radius: 999px; padding: 9px 14px; min-height: 40px; font-size: 14px; font-weight: 650;
+    letter-spacing: .02em; line-height: 1.2; border: 1px solid transparent;
+  }
+  .lang:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .attract .lang {
+    background: rgba(255, 255, 255, .14); color: #fff; border-color: rgba(255, 255, 255, .28);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .attract .lang[aria-pressed="true"] { background: rgba(255, 255, 255, .94); color: #101828; border-color: transparent; }
+  .glass .lang { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
+  .glass .lang[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+  .glass .lang:focus-visible { outline-color: var(--accent); }
+  .lang[aria-pressed="true"] { letter-spacing: 0; }
+
+  /* ---- layer 3: the glass card ---- */
   main.kiosk {
-    flex: 1; display: flex; flex-direction: column;
-    max-width: 640px; width: 100%; margin: 0 auto; padding: 12px 20px 40px;
+    position: fixed; inset: 0; z-index: 1; overflow: auto; -webkit-overflow-scrolling: touch;
+    display: flex; flex-direction: column; align-items: center;
+    padding: calc(clamp(20px, 7vh, 64px) + env(safe-area-inset-top)) 16px 0;
+    transition: opacity .22s ease;
   }
+  main.kiosk.gone { opacity: 0; pointer-events: none; }
+  .glass {
+    width: min(92vw, 720px); max-width: 720px; padding: 28px; border-radius: 28px;
+    background: var(--k-glass); color: var(--text);
+    backdrop-filter: blur(20px) saturate(1.2); -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    border: 1px solid var(--k-glass-edge);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .45), 0 2px 8px rgba(0, 0, 0, .18);
+  }
+  .cardHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .cardHead h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.15; }
+  .cardHead .site { margin: 4px 0 0; font-size: 15px; color: var(--muted); }
+  .cardHead .langRow { flex: 1 1 auto; }
 
   /* ---- search ---- */
+  .kioskField { position: relative; }
+  .kioskField svg {
+    position: absolute; inset-inline-start: 24px; top: 50%; width: 28px; height: 28px; margin-top: -14px;
+    pointer-events: none; color: var(--muted); fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round;
+  }
   .kioskInput {
-    font-size: 24px; padding: 22px 20px; min-height: 68px; border-radius: 16px;
+    font-size: 28px; min-height: 76px; padding: 18px 24px; padding-inline-start: 66px; border-radius: 18px;
+    background: var(--k-field); border-color: var(--k-field-line);
   }
-  .kioskResults {
-    display: flex; flex-direction: column; gap: 12px; margin-top: 18px;
-  }
+  .kioskInput::placeholder { color: var(--muted); opacity: .85; }
+  .kioskHint { margin: 12px 4px 0; font-size: 15px; color: var(--muted); }
+  .kioskResults { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+  .kioskResults .empty { padding: 28px 12px 12px; font-size: 17px; }
   .kioskHit {
-    width: 100%; text-align: left; min-height: 68px;
-    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
-    padding: 16px 20px; display: flex; flex-direction: column; gap: 4px;
+    width: 100%; text-align: start; min-height: 72px;
+    background: var(--k-hit); border: 1px solid var(--k-hit-line); border-radius: 18px;
+    padding: 14px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
     box-shadow: var(--lift);
   }
   .kioskHit:not(:disabled):hover { border-color: var(--line-hover); }
   .kioskHit:not(:disabled):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .kioskHit:disabled { opacity: .55; cursor: not-allowed; }
-  .kioskHitName { font-size: 21px; font-weight: 650; }
-  .kioskHitRoom { font-size: 14px; color: var(--muted); }
-  .kioskHitDone { font-size: 13px; font-weight: 650; color: var(--warn-text); }
-
-  /* ---- confirm / thank you ---- */
-  .confirmPanel {
-    flex: 1; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; text-align: center; gap: 18px; padding: 20px 0;
+  .kioskHit:disabled { opacity: .72; cursor: not-allowed; }
+  /* The room code as it is painted on the door — "C09" — before the name.
+     Only present when the server chose to show it (two residents sharing a
+     name); a resident's room is otherwise never put on screen. */
+  .kioskHitRoom {
+    flex: none; font-size: 15px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    font-variant-numeric: tabular-nums; padding: 6px 11px; border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
   }
-  .confirmName { font-size: 40px; font-weight: 700; line-height: 1.15; }
+  .kioskHitName { flex: 1 1 auto; font-size: 24px; font-weight: 650; letter-spacing: -0.01em; min-width: 0; overflow-wrap: anywhere; }
+  .kioskHitDone {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 650; padding: 7px 12px 7px 9px; border-radius: 999px;
+    background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok);
+  }
+  .kioskHitDone svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---- confirm / thank you / not checked in ---- */
+  .confirmPanel {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; gap: 16px; padding: 28px 0 12px;
+  }
+  .confirmName { font-size: 48px; font-weight: 700; line-height: 1.12; letter-spacing: -0.015em; overflow-wrap: anywhere; }
   .confirmSub { font-size: 19px; color: var(--muted); margin: 0; }
   .notMeBtn {
-    margin-top: 14px; min-height: 60px; padding: 16px 28px; font-size: 18px;
-    background: var(--surface-2); border: 1px solid var(--line-hover); color: var(--text);
+    margin-top: 14px; min-height: 64px; padding: 16px 30px; font-size: 19px; border-radius: 16px;
+    background: var(--k-hit); border: 1px solid var(--k-hit-line); color: var(--text);
   }
-
+  #failView .confirmName { color: var(--bad); }
   /* The whole panel is the tap target — see the click handler in the inline
      script — so it should read as tappable, not just as a message. */
   #failView { cursor: pointer; }
 
+  /* Staff, small and out of a resident's way, under the card. */
   .kioskStaffLink {
-    display: block; text-align: center; padding: 18px 12px calc(18px + env(safe-area-inset-bottom));
-    font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 2px;
+    display: block; margin-top: auto; text-align: center;
+    padding: 28px 12px calc(18px + env(safe-area-inset-bottom));
+    font-size: 13px; color: rgba(255, 255, 255, .7); text-decoration: underline; text-underline-offset: 2px;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, .4);
   }
 
-  @media (min-width: 480px) {
-    .confirmName { font-size: 48px; }
+  /* Before boot finds a session there is no photograph: the reconnect
+     message sits alone on the gradient. */
+  #reconnect { position: fixed; inset: 0; z-index: 3; color: #fff; }
+
+  /* The shared toast parks just below the screen's edge between messages;
+     over a photograph the sliver that shows is visible, so hide it outright
+     until it is called for. */
+  #toast:not(.show) { visibility: hidden; transition: transform .22s ease, visibility 0s linear .22s; }
+  #reconnect .confirmSub { color: rgba(255, 255, 255, .8); }
+
+  @media (max-width: 640px) {
+    .attractFoot { flex-direction: column; align-items: flex-start; gap: 12px; padding-left: 24px; padding-right: 24px; }
+    .attractClock { font-size: 56px; }
+    .attractTapWrap { bottom: calc(220px + env(safe-area-inset-bottom)); }
+    .glass { padding: 20px; border-radius: 22px; }
+    .kioskInput { font-size: 22px; min-height: 64px; padding-inline-start: 58px; }
+    .kioskField svg { inset-inline-start: 20px; width: 24px; height: 24px; margin-top: -12px; }
+    .confirmName { font-size: 38px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .attractTap { animation: none; }
+    .attractPhoto, .attract, main.kiosk { transition: none; }
   }
 </style>
 </head>
@@ -110,43 +275,70 @@
 </div>
 
 <div id="app" hidden>
-  <header class="kioskHead">
-    <p class="brand">CheckSteady</p>
-    <p class="who" id="kioskWho"></p>
-  </header>
+  <div class="stage nophoto" id="stage">
+    <img class="attractPhoto" id="attractPhoto" alt="" decoding="async">
+    <svg class="fallbackTick" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16"/><path d="M18 33l10 10 18-20"/></svg>
+  </div>
 
-  <main class="kiosk">
-    <section id="searchView">
-      <input id="q" class="field kioskInput" type="search"
-             placeholder="Your name, room or ID number"
-             autocomplete="off" autocorrect="off" autocapitalize="words"
-             spellcheck="false" enterkeyhint="search" autofocus>
-      <div id="results" class="kioskResults"></div>
-    </section>
+  <section class="attract" id="attractView">
+    <div class="attractScrim"></div>
+    <div class="langRow" id="langRowAttract" dir="ltr" aria-label="Language"></div>
+    <div class="attractTapWrap"><div class="attractTap" id="attractTap" data-s="tap">Tap to check in</div></div>
+    <div class="attractFoot">
+      <div class="attractInfo" id="attractInfo">
+        <div class="attractName" id="attractName">CheckSteady</div>
+        <div class="attractDate" id="attractDate"></div>
+      </div>
+      <div class="attractClock" id="attractClock"></div>
+    </div>
+  </section>
 
-    <section id="confirmView" class="confirmPanel" hidden>
-      <div class="confirmName" id="confirmName"></div>
-      <p class="confirmSub" id="confirmSub">Checking you in — stay for ten seconds</p>
-      <button class="btn notMeBtn" id="notMeBtn" type="button">That's not me (<span id="notMeCount">10</span>)</button>
-    </section>
+  <main class="kiosk gone" id="cardWrap">
+    <div class="glass" id="card">
+      <div class="cardHead">
+        <div>
+          <h1 data-s="heading">Check in</h1>
+          <p class="site" id="cardSite">CheckSteady</p>
+        </div>
+        <div class="langRow" id="langRowCard" dir="ltr" aria-label="Language"></div>
+      </div>
 
-    <section id="thanksView" class="confirmPanel" hidden>
-      <div class="confirmName">Thank you</div>
-    </section>
+      <section id="searchView">
+        <div class="kioskField">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="q" class="field kioskInput" type="search"
+                 placeholder="Your name or room" data-s-placeholder="placeholder"
+                 autocomplete="off" autocorrect="off" autocapitalize="words"
+                 spellcheck="false" enterkeyhint="search" autofocus>
+        </div>
+        <p class="kioskHint" id="qHint" data-s="twoLetters" hidden>Type at least two letters</p>
+        <div id="results" class="kioskResults"></div>
+      </section>
 
-    <!-- A 5xx or an unreachable server (status 0) from POST /api/kiosk/checkin
-         lands here instead of a transient toast: the tablet is unattended, so
-         "maybe it worked, maybe it didn't" must never be shown as a fleeting
-         message a resident can miss. It stays up until tapped — see doCheckin
-         below — rather than timing itself out, because nobody is watching to
-         notice it clear on its own. -->
-    <section id="failView" class="confirmPanel" hidden>
-      <div class="confirmName">Not checked in</div>
-      <p class="confirmSub">Please ask a member of staff</p>
-    </section>
+      <section id="confirmView" class="confirmPanel" hidden>
+        <div class="confirmName" id="confirmName"></div>
+        <p class="confirmSub" id="confirmSub">Checking you in — stay for ten seconds</p>
+        <button class="btn notMeBtn" id="notMeBtn" type="button"><span data-s="notMe">That's not me</span> (<span id="notMeCount">10</span>)</button>
+      </section>
+
+      <section id="thanksView" class="confirmPanel" hidden>
+        <div class="confirmName" data-s="thanks">Thank you</div>
+      </section>
+
+      <!-- A 5xx or an unreachable server (status 0) from POST /api/kiosk/checkin
+           lands here instead of a transient toast: the tablet is unattended, so
+           "maybe it worked, maybe it didn't" must never be shown as a fleeting
+           message a resident can miss. It stays up until tapped — see doCheckin
+           below — rather than timing itself out, because nobody is watching to
+           notice it clear on its own. -->
+      <section id="failView" class="confirmPanel" hidden>
+        <div class="confirmName" data-s="failTitle">Not checked in</div>
+        <p class="confirmSub" data-s="failSub">Please ask a member of staff</p>
+      </section>
+    </div>
+
+    <a class="kioskStaffLink" id="staffLink" href="/index.html" data-s="staff">Staff</a>
   </main>
-
-  <a class="kioskStaffLink" id="staffLink" href="/index.html">Staff</a>
 </div>
 
 <div id="toast" role="status" aria-live="polite" title="Dismiss"></div>
@@ -157,28 +349,188 @@
 "use strict";
 
 /* ========================================================================
+   Languages. English is the source of truth (the plan's Global Constraints
+   list the exact strings); the five translations are of those strings, in
+   the formal register a notice at a residence uses. Order here is the order
+   of the pills.
+   ====================================================================== */
+const LANGS = ["en", "uk", "ru", "ka", "ar", "fr"];
+const LOCALE = { en: "en-IE", uk: "uk", ru: "ru", ka: "ka", ar: "ar", fr: "fr" };
+const STRINGS = {
+  en: {
+    name: "English", tap: "Tap to check in", heading: "Check in", placeholder: "Your name or room",
+    checking: "Checking you in — stay for ten seconds", notMe: "That's not me", thanks: "Thank you",
+    failTitle: "Not checked in", failSub: "Please ask a member of staff", today: "Checked in today",
+    twoLetters: "Type at least two letters", staff: "Staff",
+    noMatch: "No match. Ask a member of staff for help.", done: "Checked in — goodnight.",
+  },
+  uk: {
+    name: "Українська", tap: "Торкніться, щоб відмітитися", heading: "Відмітитися", placeholder: "Ваше ім’я або кімната",
+    checking: "Відмічаємо вас — залишайтеся десять секунд", notMe: "Це не я", thanks: "Дякуємо",
+    failTitle: "Не відмічено", failSub: "Будь ласка, зверніться до працівника", today: "Відмічено сьогодні",
+    twoLetters: "Введіть щонайменше дві літери", staff: "Персонал",
+    noMatch: "Збігів немає. Зверніться до працівника по допомогу.", done: "Відмічено — доброї ночі.",
+  },
+  ru: {
+    name: "Русский", tap: "Коснитесь, чтобы отметиться", heading: "Отметиться", placeholder: "Ваше имя или комната",
+    checking: "Отмечаем вас — оставайтесь десять секунд", notMe: "Это не я", thanks: "Спасибо",
+    failTitle: "Не отмечено", failSub: "Пожалуйста, обратитесь к сотруднику", today: "Отмечено сегодня",
+    twoLetters: "Введите не менее двух букв", staff: "Персонал",
+    noMatch: "Совпадений нет. Обратитесь к сотруднику за помощью.", done: "Отмечено — доброй ночи.",
+  },
+  ka: {
+    name: "ქართული", tap: "შეეხეთ რეგისტრაციისთვის", heading: "რეგისტრაცია", placeholder: "თქვენი სახელი ან ოთახი",
+    checking: "გარეგისტრირებთ — დარჩით ათი წამი", notMe: "ეს მე არ ვარ", thanks: "გმადლობთ",
+    failTitle: "რეგისტრაცია არ შესრულდა", failSub: "გთხოვთ, მიმართეთ თანამშრომელს", today: "დღეს დარეგისტრირებულია",
+    twoLetters: "შეიყვანეთ მინიმუმ ორი ასო", staff: "პერსონალი",
+    noMatch: "შესატყვისი არ მოიძებნა. დახმარებისთვის მიმართეთ თანამშრომელს.", done: "დარეგისტრირდით — ღამე მშვიდობისა.",
+  },
+  ar: {
+    name: "العربية", tap: "المس الشاشة لتسجيل الحضور", heading: "تسجيل الحضور", placeholder: "اسمك أو غرفتك",
+    checking: "نسجّل حضورك — يرجى البقاء عشر ثوانٍ", notMe: "هذا ليس أنا", thanks: "شكرًا لك",
+    failTitle: "لم يُسجَّل الحضور", failSub: "يرجى مراجعة أحد الموظفين", today: "تم تسجيل الحضور اليوم",
+    twoLetters: "اكتب حرفين على الأقل", staff: "الموظفون",
+    noMatch: "لا توجد نتائج. يرجى مراجعة أحد الموظفين للمساعدة.", done: "تم تسجيل حضورك — تصبح على خير.",
+  },
+  fr: {
+    name: "Français", tap: "Touchez pour vous enregistrer", heading: "Enregistrement", placeholder: "Votre nom ou votre chambre",
+    checking: "Enregistrement en cours — restez dix secondes", notMe: "Ce n’est pas moi", thanks: "Merci",
+    failTitle: "Présence non enregistrée", failSub: "Veuillez vous adresser à un membre du personnel", today: "Présence enregistrée aujourd’hui",
+    twoLetters: "Saisissez au moins deux lettres", staff: "Personnel",
+    noMatch: "Aucun résultat. Adressez-vous à un membre du personnel.", done: "Présence enregistrée — bonne nuit.",
+  },
+};
+const DEFAULT_LANG = "en";
+const LANG_SLOT = "kioskLang";
+
+/* ========================================================================
    State
    ====================================================================== */
 const state = {
   profile: null,
-  view: "search",      // search | confirm | thanks | fail
+  lang: DEFAULT_LANG,
+  siteName: "CheckSteady",
+  view: "attract",      // attract | search | confirm | thanks | fail
   pending: null,        // { id, full_name } awaiting the 10s window
   posting: false,       // true once the countdown has fired and the POST is in flight
+  lastResults: [],      // re-rendered when the language changes
 };
 
 let searchTimer    = null;   // 250ms debounce
-let idleTimer      = null;   // 30s idle clears the search
+let idleTimer      = null;   // 30s idle returns to the attract view
 let confirmTimer   = null;   // the "That's not me (n)" countdown
 let goodnightTimer = null;   // "Checked in — goodnight." pause before "Thank you"
 let doneTimer      = null;   // "Thank you" for 3s
+let clockTimer     = null;   // the attract clock, re-armed at each minute boundary
 let searchToken    = 0;      // ignores a stale response that lands after a newer search
 let searchAbort    = null;   // aborts a stale request outright, belt and braces with the token above
+
+/* ========================================================================
+   Language
+   ====================================================================== */
+function t(key) {
+  return (STRINGS[state.lang] && STRINGS[state.lang][key]) || STRINGS.en[key] || "";
+}
+
+function rememberLang(code) {
+  try { localStorage.setItem(LANG_SLOT, code); } catch (_) { /* private mode */ }
+}
+function rememberedLang() {
+  try { const v = localStorage.getItem(LANG_SLOT); return LANGS.includes(v) ? v : DEFAULT_LANG; } catch (_) { return DEFAULT_LANG; }
+}
+
+// Both rows — on the photograph and in the card — are drawn from here. The
+// active language shows its own name; the rest show their codes.
+function renderLangRows() {
+  const html = LANGS.map((code) => `
+    <button class="lang" type="button" data-lang="${code}" lang="${code}" aria-pressed="${code === state.lang}">${code === state.lang ? esc(STRINGS[code].name) : code.toUpperCase()}</button>`).join("");
+  $("langRowAttract").innerHTML = html;
+  $("langRowCard").innerHTML = html;
+}
+
+function applyLang(code) {
+  if (!LANGS.includes(code)) code = DEFAULT_LANG;
+  state.lang = code;
+  const dir = code === "ar" ? "rtl" : "ltr";
+  document.documentElement.lang = code;
+  // The card and the attract text block take the direction; the language
+  // row itself stays as it is (codes read the same way in every script).
+  for (const id of ["card", "attractInfo", "attractTap"]) { $(id).dir = dir; $(id).lang = code; }
+  for (const el of document.querySelectorAll("[data-s]")) el.textContent = t(el.dataset.s);
+  for (const el of document.querySelectorAll("[data-s-placeholder]")) el.placeholder = t(el.dataset.sPlaceholder);
+  // Live text that is not a fixed string: the countdown subtitle, if a
+  // confirm is on screen and has not yet succeeded.
+  if (state.view === "confirm" && !state.posting) $("confirmSub").textContent = t("checking");
+  renderLangRows();
+  renderResults(state.lastResults);
+  paintClock();
+}
+
+/* ========================================================================
+   The attract view: clock and date in the chosen language
+   ====================================================================== */
+function paintClock() {
+  const now = new Date();
+  const locale = LOCALE[state.lang] || "en-IE";
+  let time, date;
+  try {
+    time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+    date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long" }).format(now);
+    // "Friday 18 September", as the day is said, not "Friday, 18 September".
+    if (state.lang === "en") date = date.replace(",", "");
+  } catch (_) {
+    time = now.toTimeString().slice(0, 5);
+    date = now.toDateString();
+  }
+  $("attractClock").textContent = time;
+  $("attractDate").textContent = date;
+}
+
+// Ticks at the next minute boundary, then every minute: no seconds shown, so
+// nothing needs to run more often than that.
+function armClock() {
+  clearTimeout(clockTimer);
+  paintClock();
+  clockTimer = setTimeout(armClock, 60000 - (Date.now() % 60000) + 50);
+}
+
+/* ========================================================================
+   Branding: the site name and the photograph, both via /api/kiosk/branding
+   (the kiosk role's session carries settings: null). Called on boot and again
+   on every idle return, so a photograph uploaded during the day appears
+   without anyone reloading the tablet.
+   ====================================================================== */
+async function loadBranding() {
+  let b = null;
+  try { b = await apiGet("/api/kiosk/branding"); } catch (_err) { /* keep whatever we had */ }
+  if (!b) return;
+  state.siteName = (b.site_name || "").trim() || "CheckSteady";
+  $("attractName").textContent = state.siteName;
+  $("cardSite").textContent = state.siteName;
+  const img = $("attractPhoto");
+  if (b.has_photo) {
+    if (!img.getAttribute("src")) img.src = "/api/kiosk/photo";
+  } else {
+    img.removeAttribute("src");
+    $("stage").classList.add("nophoto");
+  }
+}
+
+$("attractPhoto").addEventListener("load", () => $("stage").classList.remove("nophoto"));
+$("attractPhoto").addEventListener("error", () => {
+  $("attractPhoto").removeAttribute("src");
+  $("stage").classList.add("nophoto");
+});
 
 /* ========================================================================
    Small helpers
    ====================================================================== */
 function showView(name) {
   state.view = name;
+  const attract = name === "attract";
+  $("attractView").classList.toggle("gone", !attract);
+  $("cardWrap").classList.toggle("gone", attract);
+  document.body.classList.toggle("card-open", !attract);
   $("searchView").hidden  = name !== "search";
   $("confirmView").hidden = name !== "confirm";
   $("thanksView").hidden  = name !== "thanks";
@@ -193,6 +545,8 @@ function resetSearch() {
   if (searchAbort) { searchAbort.abort(); searchAbort = null; }
   searchToken += 1;
   $("q").value = "";
+  $("qHint").hidden = true;
+  state.lastResults = [];
   $("results").innerHTML = "";
 }
 
@@ -205,22 +559,55 @@ function backToSearch() {
   showView("search");
   resetSearch();
   $("q").focus();
+  noteActivity();
+}
+
+// Boot, and 30 s idle: the search cleared, the language back to the site's
+// default, the photograph sharp again.
+function showAttract() {
+  clearInterval(confirmTimer);
+  clearTimeout(goodnightTimer);
+  clearTimeout(doneTimer);
+  state.pending = null;
+  state.posting = false;
+  resetSearch();
+  if (state.lang !== DEFAULT_LANG) { rememberLang(DEFAULT_LANG); applyLang(DEFAULT_LANG); }
+  showView("attract");
+  $("q").blur();
+  loadBranding();
+}
+
+function openSearch() {
+  showView("search");
+  resetSearch();
+  $("q").focus();
+  noteActivity();
+}
+
+// "Slaney · Ground · C09" → "C09": the room code as painted on the door.
+function roomShort(label) {
+  const s = String(label || "");
+  const i = s.lastIndexOf(" · ");
+  return i < 0 ? s : s.slice(i + 3);
 }
 
 /* ========================================================================
    Search
    ====================================================================== */
 function renderResults(rows) {
+  rows = rows || [];
+  state.lastResults = rows;
   const box = $("results");
   if (!rows.length) {
-    box.innerHTML = $("q").value.trim().length < 2 ? "" : '<p class="empty">No match. Ask a member of staff for help.</p>';
+    box.innerHTML = $("q").value.trim().length < 2 ? "" : `<p class="empty">${esc(t("noMatch"))}</p>`;
     return;
   }
+  const tick = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   box.innerHTML = rows.map((r) => `
     <button class="kioskHit" type="button" data-id="${esc(r.id)}" data-name="${esc(r.full_name)}" ${r.checked_in_today ? "disabled" : ""}>
+      ${r.room_label ? `<span class="kioskHitRoom">${esc(roomShort(r.room_label))}</span>` : ""}
       <span class="kioskHitName">${esc(r.full_name)}</span>
-      ${r.room_label ? `<span class="kioskHitRoom">${esc(r.room_label)}</span>` : ""}
-      ${r.checked_in_today ? '<span class="kioskHitDone">Already checked in today</span>' : ""}
+      ${r.checked_in_today ? `<span class="kioskHitDone">${tick}${esc(t("today"))}</span>` : ""}
     </button>`).join("");
 }
 
@@ -230,6 +617,7 @@ function renderResults(rows) {
 // it slips through before the abort takes effect.
 async function runSearch(q) {
   q = (q || "").trim();
+  $("qHint").hidden = !(q.length === 1);
   if (q.length < 2) {
     if (searchAbort) { searchAbort.abort(); searchAbort = null; }
     searchToken += 1;
@@ -257,6 +645,7 @@ async function runSearch(q) {
     // Not "No match…" — that phrase is for a real empty result, and showing
     // it alongside the toast would read as two contradictory messages about
     // one search.
+    state.lastResults = [];
     $("results").innerHTML = "";
     return;
   }
@@ -273,7 +662,7 @@ function startConfirm(resident) {
   $("confirmName").textContent = resident.full_name;
   // Reset in case the last resident's confirm ran all the way to "Checked
   // in — goodnight." — this is a fresh countdown, not a result yet.
-  $("confirmSub").textContent = "Checking you in — stay for ten seconds";
+  $("confirmSub").textContent = t("checking");
   $("notMeBtn").disabled = false;
 
   let remaining = 10;
@@ -315,7 +704,7 @@ async function doCheckin(resident) {
   // The write has actually succeeded now — this is the first point the copy
   // is allowed to say so. "Checked in — goodnight." replaces the countdown
   // text for a moment before the screen moves on to "Thank you".
-  $("confirmSub").textContent = "Checked in — goodnight.";
+  $("confirmSub").textContent = t("done");
   clearTimeout(goodnightTimer);
   goodnightTimer = setTimeout(() => {
     showView("thanks");
@@ -325,15 +714,20 @@ async function doCheckin(resident) {
 }
 
 /* ========================================================================
-   Idle: clears the search 30s after the last touch, so the next resident in
-   the queue never sees the previous one's query on screen. There is no idle
-   LOCK here (unlike the register) — the device itself is locked with Guided
-   Access, not this session.
+   Idle: 30 s after the last touch the tablet returns to the attract view —
+   search cleared, language back to the default — so the next resident in
+   the queue never sees the previous one's query, name or language. Not
+   while a confirm is counting down or posting (it ends on its own within
+   fifteen seconds and calls backToSearch, which re-arms this), and not over
+   the "Not checked in" panel, which stays until a person taps it (see
+   doCheckin). There is no idle LOCK here (unlike the register) — the device
+   itself is locked with Guided Access, not this session.
    ====================================================================== */
 function noteActivity() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (state.view === "search") resetSearch();
+    if (state.view === "confirm" || state.view === "thanks" || state.view === "fail") return;
+    showAttract();
   }, 30000);
 }
 
@@ -397,20 +791,38 @@ async function boot() {
 
   state.profile = profile;
   // settings is always null for this role (app_settings is staff-only) —
-  // deliberately never read here. The site name a resident sees is instead
-  // whatever the admin named this tablet's account, e.g. "Slaney gate tablet".
-  $("kioskWho").textContent = profile.full_name || "";
+  // deliberately never read here; the site name comes from /api/kiosk/branding.
 
+  applyLang(rememberedLang());
+  armClock();
   $("reconnect").hidden = true;
   $("app").hidden = false;
-  showView("search");
+  showView("attract");
+  await loadBranding();
   noteActivity();
-  $("q").focus();
 }
 
 /* ========================================================================
    Wiring
    ====================================================================== */
+// The whole attract screen is the tap target — except the language row,
+// which changes the language and stays on the photograph.
+$("attractView").addEventListener("click", (e) => {
+  if (e.target.closest(".langRow")) return;
+  if (state.view === "attract") openSearch();
+});
+
+function onLangClick(e) {
+  const btn = e.target.closest(".lang");
+  if (!btn) return;
+  e.stopPropagation();
+  rememberLang(btn.dataset.lang);
+  applyLang(btn.dataset.lang);
+  if (state.view === "search") $("q").focus();
+}
+$("langRowAttract").addEventListener("click", onLangClick);
+$("langRowCard").addEventListener("click", onLangClick);
+
 $("q").addEventListener("input", (e) => {
   noteActivity();
   clearTimeout(searchTimer);
