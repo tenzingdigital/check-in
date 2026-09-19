@@ -96,6 +96,16 @@ if ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || command -v initdb >/dev/nu
     tail -20 /tmp/hut-check-api.log
     fail=1
   fi
+  step "Guardian gap alert suite"
+  ./test/guardian-push.sh >/tmp/hut-check-gap.log 2>&1
+  if [ $? -eq 0 ]; then
+    tail -2 /tmp/hut-check-gap.log | head -1
+  else
+    echo "FAIL — full output in /tmp/hut-check-gap.log"
+    tail -20 /tmp/hut-check-gap.log
+    fail=1
+  fi
+
   step "Self-serve trial suite"
   ./test/signup.sh >/tmp/hut-check-signup.log 2>&1
   if [ $? -eq 0 ]; then

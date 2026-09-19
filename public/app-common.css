@@ -405,6 +405,20 @@
 
   @media (prefers-reduced-motion: reduce) { button.card.nudge { animation: none; } }
 
+  /* The safeguarding alerts offer, above the register. Accent rather than
+     amber: it is an offer, not a warning — the warning is the notification
+     it turns on. */
+  .alertsrow {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin: 10px 0; padding: 12px 14px; border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    font-size: 13px; color: var(--muted); line-height: 1.5;
+  }
+  .alertsrow span { flex: 1; min-width: 14rem; }
+  .alertsrow b { color: var(--text); }
+  .alertsrow .btn { flex: none; }
+
   .card {
     width: 100%; text-align: left;
     background: var(--surface); border: 1px solid var(--line);

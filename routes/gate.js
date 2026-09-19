@@ -3,6 +3,8 @@ const express = require('express');
 const { wrap } = require('../lib/asyncRoute');
 const db = require('../database');
 const { HttpError, uuidParam, intParam, dateParam } = require('../lib/api');
+const tenancy = require('../lib/tenancy');
+const guardianGap = require('../lib/guardianGap');
 
 const router = express.Router();
 
@@ -32,9 +34,21 @@ router.post('/gate-events', wrap(async (req, res) => {
     );
     return rows[0];
   });
+  const tenant = await db.withOwner((client) => tenancy.schemaForUser(client, req.session.userId));
 
   if (!row) throw new HttpError(404, 'Resident not found');
   res.json(row);
+
+  // A gate event is the only thing that opens or closes a guardian gap: a
+  // guardian signing out opens one, signing back in closes it. Migration 054
+  // could already state the fact but only the nightly job asked, so the
+  // September incident — children on site with nobody responsible — went
+  // unsaid until Monday. Asking here is what makes the answer arrive at 21:10.
+  //
+  // After res.json(), and never awaited. The movement is already recorded and
+  // is the record; a guard at a door must not wait on a push round trip, and a
+  // push service being slow or down must not fail the sign-out.
+  guardianGap.evaluateInBackground(tenant.schema, tenant.tenantId);
 }));
 
 // GET /api/gate-events?date=YYYY-MM-DD — the day's movement log.

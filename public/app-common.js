@@ -1153,3 +1153,120 @@ function mountSheetDismiss(onClose, { id = "detail" } = {}) {
 async function logout() {
   try { await apiDelete("/api/session"); } catch { /* the cookie is gone either way */ }
 }
+
+/* ==========================================================================
+   Safeguarding alerts on this phone
+
+   Offered only to staff on the safeguarding list (profiles.safeguarding_alert,
+   returned by /api/session). A permission prompt put to somebody who would
+   never be sent an alert is a prompt they learn to refuse, and the browser
+   only asks once — refuse it and the button cannot ask again, on any screen,
+   until the person digs into site settings.
+
+   Per device, not per person: a supervisor with a phone and a tablet turns it
+   on twice, and turning it off on the tablet leaves the phone alerting.
+
+   iOS: Safari supports this only for an app added to the Home Screen, so on an
+   iPhone in a browser tab there is no PushManager at all. That gets a sentence
+   saying what to do rather than a button that cannot work.
+   ========================================================================== */
+
+// A VAPID public key arrives base64url; PushManager wants raw bytes.
+function urlBase64ToUint8Array(base64) {
+  const padded = (base64 + "=".repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(padded);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+const pushSupported = () =>
+  "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+// Standalone means "added to the Home Screen". On iOS that is the difference
+// between push working and not existing.
+const isStandalone = () =>
+  window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+
+async function currentPushSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+
+async function mountAlerts(profile) {
+  const box = $("alertsRow");
+  if (!box) return;
+  box.hidden = true;
+  if (!profile || !profile.safeguarding_alert) return;   // not on the list; never asked
+
+  const say = (html) => { box.innerHTML = html; box.hidden = false; };
+
+  if (!pushSupported()) {
+    // The iPhone-in-a-tab case, and the only one worth a sentence: it is
+    // fixable by the person reading it.
+    if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !isStandalone()) {
+      say(`<span><b>Alerts on this phone.</b> Add CheckSteady to your Home Screen first —
+           the Share button, then <b>Add to Home Screen</b> — then open it from there and this
+           offer will appear.</span>`);
+    }
+    return;
+  }
+
+  const key = await guarded(() => apiGet("/api/push/key"), () => {});
+  if (!key || !key.configured || !key.key) {
+    say(`<span><b>Alerts are not set up on this service.</b> Ask your administrator to
+         configure them; you will still get the nightly email.</span>`);
+    return;
+  }
+
+  const existing = await currentPushSubscription();
+  if (existing) {
+    say(`<span><b>Alerts are on for this device.</b> You will be told when children are on
+         site with no guardian.</span>
+         <button class="btn ghost sm" type="button" id="alertsOff">Turn off here</button>`);
+    $("alertsOff").onclick = async () => {
+      const endpoint = existing.endpoint;
+      await existing.unsubscribe().catch(() => {});
+      await guarded(() => apiDelete("/api/push/subscribe", { endpoint }), () => {});
+      toast("Alerts turned off on this device", "ok");
+      mountAlerts(profile);
+    };
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    say(`<span><b>Alerts are blocked in this browser.</b> Turn notifications back on for this
+         site in your browser settings, then reload.</span>`);
+    return;
+  }
+
+  say(`<span><b>Get safeguarding alerts on this device.</b> You will be told the moment
+       children are on site with no guardian — not the next morning.</span>
+       <button class="btn sm" type="button" id="alertsOn">Turn on alerts</button>`);
+
+  $("alertsOn").onclick = async () => {
+    const btn = $("alertsOn");
+    btn.disabled = true;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        toast("Alerts were not allowed", "err");
+        return mountAlerts(profile);
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        // Required by Chrome, and honest: every push this app sends shows a
+        // notification. Nothing is delivered silently.
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key.key),
+      });
+      const raw = sub.toJSON();
+      await apiPost("/api/push/subscribe", { endpoint: sub.endpoint, keys: raw.keys });
+      toast("Alerts are on for this device", "ok");
+    } catch (err) {
+      toast("Could not turn alerts on: " + (err && err.message), "err");
+    } finally {
+      btn.disabled = false;
+      mountAlerts(profile);
+    }
+  };
+}

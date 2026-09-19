@@ -219,6 +219,7 @@ app.use('/api', require('./routes/reports'));
 app.use('/api', require('./routes/tenants'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/push', require('./routes/push'));
 app.use('/api', require('./routes/gate'));
 app.use('/api', require('./routes/registerFix'));
 app.use('/api', require('./routes/checkins'));

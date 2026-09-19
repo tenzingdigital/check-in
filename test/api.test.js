@@ -670,7 +670,11 @@ async function main() {
     // signup_requests holds trial requests before any centre exists;
     // tenant_demo_rows says which rows a sample seed wrote, across every
     // tenant (migration 034).
-    const shared = new Set(["tenants", "schema_migrations", "signup_requests", "tenant_demo_rows"]);
+    const shared = new Set(["tenants", "schema_migrations", "signup_requests", "tenant_demo_rows",
+      // Alerts on a phone (058): a subscription belongs to a login in the
+      // shared auth.users, and a gap row names its tenant. Neither is
+      // per-centre, so neither belongs in tenant/template.sql.
+      "push_subscriptions", "guardian_gap_alerts"]);
     const ref = (await cols("public")).rows.filter((r) => !shared.has(r.table_name));
     const tenant = (await cols("t_verify")).rows;
 

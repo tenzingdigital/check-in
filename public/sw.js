@@ -98,3 +98,73 @@ self.addEventListener("fetch", (event) => {
       }),
   );
 });
+
+/* ============================================================================
+   Safeguarding alerts
+
+   The one thing this worker does that is not caching. A push arrives when a
+   guardian gap opens — children on site with no guardian and no supervision
+   arrangement — and the whole of what arrives is:
+
+       { kind: "guardian-gap", site: "Harbour House", url: "/?alert=…" }
+
+   No name, no room, no count, no resident id, by rule and by assertion in
+   lib/push.js. What appears on the lock screen is the centre and the fact
+   that something needs attention; who it concerns is on the register, behind
+   the login, on the access log, where it belongs.
+
+   Web Push payloads are encrypted for this device's own key (RFC 8291), so
+   the push service that relayed this message could not read it either.
+   ========================================================================= */
+
+const ALERT_TEXT = {
+  "guardian-gap": {
+    title: "Children may be unsupervised",
+    body: "Open CheckSteady to see which family and act.",
+  },
+};
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (_) { data = {}; }
+  const text = ALERT_TEXT[data.kind] || {
+    title: "CheckSteady",
+    body: "Open CheckSteady — something needs attention.",
+  };
+  // The centre's name goes in the title, not the body: a warden covering two
+  // sites needs to know which one before they read anything else.
+  const title = data.site ? `${data.site}: ${text.title}` : text.title;
+
+  event.waitUntil(self.registration.showNotification(title, {
+    body: text.body,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    // One tag per kind: a second alert about the same thing replaces the
+    // first rather than stacking. Four notifications about one gap get read
+    // as none.
+    tag: data.tag || data.kind || "checksteady",
+    renotify: true,
+    // requireInteraction keeps it on screen until it is dealt with. This is
+    // the message that must not scroll past while a phone is in a pocket.
+    requireInteraction: true,
+    data: { url: data.url || "/" },
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  // Focus a tab that is already open rather than stacking another: a warden
+  // who has the register open should land on it, not on a second copy.
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of all) {
+      if (new URL(client.url).origin === self.location.origin) {
+        await client.focus();
+        if ("navigate" in client) { try { await client.navigate(url); } catch (_) { /* focused is enough */ } }
+        return;
+      }
+    }
+    await self.clients.openWindow(url);
+  })());
+});

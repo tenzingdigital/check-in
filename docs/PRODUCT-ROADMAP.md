@@ -345,6 +345,49 @@ the session endpoint would need to return the tenant's status and
 `trial_ends_at`, and both front ends a strip under the header. That is the next
 piece of this stage.
 
+## Stage 5c — A phone that says so at 21:10
+
+**Status: built 19 September 2026 (migration 058).** The answer to the
+September incident's real failure, which was not detection but latency:
+`guardian_gap_households()` could state the fact from 054, but only the
+nightly job asked it, so "children on site with nobody responsible" waited
+until Monday.
+
+- `lib/guardianGap.js` asks the same question after every gate event — the
+  only thing that opens or closes a gap. Idempotent by construction: it opens
+  a row for each gap with no open row and closes every open row whose
+  household is no longer listed, so running it twice does nothing and missing
+  a run catches up. Same contract as `close_out_compliance_days()`.
+- It runs AFTER the response to the guard, never awaited. A person at a door
+  does not wait on a push round trip, and a push service being down must not
+  fail a sign-out.
+- `public.guardian_gap_alerts` keeps every gap from the minute it opened to
+  the minute it closed. That is the only record written at the time rather
+  than at the next midnight, and it is what a review of an incident asks for.
+  `notified_at` stays null when a gap was found and no device could be
+  reached, so "we knew and could not tell anyone" is visible rather than
+  silent.
+- Web Push, not FCM/APNs, because a Web Push payload is encrypted for the
+  device's own key (RFC 8291) and the relaying service cannot read it. A
+  native SDK's payload is readable by the provider.
+- **No names leave in a payload.** The message says which centre and that
+  something needs attention; the app fetches who, after it has a session, from
+  screens already on the access log. `lib/push.js` asserts the payload's
+  shape rather than trusting it, and the suite proves a child's name, the
+  household id and the count are all absent.
+- Recipients are the existing `profiles.safeguarding_alert` tick (041) — the
+  same people the nightly email already reaches, not a second list to keep in
+  step. Any hour: a child unsupervised at 3am is when a notification earns
+  its place.
+- `test/guardian-push.test.js` replays the incident: last guardian signs out,
+  the phones are told, a second event during the same gap tells nobody again,
+  the guardian returning closes it, a supervision arrangement means no gap.
+
+**Still open.** Alerts are offered on the In & out screen only, and only to
+staff already on the safeguarding list. On an iPhone they need the app added
+to the Home Screen first — Safari has no PushManager in a tab — which the
+screen says in a sentence but nothing in onboarding walks somebody through.
+
 ## Stage 6 — Access control integration
 
 **Status: not planned until a centre has hardware.**

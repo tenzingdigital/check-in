@@ -166,6 +166,11 @@
 
     <!-- ---- search ---- -->
     <section id="panelSearch" role="tabpanel" aria-labelledby="tabSearch">
+      <!-- Safeguarding alerts on this device. Shown only to staff on the
+           safeguarding list, and only until they answer: a permission prompt
+           put to somebody who would never be sent one is a prompt people learn
+           to refuse, and the browser only asks once. mountAlerts() decides. -->
+      <div id="alertsRow" class="alertsrow" hidden></div>
       <input id="q" class="field pinned" type="search" placeholder="Filter residents by name, room number or building…"
              autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <p id="filterLine" class="hint filterline" hidden></p>
@@ -1104,6 +1109,9 @@ async function enterApp() {
   loadRoll();
   syncRoll();
   mountTips();
+  // After the profile is known: it carries safeguarding_alert, which decides
+  // whether this person is offered alerts on this device at all.
+  mountAlerts(profile);
 
   $("login").hidden = true;
   $("app").hidden = false;

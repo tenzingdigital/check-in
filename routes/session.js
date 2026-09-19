@@ -90,14 +90,21 @@ router.delete('/', wrap(async (req, res) => {
 // Both front ends call this on boot. The browser holds no token of its own, so
 // this is also how a page decides whether to show the login form or the app.
 router.get('/', auth.requireSession, wrap(async (req, res) => {
-  const settings = await db.withIdentity(req.session.userId, async (client) => {
+  const { settings, safeguardingAlert } = await db.withIdentity(req.session.userId, async (client) => {
     const { rows } = await client.query(
       `select site_name, local_timezone, adult_age_years, due_soon_after_hour,
               event_retention_days, compliance_retention_days, late_entry_window_hours,
               idle_lock_minutes, feature_buildings, feature_evacuation, feature_households, feature_visitors, feature_door_checkin, mfa_email, home_countries
          from app_settings limit 1`,
     );
-    return rows[0] || null;
+    // Whether this person is on the safeguarding list. The app uses it to
+    // decide whether to offer "turn alerts on on this phone" — there is no
+    // point asking a guard who would never be sent one to allow
+    // notifications, and a permission prompt nobody needs is a permission
+    // prompt people learn to refuse.
+    const { rows: me } = await client.query(
+      `select safeguarding_alert from profiles where id = $1`, [req.session.userId]);
+    return { settings: rows[0] || null, safeguardingAlert: !!(me[0] && me[0].safeguarding_alert) };
   });
 
   // `id` is here for the offline queue: events recorded while the link was
@@ -106,7 +113,7 @@ router.get('/', auth.requireSession, wrap(async (req, res) => {
   // identity from the session when it does (Tao 6) — the id lets the terminal
   // avoid handing one guard's events to another's login, not the reverse.
   res.json({
-    profile: { id: req.session.userId, full_name: req.session.fullName, role: req.session.role, platform_admin: req.session.platformAdmin === true },
+    profile: { id: req.session.userId, full_name: req.session.fullName, role: req.session.role, platform_admin: req.session.platformAdmin === true, safeguarding_alert: safeguardingAlert },
     settings,
   });
 }));

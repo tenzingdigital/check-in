@@ -147,6 +147,22 @@ services:
       # Once you have logged in, delete ADMIN_PASSWORD from the service's
       # environment. The account stays; the bootstrap only ever fires when
       # there are zero staff accounts, so it will not run again either way.
+      # Web Push (VAPID). Generate one pair per deployment and keep it:
+      # changing the keys invalidates every device that has already
+      # subscribed, and they will only come back by turning alerts on again.
+      #
+      #   node -e "console.log(require('web-push').generateVAPIDKeys())"
+      #
+      # Without them the app says alerts are not configured rather than
+      # offering a button that does nothing. VAPID_SUBJECT is the contact a
+      # push service uses to reach an operator whose sender misbehaves.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:aimee@tenzing.ie
+
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
