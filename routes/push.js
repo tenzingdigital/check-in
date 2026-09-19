@@ -26,18 +26,27 @@ const router = express.Router();
 // with no keys set should say so plainly rather than offer a button that
 // silently does nothing.
 router.get('/key', wrap(async (req, res) => {
-  res.json({ configured: push.isConfigured(), key: push.publicKey() });
+  // webPushConfigured(), not isConfigured(): a browser cannot subscribe
+  // without a VAPID key however well APNs is set up for the iOS app.
+  res.json({ configured: push.webPushConfigured(), key: push.publicKey() });
 }));
 
 router.post('/subscribe', wrap(async (req, res) => {
   const body = req.body || {};
   const keys = body.keys || {};
+  const wantsApns = body.kind === 'apns';
   if (!push.isConfigured()) {
     throw new HttpError(503, 'Alerts are not configured on this service. Ask your administrator.');
+  }
+  if (!wantsApns && !push.webPushConfigured()) {
+    throw new HttpError(503, 'Browser alerts are not configured on this service.');
   }
   let id;
   try {
     id = await push.subscribe(req.session.userId, {
+      // The native app posts kind:"apns" with its device token; a browser
+      // omits it and gets the web push default.
+      kind: body.kind === 'apns' ? 'apns' : 'webpush',
       endpoint: String(body.endpoint || ''),
       p256dh: String(keys.p256dh || ''),
       auth: String(keys.auth || ''),

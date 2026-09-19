@@ -48,6 +48,25 @@ webpush.sendNotification = async (sub, body) => {
   return { statusCode: 201 };
 };
 
+// APNs stubbed at its own boundary. Configured so isConfigured() is true; the
+// transport itself (HTTP/2 to Apple) is not what this suite is about.
+process.env.APNS_KEY_ID = 'TESTKEYID0';
+process.env.APNS_TEAM_ID = 'TESTTEAM00';
+process.env.APNS_TOPIC = 'ie.checksteady.test';
+{
+  const crypto = require('crypto');
+  const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  process.env.APNS_KEY_P8 = privateKey.export({ type: 'pkcs8', format: 'pem' });
+}
+const apns = require('../lib/apns');
+const apnsOutbox = [];
+let apnsFailure = null;                     // { status, reason, gone }
+apns.send = async (token, message) => {
+  if (apnsFailure) { const f = apnsFailure; apnsFailure = null; return { ok: false, ...f }; }
+  apnsOutbox.push({ token, message });
+  return { ok: true, status: 200 };
+};
+
 const db = require('../database');
 const { closePool, withOwner, withOwnerIn, migrate } = db;
 const tenancy = require('../lib/tenancy');
@@ -91,10 +110,10 @@ async function main() {
     household = (await c.query(`insert into households default values returning id`)).rows[0].id;
     parentId = (await c.query(
       `insert into residents (first_name, last_name, date_of_birth, household_id)
-       values ('Testina', 'Guardian', current_date - interval '34 years', $1) returning id`, [household])).rows[0].id;
+       values ('Testina', 'Zolfram', current_date - interval '34 years', $1) returning id`, [household])).rows[0].id;
     childId = (await c.query(
       `insert into residents (first_name, last_name, date_of_birth, household_id)
-       values ('Testy', 'Child', current_date - interval '9 years', $1) returning id`, [household])).rows[0].id;
+       values ('Vexbury', 'Zolfram', current_date - interval '9 years', $1) returning id`, [household])).rows[0].id;
   });
   await gate(parentId, 'in');
   await gate(childId, 'in');
@@ -143,14 +162,14 @@ async function main() {
   await test('the payload carries no name, count, room or id', async () => {
     for (const { payload } of outbox) {
       const text = JSON.stringify(payload);
-      for (const leak of ['Testy', 'Child', 'Testina', 'Guardian', household, parentId, childId]) {
+      for (const leak of ['Vexbury', 'Testina', 'Zolfram', household, parentId, childId]) {
         assert.ok(!text.includes(String(leak)), `the payload leaked ${String(leak).slice(0, 12)}: ${text}`);
       }
       assert.deepEqual(Object.keys(payload).sort(), ['kind', 'site', 'tag', 'url']);
       assert.equal(payload.kind, 'guardian-gap');
     }
     // And the rule is enforced, not merely observed.
-    assert.throws(() => push.assertNoNames({ kind: 'guardian-gap', child: 'Testy Child' }), /not allowed/);
+    assert.throws(() => push.assertNoNames({ kind: 'guardian-gap', child: 'Vexbury Zolfram' }), /not allowed/);
     assert.throws(() => push.assertNoNames({ kind: 'guardian-gap', children_on_site: 1 }), /not allowed/);
   });
 
@@ -210,9 +229,83 @@ async function main() {
     assert.equal(after[0].failures, 1, 'the failure was not counted');
   });
 
+  // ---- the native iOS app -------------------------------------------------
+  const APNS_TOKEN = 'a'.repeat(64);
+  await test('an iPhone app registers its APNs token and is told too', async () => {
+    // One person, two devices, two transports: the browser on a laptop and the
+    // native app on a phone. Both must be reached by one call. Starting from a
+    // clean slate rather than whatever the failure tests above left behind.
+    await withOwner((c) => c.query(`delete from public.push_subscriptions where user_id = $1`, [adminId]));
+    await push.subscribe(adminId, { endpoint: 'https://push.example.com/laptop', p256dh: 'k', auth: 'a' });
+    await push.subscribe(adminId, { kind: 'apns', endpoint: APNS_TOKEN, userAgent: 'CheckSteady/1.0 iOS' });
+
+    const rows = await withOwner(async (c) => (await c.query(
+      `select kind, key_p256dh, key_auth from public.push_subscriptions
+        where user_id = $1 order by kind`, [adminId])).rows);
+    assert.deepEqual(rows.map((r) => r.kind), ['apns', 'webpush']);
+    // An APNs row has no per-message keys: Apple encrypts the transport and
+    // there is nothing to encrypt with (migration 059).
+    assert.equal(rows[0].key_p256dh, null);
+    assert.equal(rows[0].key_auth, null);
+
+    outbox.length = 0; apnsOutbox.length = 0;
+    await gate(parentId, 'in');                       // close whatever is open
+    await guardianGap.evaluate(SCHEMA, tenantId);
+    await gate(parentId, 'out');                      // and open it again
+    const r = await guardianGap.evaluate(SCHEMA, tenantId);
+
+    assert.equal(r.opened, 1);
+    assert.equal(r.notified, 2, 'both the browser and the iPhone should have been told');
+    assert.equal(outbox.length, 1, 'the browser was not sent a Web Push message');
+    assert.equal(apnsOutbox.length, 1, 'the iPhone was not sent an APNs message');
+  });
+
+  await test('the APNs message names the centre and nobody else', async () => {
+    const { token, message } = apnsOutbox[0];
+    assert.equal(token, APNS_TOKEN);
+    const text = JSON.stringify(message);
+    for (const leak of ['Vexbury', 'Testina', 'Zolfram', household, parentId, childId]) {
+      assert.ok(!text.includes(String(leak)), `the APNs message leaked ${String(leak).slice(0, 12)}`);
+    }
+    // Apple CAN read this payload, unlike a Web Push one. That is only
+    // acceptable because there is nothing in it: a title, a sentence, and
+    // where to land.
+    assert.match(message.title, /Children may be unsupervised/);
+    assert.ok(message.body && !/\d/.test(message.body), 'the body should carry no count');
+  });
+
+  await test('a dead APNs token is deleted; a transient failure is counted', async () => {
+    apnsFailure = { status: 410, reason: 'Unregistered', gone: true };
+    await push.sendToUsers([adminId], { kind: 'guardian-gap', site: 'Test', url: '/', tag: 't' });
+    let kinds = await withOwner(async (c) => (await c.query(
+      `select kind from public.push_subscriptions where user_id = $1`, [adminId])).rows.map((r) => r.kind));
+    assert.ok(!kinds.includes('apns'), 'an Unregistered token should have been deleted');
+
+    // And a transient one is kept and counted, as a Web Push 500 is.
+    await push.subscribe(adminId, { kind: 'apns', endpoint: APNS_TOKEN });
+    apnsFailure = { status: 500, reason: 'InternalServerError', gone: false };
+    await push.sendToUsers([adminId], { kind: 'guardian-gap', site: 'Test', url: '/', tag: 't' });
+    const row = await withOwner(async (c) => (await c.query(
+      `select failures from public.push_subscriptions where user_id = $1 and kind = 'apns'`,
+      [adminId])).rows[0]);
+    assert.ok(row, 'a 500 deleted a token it should have kept');
+    assert.equal(row.failures, 1);
+  });
+
+  await test('a malformed device token is refused before it reaches the table', async () => {
+    await assert.rejects(
+      () => push.subscribe(adminId, { kind: 'apns', endpoint: 'not-a-hex-token' }), /hex/);
+    await assert.rejects(
+      () => push.subscribe(adminId, { kind: 'webpush', endpoint: 'http://insecure.example' }), /https/);
+  });
+
   await test('a gap with nobody subscribed is still recorded', async () => {
     await withOwner((c) => c.query(`delete from public.push_subscriptions where user_id = $1`, [adminId]));
-    outbox.length = 0;
+    outbox.length = 0; apnsOutbox.length = 0;
+    // Close whatever the tests above left open, so this one opens its own gap
+    // rather than depending on the state it inherited.
+    await gate(parentId, 'in');
+    await guardianGap.evaluate(SCHEMA, tenantId);
     await gate(parentId, 'out');
     const r = await guardianGap.evaluate(SCHEMA, tenantId);
     assert.equal(r.opened, 1, 'the gap was not recorded when no device was subscribed');

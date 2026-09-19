@@ -163,6 +163,26 @@ services:
       - key: VAPID_SUBJECT
         value: mailto:aimee@tenzing.ie
 
+      # Apple Push (the native iOS app). All four from the Apple Developer
+      # portal; without them the app still runs and browser alerts still work,
+      # and lib/push.js simply has no APNs devices to send to.
+      #
+      # APNS_KEY_P8 is the .p8 file's contents, newlines and all.
+      # APNS_PRODUCTION must be "1" for a TestFlight or App Store build: a
+      # development build's device tokens are only valid on the sandbox
+      # gateway, and the mismatch fails with BadDeviceToken, which reads like
+      # a broken token rather than a wrong environment.
+      - key: APNS_KEY_P8
+        sync: false
+      - key: APNS_KEY_ID
+        sync: false
+      - key: APNS_TEAM_ID
+        sync: false
+      - key: APNS_TOPIC
+        sync: false
+      - key: APNS_PRODUCTION
+        sync: false
+
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
